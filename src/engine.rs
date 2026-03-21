@@ -4,7 +4,8 @@ use dbsp::DBSPHandle;
 use dbsp::typed_batch::IndexedZSetReader;
 
 use crate::circuit::{CircuitHandles, CompiledRule, compile_circuit};
-use crate::rule::{Program, ProgramId};
+use crate::pattern::Pattern;
+use crate::rule::{Program, ProgramId, RuleSpec};
 use crate::term::Statement;
 
 /// A unique key for Hold! state.
@@ -50,6 +51,24 @@ struct InstalledProgram {
     rules: Vec<CompiledRule>,
 }
 
+/// Recursively flatten a RuleSpec with nested whens into a flat list of CompiledRules.
+/// Each nested when is combined with all ancestor patterns to form a join rule.
+fn flatten_rule_spec(rule: RuleSpec, parent_patterns: &[Pattern], out: &mut Vec<CompiledRule>) {
+    let mut full_patterns: Vec<Pattern> = parent_patterns.to_vec();
+    full_patterns.extend(rule.patterns.clone());
+
+    // Emit the rule itself (parent patterns + this rule's patterns → body)
+    out.push(CompiledRule {
+        patterns: full_patterns.clone(),
+        body: rule.body,
+    });
+
+    // Recursively flatten nested whens, carrying forward all ancestor patterns
+    for nested in rule.whens {
+        flatten_rule_spec(nested, &full_patterns, out);
+    }
+}
+
 impl Engine {
     /// Create a new engine with no programs and no facts.
     pub fn new() -> Self {
@@ -72,17 +91,15 @@ impl Engine {
         let id = self.next_program_id;
         self.next_program_id += 1;
 
+        let mut compiled_rules = Vec::new();
+        for rule in program.rules {
+            flatten_rule_spec(rule, &[], &mut compiled_rules);
+        }
+
         let installed = InstalledProgram {
             name: program.name,
             claims: program.claims,
-            rules: program
-                .rules
-                .into_iter()
-                .map(|r| CompiledRule {
-                    patterns: r.patterns,
-                    body: r.body,
-                })
-                .collect(),
+            rules: compiled_rules,
         };
 
         self.programs.insert(id, installed);
@@ -290,21 +307,16 @@ mod tests {
     use crate::pattern::{bind, exact_sym};
     use crate::rule::RuleSpec;
     use crate::term::Term;
-    use std::sync::Arc;
     use crate::{pat, stmt};
 
     fn cool_to_awesome_program() -> Program {
-        Program {
-            name: "cool_to_awesome".to_string(),
-            claims: vec![],
-            rules: vec![RuleSpec {
-                patterns: vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
-                body: Arc::new(|bindings| {
-                    let x = bindings.get("x").unwrap().clone();
-                    vec![stmt![x, Term::sym("is"), Term::sym("awesome")]]
-                }),
-            }],
-        }
+        Program::new("cool_to_awesome").with_rules(vec![RuleSpec::new(
+            vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
+            |bindings| {
+                let x = bindings.get("x").unwrap().clone();
+                vec![stmt![x, Term::sym("is"), Term::sym("awesome")]]
+            },
+        )])
     }
 
     #[test]
@@ -339,18 +351,13 @@ mod tests {
     fn test_program_claims() {
         let mut engine = Engine::new();
 
-        // Program with a claim
-        let program = Program {
-            name: "claimer".to_string(),
-            claims: vec![stmt![
+        let pid = engine.add_program(
+            Program::new("claimer").with_claims(vec![stmt![
                 Term::sym("omar"),
                 Term::sym("is"),
                 Term::sym("cool")
-            ]],
-            rules: vec![],
-        };
-
-        let pid = engine.add_program(program);
+            ]]),
+        );
         let result = engine.step();
 
         // Claim should appear
@@ -373,23 +380,21 @@ mod tests {
         let mut engine = Engine::new();
 
         // Program claims "omar is cool" AND has rule cool -> awesome
-        let program = Program {
-            name: "self_sufficient".to_string(),
-            claims: vec![stmt![
-                Term::sym("omar"),
-                Term::sym("is"),
-                Term::sym("cool")
-            ]],
-            rules: vec![RuleSpec {
-                patterns: vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
-                body: Arc::new(|bindings| {
-                    let x = bindings.get("x").unwrap().clone();
-                    vec![stmt![x, Term::sym("is"), Term::sym("awesome")]]
-                }),
-            }],
-        };
-
-        let pid = engine.add_program(program);
+        let pid = engine.add_program(
+            Program::new("self_sufficient")
+                .with_claims(vec![stmt![
+                    Term::sym("omar"),
+                    Term::sym("is"),
+                    Term::sym("cool")
+                ]])
+                .with_rules(vec![RuleSpec::new(
+                    vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
+                    |bindings| {
+                        let x = bindings.get("x").unwrap().clone();
+                        vec![stmt![x, Term::sym("is"), Term::sym("awesome")]]
+                    },
+                )]),
+        );
         let result = engine.step();
 
         // cool (claim) + awesome (derived) = 2
@@ -492,15 +497,13 @@ mod tests {
         let mut engine = Engine::new();
 
         // Program 1: claims omar is cool
-        let p1 = engine.add_program(Program {
-            name: "claimer".to_string(),
-            claims: vec![stmt![
+        let p1 = engine.add_program(
+            Program::new("claimer").with_claims(vec![stmt![
                 Term::sym("omar"),
                 Term::sym("is"),
                 Term::sym("cool")
-            ]],
-            rules: vec![],
-        });
+            ]]),
+        );
 
         // Program 2: cool -> awesome rule
         let _p2 = engine.add_program(cool_to_awesome_program());
@@ -526,17 +529,15 @@ mod tests {
         engine.add_program(cool_to_awesome_program());
 
         // Program 2: awesome -> legendary
-        engine.add_program(Program {
-            name: "awesome_to_legendary".to_string(),
-            claims: vec![],
-            rules: vec![RuleSpec {
-                patterns: vec![pat![bind("x"), exact_sym("is"), exact_sym("awesome")]],
-                body: Arc::new(|bindings| {
+        engine.add_program(
+            Program::new("awesome_to_legendary").with_rules(vec![RuleSpec::new(
+                vec![pat![bind("x"), exact_sym("is"), exact_sym("awesome")]],
+                |bindings| {
                     let x = bindings.get("x").unwrap().clone();
                     vec![stmt![x, Term::sym("is"), Term::sym("legendary")]]
-                }),
-            }],
-        });
+                },
+            )]),
+        );
 
         engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
         let result = engine.step();
@@ -553,23 +554,292 @@ mod tests {
     }
 
     #[test]
+    fn test_nested_when_conditional_branching() {
+        // A single outer When matches [x] has-mood [mood], and declares nested
+        // Whens that fire only while the parent matches.
+        //
+        // When [x] is cool:
+        //   When [x] has-mood happy:  → claim [x] should smile
+        //   When [x] has-mood sad:    → claim [x] should cry
+        //
+        // Changing mood retracts the old nested when's output and claims the new one.
+        let mut engine = Engine::new();
+
+        engine.add_program(
+            Program::new("mood_reactions").with_rules(vec![
+                // Outer when: [x] is cool
+                RuleSpec::new(
+                    vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
+                    |_| vec![], // outer body claims nothing on its own
+                )
+                .with_whens(vec![
+                    // Nested: when [x] has-mood happy → smile
+                    RuleSpec::new(
+                        vec![pat![bind("x"), exact_sym("has-mood"), exact_sym("happy")]],
+                        |bindings| {
+                            let x = bindings.get("x").unwrap().clone();
+                            vec![stmt![x, Term::sym("should"), Term::sym("smile")]]
+                        },
+                    ),
+                    // Nested: when [x] has-mood sad → cry
+                    RuleSpec::new(
+                        vec![pat![bind("x"), exact_sym("has-mood"), exact_sym("sad")]],
+                        |bindings| {
+                            let x = bindings.get("x").unwrap().clone();
+                            vec![stmt![x, Term::sym("should"), Term::sym("cry")]]
+                        },
+                    ),
+                ]),
+            ]),
+        );
+
+        // omar is cool AND happy
+        engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        engine.assert_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("has-mood"),
+            Term::sym("happy")
+        ]);
+        let result = engine.step();
+
+        // is cool, has-mood happy, should smile = 3
+        assert_eq!(result.deltas.len(), 3);
+        assert!(result.deltas.iter().all(|(_, w)| *w == 1));
+        assert!(result.deltas.iter().any(|(s, _)| *s
+            == stmt![Term::sym("omar"), Term::sym("should"), Term::sym("smile")]));
+
+        // Change mood: retract happy, assert sad
+        engine.retract_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("has-mood"),
+            Term::sym("happy")
+        ]);
+        engine.assert_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("has-mood"),
+            Term::sym("sad")
+        ]);
+        let result = engine.step();
+
+        let appeared: Vec<_> = result
+            .deltas
+            .iter()
+            .filter(|(_, w)| *w == 1)
+            .map(|(s, _)| s.clone())
+            .collect();
+        let disappeared: Vec<_> = result
+            .deltas
+            .iter()
+            .filter(|(_, w)| *w == -1)
+            .map(|(s, _)| s.clone())
+            .collect();
+
+        // Old: has-mood happy (-1), should smile (-1)
+        // New: has-mood sad (+1), should cry (+1)
+        assert_eq!(appeared.len(), 2, "2 facts should appear: {:?}", appeared);
+        assert_eq!(
+            disappeared.len(),
+            2,
+            "2 facts should disappear: {:?}",
+            disappeared
+        );
+        assert!(disappeared
+            .contains(&stmt![Term::sym("omar"), Term::sym("should"), Term::sym("smile")]));
+        assert!(
+            appeared.contains(&stmt![Term::sym("omar"), Term::sym("should"), Term::sym("cry")])
+        );
+
+        // Retract "is cool" entirely — nested when output should also retract
+        engine.retract_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        let result = engine.step();
+
+        let disappeared: Vec<_> = result
+            .deltas
+            .iter()
+            .filter(|(_, w)| *w == -1)
+            .map(|(s, _)| s.clone())
+            .collect();
+        // "is cool" and "should cry" both retract (has-mood sad stays as a base fact)
+        assert!(disappeared
+            .contains(&stmt![Term::sym("omar"), Term::sym("should"), Term::sym("cry")]));
+        assert!(disappeared.contains(&stmt![
+            Term::sym("omar"),
+            Term::sym("is"),
+            Term::sym("cool")
+        ]));
+    }
+
+    #[test]
+    fn test_nested_when_parent_body_plus_child() {
+        // The outer When both claims its own facts AND has nested Whens.
+        // When the outer match disappears, both the parent's claims and
+        // the nested when's claims retract.
+        //
+        // When [x] is cool:
+        //   Claim [x] is awesome          (parent body)
+        //   When [x] is tall:
+        //     Claim [x] is impressive     (nested when)
+        let mut engine = Engine::new();
+
+        engine.add_program(
+            Program::new("cool_with_nested").with_rules(vec![RuleSpec::new(
+                vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
+                |bindings| {
+                    let x = bindings.get("x").unwrap().clone();
+                    vec![stmt![x, Term::sym("is"), Term::sym("awesome")]]
+                },
+            )
+            .with_whens(vec![RuleSpec::new(
+                vec![pat![bind("x"), exact_sym("is"), exact_sym("tall")]],
+                |bindings| {
+                    let x = bindings.get("x").unwrap().clone();
+                    vec![stmt![x, Term::sym("is"), Term::sym("impressive")]]
+                },
+            )])]),
+        );
+
+        // Assert cool and tall
+        engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("tall")]);
+        let result = engine.step();
+
+        // cool, tall, awesome (parent body), impressive (nested) = 4
+        assert_eq!(result.deltas.len(), 4);
+        assert!(result.deltas.iter().all(|(_, w)| *w == 1));
+        assert!(result.deltas.iter().any(|(s, _)| *s
+            == stmt![Term::sym("omar"), Term::sym("is"), Term::sym("impressive")]));
+
+        // Retract "cool" — parent body output AND nested when output should retract
+        engine.retract_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        let result = engine.step();
+
+        let disappeared: Vec<_> = result
+            .deltas
+            .iter()
+            .filter(|(_, w)| *w == -1)
+            .map(|(s, _)| s.clone())
+            .collect();
+
+        // cool, awesome, and impressive all retract (tall stays as base fact)
+        assert_eq!(disappeared.len(), 3, "3 should retract: {:?}", disappeared);
+        assert!(disappeared.contains(&stmt![
+            Term::sym("omar"),
+            Term::sym("is"),
+            Term::sym("awesome")
+        ]));
+        assert!(disappeared.contains(&stmt![
+            Term::sym("omar"),
+            Term::sym("is"),
+            Term::sym("impressive")
+        ]));
+    }
+
+    #[test]
+    fn test_nested_whens_multiple_entities_independent() {
+        // Two entities with nested whens — changing one shouldn't affect the other.
+        //
+        // When [x] is cool:
+        //   When [x] has-mood happy: claim [x] should smile
+        //   When [x] has-mood sad:   claim [x] should cry
+        let mut engine = Engine::new();
+
+        engine.add_program(
+            Program::new("mood_reactions").with_rules(vec![RuleSpec::new(
+                vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
+                |_| vec![],
+            )
+            .with_whens(vec![
+                RuleSpec::new(
+                    vec![pat![bind("x"), exact_sym("has-mood"), exact_sym("happy")]],
+                    |bindings| {
+                        let x = bindings.get("x").unwrap().clone();
+                        vec![stmt![x, Term::sym("should"), Term::sym("smile")]]
+                    },
+                ),
+                RuleSpec::new(
+                    vec![pat![bind("x"), exact_sym("has-mood"), exact_sym("sad")]],
+                    |bindings| {
+                        let x = bindings.get("x").unwrap().clone();
+                        vec![stmt![x, Term::sym("should"), Term::sym("cry")]]
+                    },
+                ),
+            ])]),
+        );
+
+        // omar is cool+happy, alice is cool+sad
+        engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        engine.assert_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("has-mood"),
+            Term::sym("happy")
+        ]);
+        engine.assert_fact(stmt![Term::sym("alice"), Term::sym("is"), Term::sym("cool")]);
+        engine.assert_fact(stmt![
+            Term::sym("alice"),
+            Term::sym("has-mood"),
+            Term::sym("sad")
+        ]);
+        let result = engine.step();
+
+        // omar: is cool, has-mood happy, should smile = 3
+        // alice: is cool, has-mood sad, should cry = 3
+        assert_eq!(result.deltas.len(), 6);
+
+        // Change only omar to sad — alice should be unaffected
+        engine.retract_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("has-mood"),
+            Term::sym("happy")
+        ]);
+        engine.assert_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("has-mood"),
+            Term::sym("sad")
+        ]);
+        let result = engine.step();
+
+        let appeared: Vec<_> = result
+            .deltas
+            .iter()
+            .filter(|(_, w)| *w == 1)
+            .map(|(s, _)| s.clone())
+            .collect();
+        let disappeared: Vec<_> = result
+            .deltas
+            .iter()
+            .filter(|(_, w)| *w == -1)
+            .map(|(s, _)| s.clone())
+            .collect();
+
+        // omar: smile retracts, cry appears (+ mood change)
+        assert_eq!(disappeared.len(), 2);
+        assert_eq!(appeared.len(), 2);
+
+        // No alice facts should change
+        assert!(!appeared
+            .iter()
+            .any(|s| s.terms[0] == Term::sym("alice")));
+        assert!(!disappeared
+            .iter()
+            .any(|s| s.terms[0] == Term::sym("alice")));
+    }
+
+    #[test]
     fn test_join_rule_via_engine() {
         let mut engine = Engine::new();
 
-        engine.add_program(Program {
-            name: "join_test".to_string(),
-            claims: vec![],
-            rules: vec![RuleSpec {
-                patterns: vec![
+        engine.add_program(
+            Program::new("join_test").with_rules(vec![RuleSpec::new(
+                vec![
                     pat![bind("x"), exact_sym("is"), exact_sym("cool")],
                     pat![bind("x"), exact_sym("is"), exact_sym("tall")],
                 ],
-                body: Arc::new(|bindings| {
+                |bindings| {
                     let x = bindings.get("x").unwrap().clone();
                     vec![stmt![x, Term::sym("is"), Term::sym("impressive")]]
-                }),
-            }],
-        });
+                },
+            )]),
+        );
 
         engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
         engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("tall")]);
