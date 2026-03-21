@@ -51,21 +51,61 @@ struct InstalledProgram {
     rules: Vec<CompiledRule>,
 }
 
-/// Recursively flatten a RuleSpec with nested whens into a flat list of CompiledRules.
-/// Each nested when is combined with all ancestor patterns to form a join rule.
-fn flatten_rule_spec(rule: RuleSpec, parent_patterns: &[Pattern], out: &mut Vec<CompiledRule>) {
-    let mut full_patterns: Vec<Pattern> = parent_patterns.to_vec();
-    full_patterns.extend(rule.patterns.clone());
+/// Recursively flatten a RuleSpec (with PatternExpr and nested whens) into
+/// a flat list of CompiledRules.
+///
+/// The PatternExpr is converted to DNF (disjunctive normal form): each OR branch
+/// becomes a separate CompiledRule with the same body, and AND branches become
+/// multi-pattern joins. Parent patterns from enclosing Whens are prepended to
+/// each conjunction.
+fn flatten_rule_spec(
+    rule: RuleSpec,
+    parent_patterns: &[Pattern],
+    out: &mut Vec<CompiledRule>,
+) {
+    // Convert the pattern expression to DNF: Vec of conjunctions (Vec<Pattern>).
+    // Each conjunction becomes a separate CompiledRule.
+    let disjuncts = rule.pattern.to_dnf();
 
-    // Emit the rule itself (parent patterns + this rule's patterns → body)
-    out.push(CompiledRule {
-        patterns: full_patterns.clone(),
-        body: rule.body,
-    });
+    for conjunction in &disjuncts {
+        let mut full_patterns: Vec<Pattern> = parent_patterns.to_vec();
+        full_patterns.extend(conjunction.clone());
 
-    // Recursively flatten nested whens, carrying forward all ancestor patterns
-    for nested in rule.whens {
-        flatten_rule_spec(nested, &full_patterns, out);
+        // Emit one CompiledRule per disjunct
+        out.push(CompiledRule {
+            patterns: full_patterns.clone(),
+            body: rule.body.clone(),
+        });
+
+        // Recursively flatten nested whens under each disjunct.
+        // Each nested when inherits the full pattern context of its parent branch.
+        for nested in &rule.whens {
+            flatten_nested_when(nested, &full_patterns, out);
+        }
+    }
+}
+
+/// Helper: flatten a borrowed nested RuleSpec (needs clone since we may emit it
+/// multiple times for parent OR branches).
+fn flatten_nested_when(
+    rule: &RuleSpec,
+    parent_patterns: &[Pattern],
+    out: &mut Vec<CompiledRule>,
+) {
+    let disjuncts = rule.pattern.to_dnf();
+
+    for conjunction in &disjuncts {
+        let mut full_patterns: Vec<Pattern> = parent_patterns.to_vec();
+        full_patterns.extend(conjunction.clone());
+
+        out.push(CompiledRule {
+            patterns: full_patterns.clone(),
+            body: rule.body.clone(),
+        });
+
+        for nested in &rule.whens {
+            flatten_nested_when(nested, &full_patterns, out);
+        }
     }
 }
 
@@ -305,7 +345,7 @@ impl Drop for Engine {
 mod tests {
     use super::*;
     use crate::pattern::{bind, exact_sym};
-    use crate::rule::RuleSpec;
+    use crate::rule::{all, any, RuleSpec};
     use crate::term::Term;
     use crate::{pat, stmt};
 
@@ -855,5 +895,246 @@ mod tests {
         // tall (-1) + impressive (-1) = -2
         assert_eq!(result.deltas.len(), 2);
         assert!(result.deltas.iter().all(|(_, w)| *w == -1));
+    }
+
+    #[test]
+    fn test_or_pattern_fires_on_either_branch() {
+        // When [x] is cool OR [x] is awesome → claim [x] is notable
+        let mut engine = Engine::new();
+
+        engine.add_program(
+            Program::new("or_test").with_rules(vec![RuleSpec::new(
+                any([
+                    pat![bind("x"), exact_sym("is"), exact_sym("cool")],
+                    pat![bind("x"), exact_sym("is"), exact_sym("awesome")],
+                ]),
+                |bindings| {
+                    let x = bindings.get("x").unwrap().clone();
+                    vec![stmt![x, Term::sym("is"), Term::sym("notable")]]
+                },
+            )]),
+        );
+
+        // Assert cool — should fire
+        engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        let result = engine.step();
+
+        assert!(result
+            .deltas
+            .iter()
+            .any(|(s, w)| *s == stmt![Term::sym("omar"), Term::sym("is"), Term::sym("notable")]
+                && *w == 1));
+
+        // Retract cool, assert awesome — should still be notable (different branch)
+        engine.retract_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        engine.assert_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("is"),
+            Term::sym("awesome")
+        ]);
+        let result = engine.step();
+
+        // cool retracts, awesome appears — but notable stays (OR semantics)
+        let notable_retracted = result
+            .deltas
+            .iter()
+            .any(|(s, w)| *s == stmt![Term::sym("omar"), Term::sym("is"), Term::sym("notable")]
+                && *w == -1);
+        assert!(
+            !notable_retracted,
+            "notable should NOT retract when switching OR branches"
+        );
+    }
+
+    #[test]
+    fn test_or_pattern_retracts_when_all_branches_gone() {
+        // When [x] is cool OR [x] is awesome → claim [x] is notable
+        let mut engine = Engine::new();
+
+        engine.add_program(
+            Program::new("or_test").with_rules(vec![RuleSpec::new(
+                any([
+                    pat![bind("x"), exact_sym("is"), exact_sym("cool")],
+                    pat![bind("x"), exact_sym("is"), exact_sym("awesome")],
+                ]),
+                |bindings| {
+                    let x = bindings.get("x").unwrap().clone();
+                    vec![stmt![x, Term::sym("is"), Term::sym("notable")]]
+                },
+            )]),
+        );
+
+        // Both branches match
+        engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        engine.assert_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("is"),
+            Term::sym("awesome")
+        ]);
+        let result = engine.step();
+
+        assert!(result
+            .deltas
+            .iter()
+            .any(|(s, w)| *s == stmt![Term::sym("omar"), Term::sym("is"), Term::sym("notable")]
+                && *w == 1));
+
+        // Retract one — notable persists
+        engine.retract_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        let result = engine.step();
+
+        let notable_changed = result.deltas.iter().any(|(s, _)| {
+            *s == stmt![Term::sym("omar"), Term::sym("is"), Term::sym("notable")]
+        });
+        assert!(!notable_changed, "notable should persist with one branch");
+
+        // Retract the other — now notable retracts
+        engine.retract_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("is"),
+            Term::sym("awesome")
+        ]);
+        let result = engine.step();
+
+        assert!(result
+            .deltas
+            .iter()
+            .any(|(s, w)| *s == stmt![Term::sym("omar"), Term::sym("is"), Term::sym("notable")]
+                && *w == -1));
+    }
+
+    #[test]
+    fn test_and_or_nested_expression() {
+        // (cool OR awesome) AND tall → impressive
+        // This should fire when (cool AND tall) or (awesome AND tall).
+        let mut engine = Engine::new();
+
+        engine.add_program(
+            Program::new("complex_bool").with_rules(vec![RuleSpec::new(
+                all([
+                    any([
+                        pat![bind("x"), exact_sym("is"), exact_sym("cool")],
+                        pat![bind("x"), exact_sym("is"), exact_sym("awesome")],
+                    ]),
+                    pat![bind("x"), exact_sym("is"), exact_sym("tall")].into(),
+                ]),
+                |bindings| {
+                    let x = bindings.get("x").unwrap().clone();
+                    vec![stmt![x, Term::sym("is"), Term::sym("impressive")]]
+                },
+            )]),
+        );
+
+        // Just tall — no match (need cool or awesome too)
+        engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("tall")]);
+        let result = engine.step();
+
+        let has_impressive = result.deltas.iter().any(|(s, _)| {
+            *s == stmt![Term::sym("omar"), Term::sym("is"), Term::sym("impressive")]
+        });
+        assert!(!has_impressive, "tall alone shouldn't produce impressive");
+
+        // Add cool — now cool AND tall fires
+        engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        let result = engine.step();
+
+        assert!(result.deltas.iter().any(|(s, w)| *s
+            == stmt![Term::sym("omar"), Term::sym("is"), Term::sym("impressive")]
+            && *w == 1));
+
+        // Switch cool → awesome — impressive should persist (awesome AND tall)
+        engine.retract_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        engine.assert_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("is"),
+            Term::sym("awesome")
+        ]);
+        let result = engine.step();
+
+        let impressive_retracted = result.deltas.iter().any(|(s, w)| {
+            *s == stmt![Term::sym("omar"), Term::sym("is"), Term::sym("impressive")] && *w == -1
+        });
+        assert!(
+            !impressive_retracted,
+            "impressive should persist when switching OR branches"
+        );
+
+        // Retract tall — now neither branch has tall, impressive retracts
+        engine.retract_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("tall")]);
+        let result = engine.step();
+
+        assert!(result.deltas.iter().any(|(s, w)| *s
+            == stmt![Term::sym("omar"), Term::sym("is"), Term::sym("impressive")]
+            && *w == -1));
+    }
+
+    #[test]
+    fn test_or_with_nested_whens() {
+        // Outer when uses OR, and has nested whens inside:
+        //
+        // When [x] is cool OR [x] is awesome:
+        //   When [x] has-mood happy:
+        //     Claim [x] should celebrate
+        let mut engine = Engine::new();
+
+        engine.add_program(
+            Program::new("or_with_nested").with_rules(vec![RuleSpec::new(
+                any([
+                    pat![bind("x"), exact_sym("is"), exact_sym("cool")],
+                    pat![bind("x"), exact_sym("is"), exact_sym("awesome")],
+                ]),
+                |_| vec![],
+            )
+            .with_whens(vec![RuleSpec::new(
+                vec![pat![bind("x"), exact_sym("has-mood"), exact_sym("happy")]],
+                |bindings| {
+                    let x = bindings.get("x").unwrap().clone();
+                    vec![stmt![x, Term::sym("should"), Term::sym("celebrate")]]
+                },
+            )])]),
+        );
+
+        // cool + happy → should celebrate
+        engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        engine.assert_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("has-mood"),
+            Term::sym("happy")
+        ]);
+        let result = engine.step();
+
+        assert!(result.deltas.iter().any(|(s, w)| *s
+            == stmt![Term::sym("omar"), Term::sym("should"), Term::sym("celebrate")]
+            && *w == 1));
+
+        // Switch cool → awesome — nested when should still fire (parent OR still matches)
+        engine.retract_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
+        engine.assert_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("is"),
+            Term::sym("awesome")
+        ]);
+        let result = engine.step();
+
+        let celebrate_retracted = result.deltas.iter().any(|(s, w)| {
+            *s == stmt![Term::sym("omar"), Term::sym("should"), Term::sym("celebrate")]
+                && *w == -1
+        });
+        assert!(
+            !celebrate_retracted,
+            "celebrate should persist when switching parent OR branches"
+        );
+
+        // Retract awesome — no parent match, nested when output retracts
+        engine.retract_fact(stmt![
+            Term::sym("omar"),
+            Term::sym("is"),
+            Term::sym("awesome")
+        ]);
+        let result = engine.step();
+
+        assert!(result.deltas.iter().any(|(s, w)| *s
+            == stmt![Term::sym("omar"), Term::sym("should"), Term::sym("celebrate")]
+            && *w == -1));
     }
 }
