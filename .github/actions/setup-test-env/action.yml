@@ -1,0 +1,39 @@
+name: "Setup test environment"
+description: ""
+inputs:
+  cachix_auth_token:
+    description: "Cachix auth token"
+    required: false
+outputs: {}
+runs:
+  using: "composite"
+  steps:
+    - uses: nixbuild/nix-quick-install-action@v34
+    - name: Restore and save Nix store
+      uses: nix-community/cache-nix-action@v7
+      with:
+        primary-key: nix-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock') }}-${{ github.run_id }}
+        restore-prefixes-first-match: nix-v1-${{ runner.os }}-${{ runner.arch }}-
+        gc-max-store-size-linux: 4294967296
+    - run: |
+        set -eo pipefail
+
+        # Write dev env to a file first so nix failures are caught by set -e
+        nix print-dev-env --show-trace > /tmp/nix-dev-env.sh
+        source /tmp/nix-dev-env.sh
+
+        output_file="nix-env.txt"
+        > $output_file
+
+        while IFS='=' read -r -d '' name value; do
+            [[ "$(declare -p $name)" =~ "declare -[a-z]*r[a-z]* " ]] && continue
+            [[ ! $name =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] && continue
+
+            if [[ "$value" != *$'\n'* ]]; then
+                echo "${name}=${value//\"/}" >> $output_file
+            fi
+        done < <(env -0)
+      shell: bash
+
+    - run: cat nix-env.txt >> "$GITHUB_ENV"
+      shell: bash

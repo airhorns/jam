@@ -1,0 +1,12 @@
+[package]
+name = "jam"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dbsp = "0.272"
+ordered-float = { version = "4", features = ["serde", "rkyv_64"] }
+rkyv = { version = "0.7.45", default-features = false, features = ["std", "size_64"] }
+serde = { version = "1", features = ["derive"] }
+size-of = { version = "0.1.7", package = "feldera-size-of" }
+feldera-macros = "0.272"
