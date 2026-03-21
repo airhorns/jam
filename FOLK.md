@@ -775,7 +775,222 @@ Physical sensors (cameras, tag detectors) are noisy. Tags appear and disappear b
 
 ---
 
-## 9. Sources
+## 9. `$this` — Program Identity
+
+### 9.1 What `$this` holds
+
+`$this` is the **program identifier** — a simple string value that uniquely identifies the running program. For physical programs (paper on the table), this is the **AprilTag number** (e.g., `42`). For built-in virtual programs, it's the filename (e.g., `builtin-programs/label.folk`).
+
+It is not a complex object — just a string. But this string is the program's identity in the reactive database: all Claims and Wishes are attributed to it, and when the program is removed, everything attributed to its `$this` is retracted.
+
+### 9.2 How `$this` gets assigned
+
+The assignment is a precise chain:
+
+1. **Tag detection:** The camera detects AprilTags and creates: `Claim -keep 100ms tag $tag has a program`
+2. **Code loading:** The system loads source from disk (`$saveDir/$obj.folk`) and claims: `Claim $obj has program code $code`
+3. **Execution via Tcl `apply`:**
+   ```tcl
+   apply [list {this} $metacode] $obj
+   ```
+   This is standard Tcl `apply` — it creates an anonymous procedure with a single parameter named `this`, uses the program's source code as the body, and passes the tag identifier as the argument. **This is how `$this` gets its value.**
+
+4. **Propagation into Claim/Wish:** The `Claim` proc uses `upvar` to reach the caller's `this` variable:
+   ```tcl
+   proc Claim {args} {
+       upvar this this
+       tailcall Say [expr {[info exists this] ? $this : "<unknown>"}] claims {*}$args
+   }
+   ```
+   So `Claim $this is cool` becomes `Say 42 claims 42 is cool` in the database. The first `42` is the program attribution (added by `Claim`), the second is the literal expansion of `$this` in the statement text.
+
+5. **Inside `When` bodies:** When a `When` handler executes, `$this` is extracted from the captured environment and set as a global: `set ::this [dict getdef $env this <unknown>]`. This ensures `$this` remains available in nested reactive contexts.
+
+### 9.3 `$this'` — Derived identities (the "prime" convention)
+
+`$this'` is **not a language feature** — it's a consequence of Tcl's variable parsing rules. In Tcl, the apostrophe `'` is not a valid variable name character, so `$this'` parses as: substitute `$this`, then append the literal character `'`. If `$this` is `42`, then `$this'` evaluates to the string `42'`.
+
+This creates a **derived identifier** — a distinct entity in the database that is conventionally associated with the original program. It's used as a naming convention for **companion/virtual entities**:
+
+```tcl
+# The physical program (tag 42) defines a companion entity (42')
+# positioned below itself on the table
+When $this has region /r/ {
+    Wish $this' is outlined white
+    Claim $this' has region [region move $r down 110%]
+}
+
+# The companion entity captures camera input
+When $this' has camera slice /slice/ {
+    Wish $this displays camera slice $slice
+}
+```
+
+Here, `$this` (42) is the physical paper. `$this'` (42') is a virtual entity positioned below it that defines a camera-capture region. The physical paper displays the result, but the capture area is separate. This is how Folk programs create multiple "zones" with a single piece of paper.
+
+The convention looks mathematical (like x′ in calculus), which fits the idea of a "derived" value. You could equally write `${this}-shadow` or `${this}_display` — `$this'` is just the community's terse idiom.
+
+### 9.4 Constructed identities
+
+Programs routinely manufacture identifiers for sub-entities:
+
+```tcl
+# Stop-motion animation: create N frame entities
+for {set i 1} {$i <= $N_FRAMES} {incr i} {
+    Claim frame-$this-$i has region [region move $d right ${i}00%]
+}
+```
+
+Each `frame-42-1`, `frame-42-2`, etc. is a distinct entity in the database with its own claims, wishes, and reactive lifecycle. There's no registration — any string can be an entity identity. The only requirement is uniqueness (which scoping to `$this` provides).
+
+### 9.5 Other identity-related globals
+
+- **`$::thisNode`**: Holds the machine/node name (e.g., `folk-hex`), used for multi-machine Folk setups where statements can be shared across networked tables.
+- **`$::thisProcess`**: The process identity, used internally.
+
+### 9.6 Identity and lifecycle
+
+Every statement in the database is attributed to a source program via `$this`. This attribution is what makes automatic revocation work:
+
+- When a tag is no longer detected → its `tag $id has a program` claim is retracted (after the `-keep` duration)
+- This causes the program's `When` to unmatch → all Claims/Wishes produced by that program's code are retracted
+- Those retractions cascade downstream through the dependency graph
+- The physical act of lifting paper off the table removes `$this` from the system, and everything it caused vanishes
+
+`$this` is not just a variable — it's the **anchor point for the entire lifecycle** of a program's effects in the reactive database.
+
+---
+
+## 10. Structured Data in Folk
+
+### 10.1 The design: flat statements, rich values
+
+Folk has **no dedicated struct or record type**. Statements are flat sequences of words, indexed word-by-word by the trie. But this doesn't mean Folk can't handle structured data — it means structured data lives **inside** individual words rather than **in** the statement structure itself.
+
+This works because of Tcl's foundational principle: **everything is a string**. A Tcl list is a string. A Tcl dict is a string. A list of lists is a string. Any of these can appear as a single "word" in a Folk statement, and the trie treats it as an opaque atom for indexing purposes.
+
+### 10.2 Lists as compound values
+
+Two-element lists are the standard representation for coordinates, offsets, and pairs:
+
+```tcl
+set center [list $x $y]
+Wish to draw an image with center $center image $im radians 0 scale 2
+
+set points [list [list 0 0] [list $width 0] [list $width $height] [list 0 $height]]
+Wish to draw a stroke with points $points width 2 color grey
+```
+
+The `$center` and `$points` values are complex nested lists, but they appear as single words in the statement. The trie indexes them as opaque tokens.
+
+### 10.3 Dicts as option bundles
+
+Tcl dicts (key-value maps) are used for structured parameter passing:
+
+```tcl
+When /someone/ wishes program $obj is replaced with /...opts/ {
+    Claim $obj has program code [dict get $opts code]
+    set editedTime [dict get $opts editedTime]
+}
+```
+
+The `/...opts/` rest-variable captures remaining words as a dict-like structure, enabling keyword-argument style patterns.
+
+### 10.4 Namespace ensembles as "data types"
+
+Folk's convention for structured data types is the **namespace ensemble** — a collection of procedures that operate on a shared data representation. These act like methods on an abstract data type:
+
+| Ensemble | Representation | Operations |
+|----------|---------------|------------|
+| `region` | List of corner points | `move`, `scale`, `angle`, `centroid`, `distance` |
+| `image` | C struct handle | `subimage`, `saveAsJpeg`, `load`, `width`, `height` |
+| `vec2` | Two-element list | `add`, `scale`, `rotate`, `length` |
+| `statement` | Word list | `create`, `match`, `bindings` |
+
+Usage looks like method calls:
+
+```tcl
+set r2 [region move $r down 110%]
+set angle [region angle $r]
+set c [region centroid $r]
+set v [vec2 add $center $offset]
+```
+
+The Folk README recommends this pattern: *"Create a namespace for your datatype as an ensemble command with operations on that datatype. Constructor should be called `create`, as in `dict create` and `statement create`."*
+
+### 10.5 C structs exposed via FFI
+
+For performance-critical data, Folk defines C structs and exposes them to Tcl as opaque handles:
+
+```c
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    int components;
+    uint32_t bytesPerRow;
+    uint8_t *data;
+    uint64_t uniq;
+} image_t;
+```
+
+From Tcl's perspective, these are opaque values — you can pass them through statements and call ensemble operations on them, but you can't destructure them in Tcl code. The C FFI boundary handles marshaling.
+
+### 10.6 Collected matches return lists of dicts
+
+The `collected matches` primitive returns structured data — a list of dicts where each dict maps variable names to their bound values:
+
+```tcl
+When the collected matches for [list /p/ has tableshot /ts/] are /matches/ {
+    # $matches is a list like: {{p 42 ts /tmp/42-shot.jpg} {p 43 ts /tmp/43-shot.jpg}}
+    set images [lmap m $matches {dict get $m ts}]
+}
+```
+
+The C implementation builds these dicts explicitly from pattern match bindings.
+
+### 10.7 Why no formal structs?
+
+The absence of structs appears intentional and load-bearing:
+
+1. **Trie indexing requires flat statements.** The trie matches word-by-word with wildcards at any position. If statement positions contained nested structures, the trie couldn't index or match them efficiently. Keeping statements flat preserves O(statement-length) lookup.
+
+2. **Natural language is the interface.** Folk's readability comes from statements being English sentences. `Claim $this has a ball at x 100 y 100` is readable; `Claim $this has ball {x: 100, y: 100}` is not, and would break pattern matching on the x and y values individually.
+
+3. **Tcl's "everything is a string" bridges the gap.** You get the benefits of structured data (lists, dicts, nested structures) inside individual values, while the statement-level structure remains flat and pattern-matchable. This is a deliberate two-level architecture: **flat for matching, rich for computation.**
+
+4. **The natural-language keyword pattern is Folk's "struct".** Instead of a struct with named fields, Folk uses natural-language keywords as field markers within flat statements:
+   ```tcl
+   # Instead of a struct: {x: 100, y: 100, color: red}
+   # Folk uses keyword markers in the statement:
+   Claim $this has a ball at x 100 y 100 with color red
+
+   # Pattern matching extracts "fields":
+   When /p/ has a ball at x /x/ y /y/ with color /color/ { ... }
+   ```
+   The English words `at`, `x`, `y`, `with`, `color` serve as field names. The trie indexes them as literal words, enabling efficient matching on any subset.
+
+### 10.8 The `/...opts/` pattern for extensible records
+
+The rest-variable `/...opts/` enables a dict-like extensibility pattern within statements:
+
+```tcl
+# Producer can include arbitrary key-value pairs:
+Wish to draw a circle with center $c radius 4 color white filled true
+
+# Consumer captures extras with /...opts/:
+When /someone/ wishes to draw a circle with /...opts/ {
+    set center [dict get $opts center]
+    set radius [dict get $opts radius]
+    set color [dict getdef $opts color "black"]
+    set filled [dict getdef $opts filled false]
+}
+```
+
+This is the closest Folk comes to extensible records — the rest-variable captures trailing key-value pairs as a dict, and consumers can extract known keys with defaults for optional ones.
+
+---
+
+## 11. Sources
 
 - [folk.computer](https://folk.computer) — official website
 - [FolkComputer/folk on GitHub](https://github.com/FolkComputer/folk) — source code
