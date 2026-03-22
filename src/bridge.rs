@@ -46,23 +46,39 @@ impl JamEngine {
 
     /// Fire an event callback by its full callback ID (e.g., "root/app/btn:onPress").
     pub fn fire_event_by_callback_id(&mut self, callback_id: &str) -> String {
-        self.fire_callback_internal(callback_id)
+        self.fire_callback_internal(callback_id, None)
     }
 
-    /// Fire an event callback on an entity (e.g., button press).
+    /// Fire an event callback on an entity, optionally passing data (e.g., text from TextField).
     /// Callback IDs are deterministic: "entityId:eventName".
     pub fn fire_event(&mut self, entity_id: &str, event_name: &str) -> String {
         let callback_id = format!("{entity_id}:{event_name}");
-        self.fire_callback_internal(&callback_id)
+        self.fire_callback_internal(&callback_id, None)
     }
 
-    fn fire_callback_internal(&mut self, callback_id: &str) -> String {
-        match self.js_runtime.fire_callback(callback_id) {
-            Ok(hold_ops) => {
+    /// Fire an event with data (e.g., TextField onSubmit with the text value).
+    pub fn fire_event_with_data(
+        &mut self,
+        entity_id: &str,
+        event_name: &str,
+        data: &str,
+    ) -> String {
+        let callback_id = format!("{entity_id}:{event_name}");
+        self.fire_callback_internal(&callback_id, Some(data))
+    }
+
+    fn fire_callback_internal(&mut self, callback_id: &str, data: Option<&str>) -> String {
+        match self.js_runtime.fire_callback(callback_id, data) {
+            Ok(result) => {
                 // Apply hold operations produced by the callback
                 let pid = self.active_program_id.unwrap_or(0);
-                for op in &hold_ops {
+                for op in &result.hold_ops {
                     self.apply_hold_op(pid, op);
+                }
+
+                // Assert claims produced by the callback as base facts
+                for claim in result.claims {
+                    self.engine.assert_fact(claim);
                 }
 
                 // Step the engine to propagate changes
@@ -234,6 +250,13 @@ mod ffi {
         fn current_facts_json(&self) -> String;
 
         fn fire_event(&mut self, entity_id: &str, event_name: &str) -> String;
+
+        fn fire_event_with_data(
+            &mut self,
+            entity_id: &str,
+            event_name: &str,
+            data: &str,
+        ) -> String;
     }
 }
 
@@ -1204,6 +1227,86 @@ mod tests {
 
         let result = engine.fire_event("root/nonexistent", "onPress");
         assert!(result.starts_with("ERROR"), "expected error for missing callback, got: {result}");
+    }
+
+    #[test]
+    fn test_claim_inside_callback_produces_facts() {
+        // BUG REPRO: claim() called inside a fire_event callback should
+        // produce facts that enter the engine, just like claim() at the top level.
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            render(
+                <Button key="btn" label="Add" onPress={() => {
+                    claim("added", "fact", "from", "callback");
+                }} />
+            );
+        "#;
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Press the button — the callback calls claim()
+        engine.fire_event("root/btn", "onPress");
+
+        let f = engine.current_facts_json();
+        assert!(
+            f.contains(r#""added","fact","from","callback""#),
+            "claim() inside callback should produce a fact: {f}"
+        );
+    }
+
+    #[test]
+    fn test_fire_event_with_data() {
+        // Callback receives data argument (e.g., text from TextField onSubmit)
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("s", [["submitted", ""]]);
+            render(
+                <VStack key="app">
+                    <TextField key="input" placeholder="Type..." onSubmit={(text) => {
+                        hold("s", [["submitted", text]]);
+                    }} />
+                </VStack>
+            );
+        "#;
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Fire onSubmit with data
+        let result = engine.fire_event_with_data("root/app/input", "onSubmit", "Hello world");
+        assert!(!result.starts_with("ERROR"), "fire_event_with_data failed: {result}");
+
+        let f = engine.current_facts_json();
+        assert!(
+            f.contains(r#""submitted","Hello world""#),
+            "callback should receive text data: {f}"
+        );
+    }
+
+    #[test]
+    fn test_fire_event_with_data_no_data_fallback() {
+        // When no data is passed, callback still works (data is undefined)
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("s", [["pressed", false]]);
+            render(
+                <Button key="btn" label="Go" onPress={() => {
+                    hold("s", [["pressed", true]]);
+                }} />
+            );
+        "#;
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Fire without data (regular fire_event)
+        engine.fire_event("root/btn", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""pressed",true"#), "no-data callback should work: {f}");
     }
 
     // ========================================================================

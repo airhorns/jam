@@ -346,11 +346,15 @@ function render(element: any, parentId?: string, isInsertion?: boolean): void {
   getHoldOps(): HoldOp[] {
     return __holdOps.splice(0);
   },
-  // Fire a callback by its callback ID
-  fireCallback(callbackId: string): boolean {
+  // Fire a callback by its callback ID, optionally passing data
+  fireCallback(callbackId: string, data?: any): boolean {
     const cb = __callbackTable.get(callbackId);
     if (cb) {
-      cb();
+      if (data !== undefined) {
+        cb(data);
+      } else {
+        cb();
+      }
       return true;
     }
     return false;

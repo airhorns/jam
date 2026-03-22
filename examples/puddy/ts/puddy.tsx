@@ -15,29 +15,23 @@ import {
 // hold("connection", [
 //   ["connection", "status", "disconnected" | "connected" | "checking"],
 //   ["connection", "hostname", "localhost"],
-//   ["connection", "error", "..."],          // optional
 // ])
 //
 // hold("sessions", [
-//   ["session", sessionId, "agent", "claude"],
+//   ["session", sessionId, "agent", agentName],
 //   ["session", sessionId, "status", "starting" | "active" | "ended" | "failed"],
-//   ["session", sessionId, "statusDetail", "..."],  // reason or error
+//   ["session", sessionId, "statusDetail", "..."],
 //   ["session", sessionId, "streamingText", "..."],
-//   ...
 // ])
 //
 // hold("messages-{sessionId}", [
-//   ["message", msgId, "session", sessionId],
-//   ["message", msgId, "sender", "user" | "assistant" | "tool"],
-//   ["message", msgId, "kind", "text" | "toolUse" | "toolResult"],
-//   ["message", msgId, "text", "..."],
-//   ["message", msgId, "toolName", "..."],
-//   ["message", msgId, "toolStatus", "..."],
+//   ["message", sessionId, msgId, sender, kindType, content],
+//   // sender: "user" | "assistant" | "tool"
+//   // kindType: "text" | "toolUse" | "toolResult"
+//   // content: the text, tool name, or status string
 // ])
 //
-// hold("ui", [
-//   ["ui", "selectedSession", ""],
-// ])
+// hold("ui", [["ui", "selectedSession", ""]])
 // ============================================================================
 
 // --- Initial state ---
@@ -52,6 +46,18 @@ hold("sessions", []);
 hold("ui", [
   ["ui", "selectedSession", ""],
 ]);
+
+// --- Helper: add a message to a session ---
+let _msgCounter = 0;
+function addMessage(
+  sessionId: string,
+  sender: string,
+  kindType: string,
+  content: string
+) {
+  const msgId = `msg-${_msgCounter++}`;
+  claim("message", sessionId, msgId, sender, kindType, content);
+}
 
 // --- Render ---
 
@@ -79,8 +85,8 @@ render(
         <Text key="header" font="headline" padding={8}>Sessions</Text>
         <Divider key="div-top" />
 
-        {/* Dynamic session rows - rendered by when rules matching session facts */}
-        {when([$.sid, "agent", $.agent], ({ sid, agent }) =>
+        {/* Dynamic session rows */}
+        {when(["session", $.sid, "agent", $.agent], ({ sid, agent }) =>
           when(["session", sid, "status", $.status], ({ status }) =>
             <Button key={`row-${sid}`} label=""
               onPress={() => hold("ui", [["ui", "selectedSession", sid]])}
@@ -114,24 +120,76 @@ render(
         />
       </VStack>
 
-      {/* Detail: selected session */}
-      {when(["ui", "selectedSession", $.selectedId], ({ selectedId }) => {
-        if (!selectedId) {
-          return <Text key="no-selection" font="title2" foregroundColor="secondary">Select a session</Text>;
-        }
-        return (
-          <VStack key="detail">
-            <Text key="detail-title" font="headline">{`Session: ${selectedId}`}</Text>
-            <Divider key="detail-div" />
-            <ScrollView key="detail-messages">
-              <VStack key="msg-list" alignment="leading" spacing={8}>
-                {/* Messages would be rendered here via when rules
-                    matching message facts for the selected session */}
-              </VStack>
-            </ScrollView>
-          </VStack>
-        );
-      })}
+      {/* Detail: selected session — always render, join handles filtering */}
+      {when(["ui", "selectedSession", $.selectedId], ({ selectedId }) =>
+        <VStack key="detail">
+          <Text key="detail-title" font="headline">{
+            selectedId ? `Session: ${selectedId}` : "Select a session"
+          }</Text>
+
+          {selectedId ? <Divider key="detail-div" /> : null}
+
+          <ScrollView key="detail-messages" padding={12}>
+            <VStack key="msg-list" alignment="leading" spacing={8}>
+              {/* Render messages — $.selectedId binding for proper join */}
+              {when(["message", $.selectedId, $.msgId, $.sender, $.kind, $.content],
+                ({ msgId, sender, kind, content }) => {
+                  const icon = sender === "user" ? "👤" : sender === "assistant" ? "✨" : "🔧";
+                  const color = sender === "user" ? "blue" : sender === "assistant" ? "purple" : "orange";
+
+                  if (kind === "toolUse") {
+                    return (
+                      <HStack key={`msg-${msgId}`} spacing={8}>
+                        <Text foregroundColor="orange">🔧</Text>
+                        <Text font="callout" foregroundColor="orange">{content}</Text>
+                      </HStack>
+                    );
+                  }
+                  if (kind === "toolResult") {
+                    const statusColor = content === "completed" ? "green" : "red";
+                    const statusIcon = content === "completed" ? "✓" : "✗";
+                    return (
+                      <HStack key={`msg-${msgId}`} spacing={8}>
+                        <Text foregroundColor={statusColor}>{statusIcon}</Text>
+                        <Text font="caption" foregroundColor={statusColor}>{content}</Text>
+                      </HStack>
+                    );
+                  }
+                  return (
+                    <HStack key={`msg-${msgId}`} spacing={8}>
+                      <Text foregroundColor={color}>{icon}</Text>
+                      <Text font="body">{content}</Text>
+                    </HStack>
+                  );
+                }
+              )}
+            </VStack>
+          </ScrollView>
+
+          {/* Streaming text — $.selectedId binding for proper join */}
+          {when(["session", $.selectedId, "streamingText", $.streaming], ({ streaming }) =>
+            streaming ? (
+              <HStack key="streaming" spacing={8} padding={8}>
+                <Text foregroundColor="purple">✨</Text>
+                <Text font="body" foregroundColor="secondary">{streaming}</Text>
+              </HStack>
+            ) : null
+          )}
+
+          {selectedId ? <Divider key="input-div" /> : null}
+
+          {selectedId ? (
+            <HStack key="input-bar" spacing={8} padding={12}>
+              <TextField key="input" placeholder="Type a message..."
+                onSubmit={(text: string) => {
+                  addMessage(selectedId, "user", "text", text);
+                }}
+                font="body"
+              />
+            </HStack>
+          ) : null}
+        </VStack>
+      )}
     </NavigationSplitView>
   </VStack>
 );

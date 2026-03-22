@@ -875,6 +875,307 @@ fn test_nested_when_in_jsx() {
 }
 
 #[test]
+fn test_nested_when_with_shared_vars_in_jsx() {
+    // Test nested when with shared variable binding across levels
+    let mut engine = JamEngine::new();
+    let tsx = r#"
+        hold("s", [
+            ["selected", "item-1"],
+            ["detail", "item-1", "description", "First item"],
+            ["detail", "item-2", "description", "Second item"],
+        ]);
+
+        render(
+            <VStack key="app">
+                {when(["selected", $.id], ({ id }) =>
+                    <VStack key="detail">
+                        <Text key="sel">{"Selected: " + id}</Text>
+                        {when(["detail", $.id, "description", $.desc], ({ id: detailId, desc }) =>
+                            <Text key={"desc-" + detailId}>{desc}</Text>
+                        )}
+                    </VStack>
+                )}
+            </VStack>
+        );
+    "#;
+
+    let result = engine.load_program("test.tsx", tsx);
+    assert!(!result.starts_with("ERROR"), "load failed: {result}");
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    eprintln!("shared var facts: {f}");
+    // Should show detail for item-1 only (matched via shared $id)
+    assert!(f.contains(r#""text","First item""#), "should render item-1 text claim: {f}");
+    // Item-2 data exists as a base fact but should NOT have a rendered text claim
+    assert!(!f.contains(r#""text","Second item""#), "should not render item-2: {f}");
+}
+
+#[test]
+fn test_join_3_and_6_term_patterns() {
+    // Test the exact pattern combination used in puddy messages
+    let mut engine = JamEngine::new();
+    let tsx = r#"
+        hold("s", [
+            ["ui", "selected", "s1"],
+            ["msg", "s1", "m1", "user", "text", "Hello"],
+        ]);
+
+        render(
+            <VStack key="app">
+                {when(["ui", "selected", $.id], ({ id }) =>
+                    <VStack key="detail">
+                        <Text key="sel">{"id=" + id}</Text>
+                        {when(["msg", $.id, $.mid, $.sender, $.kind, $.content], ({ mid, content }) =>
+                            <Text key={"m-" + mid}>{content}</Text>
+                        )}
+                    </VStack>
+                )}
+            </VStack>
+        );
+    "#;
+    let result = engine.load_program("test.tsx", tsx);
+    assert!(!result.starts_with("ERROR"), "load failed: {result}");
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    eprintln!("3+6 join: {f}");
+    assert!(f.contains(r#""id=s1""#), "outer when: {f}");
+    assert!(f.contains(r#""text","Hello""#), "message should render: {f}");
+}
+
+#[test]
+fn test_join_with_late_fact_insertion() {
+    // Test that asserting facts AFTER load_program still triggers join rules
+    let mut engine = JamEngine::new();
+    let tsx = r#"
+        hold("s", [["ui", "selected", "s1"]]);
+
+        render(
+            <VStack key="app">
+                {when(["ui", "selected", $.id], ({ id }) =>
+                    <VStack key="detail">
+                        <Text key="sel">{"id=" + id}</Text>
+                        {when(["msg", $.id, $.mid, $.content], ({ mid, content }) =>
+                            <Text key={"m-" + mid}>{content}</Text>
+                        )}
+                    </VStack>
+                )}
+            </VStack>
+        );
+    "#;
+    let result = engine.load_program("test.tsx", tsx);
+    assert!(!result.starts_with("ERROR"), "load failed: {result}");
+    let _ = engine.step_json();
+
+    // Initially: detail renders but no messages
+    let f = engine.current_facts_json();
+    assert!(f.contains(r#""id=s1""#), "detail should render: {f}");
+    assert!(!f.contains(r#""text","Hello""#), "no messages yet: {f}");
+
+    // Now add a message fact AFTER the initial load (4-term)
+    engine.assert_fact_json(r#"["msg", "s1", "m1", "Hello"]"#);
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    assert!(f.contains(r#""text","Hello""#), "4-term late fact join: {f}");
+
+    // (no 6-term test here, see test_join_with_6_term_late_fact)
+}
+
+#[test]
+fn test_join_6_term_late_fact() {
+    // Same as late fact test but with 6-term message pattern (matching puddy)
+    let mut engine = JamEngine::new();
+    let tsx = r#"
+        hold("s", [["ui", "selected", "s1"]]);
+
+        render(
+            <VStack key="app">
+                {when(["ui", "selected", $.id], ({ id }) =>
+                    <VStack key="detail">
+                        {when(["message", $.id, $.mid, $.sender, $.kind, $.content],
+                          ({ mid, sender, kind, content }) =>
+                            <Text key={"m-" + mid}>{sender + ": " + content}</Text>
+                        )}
+                    </VStack>
+                )}
+            </VStack>
+        );
+    "#;
+    let result = engine.load_program("test.tsx", tsx);
+    assert!(!result.starts_with("ERROR"), "load failed: {result}");
+    let _ = engine.step_json();
+
+    // Add 6-term message after load
+    engine.assert_fact_json(r#"["message", "s1", "m1", "user", "text", "Hello"]"#);
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    eprintln!("6-term join: {f}");
+    assert!(
+        f.contains(r#""text","user: Hello""#),
+        "6-term join should render: {f}"
+    );
+}
+
+#[test]
+fn test_puddy_simplified_message_render() {
+    // Minimal version of puddy's detail view with messages
+    let mut engine = JamEngine::new();
+    let tsx = r#"
+        hold("sessions", [
+            ["session", "s1", "agent", "claude"],
+            ["session", "s1", "status", "active"],
+        ]);
+        hold("ui", [["ui", "selectedSession", "s1"]]);
+
+        render(
+            <VStack key="app">
+                {/* Detail: always render, the join handles filtering */}
+                {when(["ui", "selectedSession", $.selectedId], ({ selectedId }) =>
+                    <VStack key="detail">
+                        <Text key="title">{"Session: " + selectedId}</Text>
+                        {when(["message", $.selectedId, $.mid, $.sender, $.kind, $.content],
+                          ({ mid, sender, content }) =>
+                            <Text key={"m-" + mid}>{sender + ": " + content}</Text>
+                        )}
+                    </VStack>
+                )}
+            </VStack>
+        );
+    "#;
+    let result = engine.load_program("test.tsx", tsx);
+    assert!(!result.starts_with("ERROR"), "load failed: {result}");
+    let _ = engine.step_json();
+
+    // Add message
+    engine.assert_fact_json(r#"["message", "s1", "m1", "user", "text", "Hello!"]"#);
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    eprintln!("simplified puddy: {f}");
+    assert!(f.contains("Session: s1"), "detail title: {f}");
+    assert!(f.contains("user: Hello!"), "message should render: {f}");
+}
+
+#[test]
+fn test_puddy_messages_render_in_detail() {
+    let mut engine = load_puddy_app();
+
+    // Create a session and select it
+    engine.eval_js(r#"
+        hold("sessions", [
+            ["session", "s1", "agent", "claude"],
+            ["session", "s1", "status", "active"],
+        ]);
+        hold("ui", [["ui", "selectedSession", "s1"]]);
+    "#).unwrap();
+    let _ = engine.step_json();
+
+    // Add messages via claim (the same way the app's addMessage does it)
+    engine.assert_fact_json(r#"["message", "s1", "m1", "user", "text", "Hello agent!"]"#);
+    engine.assert_fact_json(r#"["message", "s1", "m2", "assistant", "text", "Hi! How can I help?"]"#);
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    // Message facts should exist
+    assert!(f.contains(r#"["message","s1","m1"#), "message fact m1: {f}");
+    assert!(f.contains(r#"["message","s1","m2"#), "message fact m2: {f}");
+    // The join rule should render messages with icons
+    assert!(f.contains("Hello agent!"), "user message text: {f}");
+    assert!(f.contains("Hi! How can I help?"), "assistant message text: {f}");
+    assert!(f.contains("\u{1F464}"), "user icon 👤: {f}"); // 👤
+    assert!(f.contains("\u{2728}"), "assistant icon ✨: {f}"); // ✨
+}
+
+#[test]
+fn test_puddy_tool_messages_render() {
+    let mut engine = load_puddy_app();
+
+    engine.eval_js(r#"
+        hold("sessions", [
+            ["session", "s1", "agent", "claude"],
+            ["session", "s1", "status", "active"],
+        ]);
+        hold("ui", [["ui", "selectedSession", "s1"]]);
+    "#).unwrap();
+    let _ = engine.step_json();
+
+    engine.assert_fact_json(r#"["message", "s1", "m1", "assistant", "toolUse", "Read file"]"#);
+    engine.assert_fact_json(r#"["message", "s1", "m2", "tool", "toolResult", "completed"]"#);
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    assert!(f.contains("Read file"), "tool use should render: {f}");
+    assert!(f.contains("completed"), "tool result should render: {f}");
+    assert!(f.contains("🔧"), "tool icon: {f}");
+}
+
+#[test]
+fn test_puddy_streaming_text_shows() {
+    let mut engine = load_puddy_app();
+
+    engine.eval_js(r#"
+        hold("sessions", [
+            ["session", "s1", "agent", "claude"],
+            ["session", "s1", "status", "active"],
+            ["session", "s1", "streamingText", "I am thinking..."],
+        ]);
+        hold("ui", [["ui", "selectedSession", "s1"]]);
+    "#).unwrap();
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    assert!(f.contains("I am thinking..."), "streaming text should show: {f}");
+}
+
+#[test]
+fn test_puddy_text_input_adds_message() {
+    let mut engine = load_puddy_app();
+
+    // Create and select a session
+    engine.eval_js(r#"
+        hold("sessions", [
+            ["session", "s1", "agent", "claude"],
+            ["session", "s1", "status", "active"],
+        ]);
+        hold("ui", [["ui", "selectedSession", "s1"]]);
+    "#).unwrap();
+    let _ = engine.step_json();
+
+    // Find the TextField's onSubmit callback
+    let f = engine.current_facts_json();
+    let facts: Vec<serde_json::Value> = serde_json::from_str(&f).unwrap();
+    let callback_id = facts.iter().find_map(|fact| {
+        let arr = fact.as_array()?;
+        if arr.len() >= 3
+            && arr[1].as_str() == Some("onSubmit")
+            && arr[0].as_str()?.contains("input")
+        {
+            arr[2].as_str().map(String::from)
+        } else {
+            None
+        }
+    });
+    assert!(callback_id.is_some(), "should find input callback: {f}");
+
+    // Fire onSubmit with text data
+    let result = engine.fire_event_with_data(
+        &callback_id.unwrap().replace(":onSubmit", ""),
+        "onSubmit",
+        "Test message from user"
+    );
+    assert!(!result.starts_with("ERROR"), "fire failed: {result}");
+
+    let f = engine.current_facts_json();
+    assert!(
+        f.contains("Test message from user"),
+        "user message should appear: {f}"
+    );
+}
+
+#[test]
 fn test_session_state_machine_full_lifecycle() {
     let mut engine = engine_with_networking();
     let facts = eval_and_get_facts(

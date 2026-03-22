@@ -9,3 +9,4 @@ scratch/
 **/.build
 **/Sources/*/Generated
 package-lock.json
+pnpm-lock.yaml

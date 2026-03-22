@@ -110,6 +110,12 @@ impl JsContext {
     }
 }
 
+/// Result of firing a callback: hold ops + claims produced.
+pub struct CallbackResult {
+    pub hold_ops: Vec<HoldOp>,
+    pub claims: Vec<Statement>,
+}
+
 /// A JavaScript runtime for loading Jam programs written in TypeScript.
 /// Uses a single persistent QuickJS context that all programs share.
 pub struct JsRuntime {
@@ -201,22 +207,36 @@ impl JsRuntime {
         })
     }
 
-    /// Fire a callback registered by render() (e.g., onPress).
-    /// Returns any hold operations produced by the callback.
-    /// Fire a callback by its deterministic ID (e.g., "root/app/btn:onPress").
+    /// Fire a callback by its deterministic ID, optionally passing data.
+    /// Returns hold operations AND claims produced by the callback.
     pub fn fire_callback(
         &self,
         callback_id: &str,
-    ) -> Result<Vec<HoldOp>, String> {
+        data: Option<&str>,
+    ) -> Result<CallbackResult, String> {
         let guard = self.shared.lock().unwrap();
+
+        // Clear topLevelClaims before calling the callback so we capture only its output
+        guard.with(|ctx| {
+            ctx.eval::<(), _>("__jam.topLevelClaims.length = 0;").ok();
+        });
 
         let result = guard.with(|ctx| {
             let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
             let fire: Function = jam.get("fireCallback").map_err(|e| format!("{e}"))?;
 
-            let result: bool = fire
-                .call((callback_id,))
-                .map_err(|e| format!("Callback error: {e}"))?;
+            let result: bool = match data {
+                Some(s) => {
+                    let js_str = rquickjs::String::from_str(ctx.clone(), s)
+                        .map_err(|e| format!("String creation error: {e}"))?;
+                    fire.call((callback_id, js_str))
+                        .map_err(|e| format!("Callback error: {e}"))?
+                }
+                None => {
+                    fire.call((callback_id, Value::new_undefined(ctx.clone())))
+                        .map_err(|e| format!("Callback error: {e}"))?
+                }
+            };
 
             if !result {
                 return Err(format!(
@@ -230,7 +250,15 @@ impl JsRuntime {
         // Drive any async operations (fetch in callback)
         guard.idle();
 
-        guard.with(|ctx| read_hold_ops(&ctx))
+        // Read both hold ops and claims
+        let hold_ops = guard.with(|ctx| read_hold_ops(&ctx))?;
+        let claims = guard.with(|ctx| {
+            let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
+            let claims_val: Value = jam.get("topLevelClaims").map_err(|e| format!("{e}"))?;
+            js_array_to_statements(&claims_val)
+        })?;
+
+        Ok(CallbackResult { hold_ops, claims })
     }
 
     /// Refresh callbacks by re-deriving them from current facts.

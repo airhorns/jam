@@ -79,8 +79,12 @@ class JamEngineWrapper {
     /// Fire an event callback on an entity (e.g., button press).
     /// The Rust side invokes the JS callback, applies hold ops, and steps the engine.
     func fireEvent(entityId: String, eventName: String, data: String? = nil) {
-        // TODO: pass data to the callback (e.g., text field value)
-        let result = engine.fire_event(entityId, eventName).toString()
+        let result: String
+        if let data = data {
+            result = engine.fire_event_with_data(entityId, eventName, data).toString()
+        } else {
+            result = engine.fire_event(entityId, eventName).toString()
+        }
         if result.hasPrefix("ERROR: ") {
             print("fireEvent error: \(result)")
         }
