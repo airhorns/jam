@@ -11,30 +11,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-test-env
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-nix
       - name: Check Rust formatting
-        run: rustfmt --check --edition=2024 **/*.rs
+        run: nix develop -c rustfmt --check --edition=2024 src/*.rs
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-test-env
+      - uses: ./.github/actions/setup-nix
       - uses: Swatinem/rust-cache@v2
       - name: Run clippy
-        run: cargo clippy -- -D warnings
+        run: nix develop -c cargo clippy -- -D warnings
 
   test:
     name: Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-test-env
+      - uses: ./.github/actions/setup-nix
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo test
+        run: nix develop -c cargo test
 
   typecheck:
     name: TypeScript Typecheck

@@ -1,0 +1,15 @@
+name: "Setup Nix"
+description: "Install Nix and cache the store"
+runs:
+  using: "composite"
+  steps:
+    - uses: nixbuild/nix-quick-install-action@v34
+    - name: Restore and save Nix store
+      uses: nix-community/cache-nix-action@v7
+      with:
+        primary-key: nix-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-${{ github.run_id }}
+        restore-prefixes-first-match: nix-v1-${{ runner.os }}-${{ runner.arch }}-
+        gc-max-store-size-linux: 4294967296
+    - name: Build dev environment
+      run: nix develop -c true
+      shell: bash
