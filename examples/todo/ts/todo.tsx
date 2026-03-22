@@ -4,66 +4,38 @@ import { VStack, HStack, Text, Button, ScrollView, TextField, Divider } from "./
 // ============================================================================
 // Todo List Manager
 //
-// State schema (all stored via hold):
-//   hold("todos", [
-//     ["todo", id, "title", "..."],
-//     ["todo", id, "done", false],
-//     ...for each todo
-//   ])
-//   hold("next-id", [["todo", "nextId", N]])
+// State schema (Folk-style EAV claims):
+//   hold("todo-{id}-title", [["todo", id, "has", "title", "..."]])
+//   hold("todo-{id}-done",  [["todo", id, "is", "done", false]])
 //
-// Each todo has a unique numeric ID. The "todos" hold key contains all todo
-// claims as a flat list. Adding/removing/editing todos rebuilds the full list.
+// Each attribute is its own hold key. Adding a todo asserts two facts.
+// Toggling flips one. Deleting retracts both by holding empty arrays.
+// The reactive when() join drives the UI directly — no shadow state.
 // ============================================================================
 
 // --- State helpers ---
 
-interface Todo {
-  id: number;
-  title: string;
-  done: boolean;
-}
-
-// Parse all todo claims from the current todos hold state into an array.
-// This is called from callbacks to read the current state before modifying it.
-let __todos: Todo[] = [];
-
-function setTodos(todos: Todo[]) {
-  __todos = todos;
-  const stmts: any[][] = [];
-  for (const t of todos) {
-    stmts.push(["todo", t.id, "title", t.title]);
-    stmts.push(["todo", t.id, "done", t.done]);
-  }
-  hold("todos", stmts);
-}
+let __nextId = 1;
 
 function addTodo(title: string) {
   if (!title.trim()) return;
-  const id = __nextId;
-  __nextId++;
-  hold("next-id", [["todo", "nextId", __nextId]]);
-  __todos.push({ id, title: title.trim(), done: false });
-  setTodos([...__todos]);
+  const id = __nextId++;
+  hold(`todo-${id}-title`, [["todo", id, "has", "title", title.trim()]]);
+  hold(`todo-${id}-done`, [["todo", id, "is", "done", false]]);
 }
 
-function toggleTodo(id: number) {
-  setTodos(__todos.map(t => t.id === id ? { ...t, done: !t.done } : t));
+function toggleTodo(id: number, currentDone: boolean) {
+  hold(`todo-${id}-done`, [["todo", id, "is", "done", !currentDone]]);
 }
 
 function editTodo(id: number, title: string) {
-  setTodos(__todos.map(t => t.id === id ? { ...t, title } : t));
+  hold(`todo-${id}-title`, [["todo", id, "has", "title", title]]);
 }
 
 function deleteTodo(id: number) {
-  setTodos(__todos.filter(t => t.id !== id));
+  hold(`todo-${id}-title`, []);
+  hold(`todo-${id}-done`, []);
 }
-
-// --- Initial state ---
-
-let __nextId = 1;
-hold("next-id", [["todo", "nextId", 1]]);
-setTodos([]);
 
 // --- UI ---
 
@@ -74,7 +46,7 @@ function TodoItem({ id, title, done }: { id: number; title: string; done: boolea
         key="toggle"
         label={done ? "✓" : "○"}
         foregroundColor={done ? "green" : "secondary"}
-        onPress={() => toggleTodo(id)}
+        onPress={() => toggleTodo(id, done)}
       />
       <Text key="title" font="body" foregroundColor={done ? "secondary" : "primary"}>
         {title}
@@ -100,7 +72,7 @@ render(
     <Divider key="div" />
     <ScrollView key="list">
       <VStack key="items" spacing={4} alignment="leading">
-        {when(["todo", $.id, "title", $.title], ["todo", $.id, "done", $.done], ({ id, title, done }) => (
+        {when(["todo", $.id, "has", "title", $.title], ["todo", $.id, "is", "done", $.done], ({ id, title, done }) => (
           <TodoItem key={`item-${id}`} id={id} title={title} done={done} />
         ))}
       </VStack>

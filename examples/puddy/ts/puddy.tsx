@@ -89,9 +89,9 @@ render(
         <Text key="header" font="headline" padding={8}>Sessions</Text>
         <Divider key="div-top" />
 
-        {/* Dynamic session rows */}
+        {/* Dynamic session rows — use $.sid binding in inner when for proper join */}
         {when(["session", $.sid, "agent", $.agent], ({ sid, agent }) =>
-          when(["session", sid, "status", $.status], ({ status }) =>
+          when(["session", $.sid, "status", $.status], ({ status }) =>
             <Button key={`row-${sid}`} label=""
               onPress={() => hold("ui", [["ui", "selectedSession", sid]])}
             >

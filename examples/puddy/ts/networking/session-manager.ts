@@ -1,23 +1,19 @@
-// SessionManager — orchestrates agent sessions and their lifecycle.
-// Ports the Swift SessionManager to TypeScript.
+// SessionManager — orchestrates agent sessions using hold() for reactive state.
+// All state mutations go through hold(), which triggers when() rules to re-render.
 
 import { type AgentEvent } from "../models/events";
-import {
-  type AgentSession,
-  type ConversationItem,
-  createSession,
-  applyEvent,
-  isTerminal,
-} from "../models/session";
+import { type AgentSession, applyEvent, createSession } from "../models/session";
 import { SandboxAgentClient, SandboxAgentError, type AgentInfo } from "./client";
+
+// These are available as globals from the Jam runtime
+declare function hold(key: string, stmts: any[][]): void;
 
 let _nextUserMsgId = 0;
 
 export class SessionManager {
   private client: SandboxAgentClient;
-  private eventStreamAbortFns = new Map<string, () => void>();
+  sessions: Map<string, AgentSession> = new Map();
 
-  sessions: AgentSession[] = [];
   isConnected = false;
   connectionError?: string;
   pingMs?: number;
@@ -53,10 +49,6 @@ export class SessionManager {
     return undefined;
   }
 
-  get activeSessions(): AgentSession[] {
-    return this.sessions.filter((s) => !isTerminal(s.status));
-  }
-
   // --- Connection ---
 
   async checkConnection(): Promise<void> {
@@ -72,135 +64,155 @@ export class SessionManager {
       this.agents = [];
       this.connectionError = err.message ?? String(err);
     }
+
+    // Update reactive state
+    this.syncConnectionState();
   }
 
   // --- Session Lifecycle ---
 
-  async createSession(
-    id?: string,
-    agent?: string,
-    initialPrompt?: string
-  ): Promise<AgentSession> {
-    const resolvedAgent = agent ?? this.preferredAgent?.id;
-    if (!resolvedAgent) {
-      throw SandboxAgentError.noReadyAgent();
-    }
+  async createNewSession(initialPrompt?: string): Promise<string> {
+    const agent = this.preferredAgent?.id;
+    if (!agent) throw SandboxAgentError.noReadyAgent();
 
-    const sessionId = id ?? `session-${Date.now()}`;
-    const session = createSession(sessionId, resolvedAgent);
-    this.sessions.push(session);
+    const sessionId = "s-" + Date.now();
+    const session = createSession(sessionId, agent);
+    this.sessions.set(sessionId, session);
+    this.syncSessionState(sessionId);
 
     try {
-      await this.client.createSession(sessionId, resolvedAgent);
-      this.startEventStream(session);
+      await this.client.createSession(sessionId, agent);
 
       if (initialPrompt) {
-        const userMsg: ConversationItem = {
-          id: `umsg-${_nextUserMsgId++}`,
-          sender: "user",
-          kind: { type: "text", text: initialPrompt },
-          timestamp: Date.now(),
-        };
-        this.updateSession(sessionId, (s) => ({
-          ...s,
-          messages: [...s.messages, userMsg],
-        }));
-
+        // Add user message
+        this.addUserMessage(sessionId, initialPrompt);
         await this.client.sendPrompt(sessionId, initialPrompt);
       }
+
+      // Start polling for events
+      this.pollEvents(sessionId);
     } catch (err: any) {
-      this.updateSession(sessionId, (s) => ({
-        ...s,
-        status: { type: "failed", error: err.message ?? String(err) },
-      }));
-      throw err;
+      const s = this.sessions.get(sessionId);
+      if (s) {
+        s.status = { type: "failed", error: err.message ?? String(err) };
+        this.syncSessionState(sessionId);
+      }
     }
 
-    return this.getSession(sessionId)!;
+    return sessionId;
   }
 
   async sendMessage(sessionId: string, message: string): Promise<void> {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session '${sessionId}' not found`);
+    this.addUserMessage(sessionId, message);
+
+    try {
+      await this.client.sendPrompt(sessionId, message);
+      // Poll for response events
+      this.pollEvents(sessionId);
+    } catch (err: any) {
+      console.error("sendMessage error:", err.message ?? err);
     }
-
-    const userMsg: ConversationItem = {
-      id: `umsg-${_nextUserMsgId++}`,
-      sender: "user",
-      kind: { type: "text", text: message },
-      timestamp: Date.now(),
-    };
-    this.updateSession(sessionId, (s) => ({
-      ...s,
-      messages: [...s.messages, userMsg],
-    }));
-
-    await this.client.sendPrompt(sessionId, message);
   }
 
   async destroySession(id: string): Promise<void> {
-    const abortFn = this.eventStreamAbortFns.get(id);
-    if (abortFn) {
-      abortFn();
-      this.eventStreamAbortFns.delete(id);
-    }
-
-    this.sessions = this.sessions.filter((s) => s.id !== id);
+    this.sessions.delete(id);
+    // Clear session facts
+    hold(`session-${id}`, []);
+    hold(`session-${id}-msgs`, []);
 
     try {
       await this.client.destroySession(id);
     } catch {
-      // Best-effort cleanup
+      // best effort
     }
   }
 
-  // --- Event Streaming ---
+  // --- Event Polling ---
 
-  private async startEventStream(session: AgentSession): Promise<void> {
-    const sessionId = session.id;
+  private async pollEvents(sessionId: string): Promise<void> {
+    try {
+      const events = await this.client.fetchEvents(sessionId);
+      let session = this.sessions.get(sessionId);
+      if (!session) return;
 
-    const abortFn = await this.client.startEventStream(
-      sessionId,
-      (event: AgentEvent) => {
-        this.updateSession(sessionId, (s) => applyEvent(s, event));
-      },
-      (_reason: string) => {
-        // Session ended via JSON-RPC result — applyEvent handles the status change
-      },
-      (error: Error) => {
-        const current = this.getSession(sessionId);
-        if (current && !isTerminal(current.status)) {
-          this.updateSession(sessionId, (s) => ({
-            ...s,
-            status: { type: "failed", error: error.message },
-          }));
-        }
+      for (const event of events) {
+        if (event.eventIndex <= session.lastEventIndex) continue;
+        session = applyEvent(session, event);
+        this.sessions.set(sessionId, session);
       }
-    );
 
-    this.eventStreamAbortFns.set(sessionId, abortFn);
+      this.syncSessionState(sessionId);
+    } catch (err: any) {
+      const session = this.sessions.get(sessionId);
+      if (session && session.status.type !== "ended" && session.status.type !== "failed") {
+        session.status = { type: "failed", error: err.message ?? String(err) };
+        this.sessions.set(sessionId, session);
+        this.syncSessionState(sessionId);
+      }
+    }
   }
 
-  // --- Helpers ---
+  // --- Reactive State Sync ---
+  // Push manager state into hold() facts so when() rules can react.
 
-  private getSession(id: string): AgentSession | undefined {
-    return this.sessions.find((s) => s.id === id);
+  private syncConnectionState(): void {
+    hold("connection", [
+      ["connection", "status", this.isConnected ? "connected" : "disconnected"],
+      ["connection", "hostname", this.hostname],
+      ...(this.connectionError ? [["connection", "error", this.connectionError]] : []),
+    ]);
   }
 
-  private updateSession(
-    id: string,
-    updater: (session: AgentSession) => AgentSession
-  ): void {
-    this.sessions = this.sessions.map((s) =>
-      s.id === id ? updater(s) : s
-    );
+  private syncSessionState(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+
+    const facts: any[][] = [
+      ["session", sessionId, "agent", session.agent],
+      ["session", sessionId, "status", session.status.type],
+    ];
+
+    if (session.status.type === "ended") {
+      facts.push(["session", sessionId, "statusDetail", (session.status as any).reason]);
+    } else if (session.status.type === "failed") {
+      facts.push(["session", sessionId, "statusDetail", (session.status as any).error]);
+    }
+
+    if (session.streamingText) {
+      facts.push(["session", sessionId, "streamingText", session.streamingText]);
+    }
+
+    hold(`session-${sessionId}`, facts);
+
+    // Sync messages
+    const msgFacts: any[][] = [];
+    for (const msg of session.messages) {
+      const content =
+        msg.kind.type === "text" ? msg.kind.text :
+        msg.kind.type === "toolUse" ? msg.kind.name :
+        msg.kind.type === "toolResult" ? msg.kind.status :
+        "";
+      msgFacts.push(["message", sessionId, msg.id, msg.sender, msg.kind.type, content]);
+    }
+    hold(`session-${sessionId}-msgs`, msgFacts);
+  }
+
+  private addUserMessage(sessionId: string, text: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+
+    const msgId = `umsg-${_nextUserMsgId++}`;
+    session.messages.push({
+      id: msgId,
+      sender: "user",
+      kind: { type: "text", text },
+      timestamp: Date.now(),
+    });
+    this.sessions.set(sessionId, session);
+    this.syncSessionState(sessionId);
   }
 
   disconnectAll(): void {
-    for (const [, abortFn] of this.eventStreamAbortFns) {
-      abortFn();
-    }
-    this.eventStreamAbortFns.clear();
+    // No active connections to close in polling mode
   }
 }

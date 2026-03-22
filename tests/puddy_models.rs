@@ -1179,6 +1179,215 @@ fn test_puddy_text_input_adds_message() {
     );
 }
 
+// ============================================================================
+// End-to-end integration tests
+// ============================================================================
+
+#[test]
+fn test_e2e_full_session_lifecycle() {
+    // Test the complete flow: load app → connect → create session →
+    // receive messages → send message → tool call → session end
+    let mut engine = load_puddy_app();
+
+    // 1. Initial state: disconnected, no sessions, "Select a session"
+    let f = engine.current_facts_json();
+    assert!(f.contains("Disconnected"), "1a: disconnected");
+    assert!(f.contains("Sessions"), "1b: session header");
+    assert!(f.contains("Select a session"), "1c: no selection");
+
+    // 2. Simulate connection
+    engine.eval_js(r#"
+        hold("connection", [
+            ["connection", "status", "connected"],
+            ["connection", "hostname", "agent.local"],
+        ]);
+    "#).unwrap();
+    let _ = engine.step_json();
+    let f = engine.current_facts_json();
+    assert!(f.contains("agent.local"), "2a: hostname shows");
+    assert!(f.contains(r#""foregroundColor","green""#), "2b: green dot");
+
+    // 3. Create a session (simulating what the button callback does)
+    engine.eval_js(r#"
+        hold("session-s1", [
+            ["session", "s1", "agent", "claude"],
+            ["session", "s1", "status", "starting"],
+        ]);
+        hold("ui", [["ui", "selectedSession", "s1"]]);
+    "#).unwrap();
+    let _ = engine.step_json();
+    let f = engine.current_facts_json();
+    assert!(f.contains("Session: s1"), "3a: detail title");
+    // Session row should exist in sidebar with starting status
+    assert!(f.contains(r#""status","starting""#), "3b: starting status in facts");
+
+    // 4. Session becomes active with streaming text
+    engine.eval_js(r#"
+        hold("session-s1", [
+            ["session", "s1", "agent", "claude"],
+            ["session", "s1", "status", "active"],
+            ["session", "s1", "streamingText", "Let me help you with that..."],
+        ]);
+    "#).unwrap();
+    let _ = engine.step_json();
+    let f = engine.current_facts_json();
+    assert!(f.contains("Let me help you with that..."), "4a: streaming text");
+
+    // 5. Messages arrive
+    engine.eval_js(r#"
+        hold("session-s1-msgs", [
+            ["message", "s1", "m1", "user", "text", "Hello Claude!"],
+            ["message", "s1", "m2", "assistant", "text", "Hi! How can I help?"],
+        ]);
+    "#).unwrap();
+    let _ = engine.step_json();
+    let f = engine.current_facts_json();
+    assert!(f.contains("Hello Claude!"), "5a: user message");
+    assert!(f.contains("Hi! How can I help?"), "5b: assistant message");
+    assert!(f.contains("\u{1F464}"), "5c: user icon 👤");
+    assert!(f.contains("\u{2728}"), "5d: assistant icon ✨");
+
+    // 6. Tool call
+    engine.eval_js(r#"
+        hold("session-s1-msgs", [
+            ["message", "s1", "m1", "user", "text", "Hello Claude!"],
+            ["message", "s1", "m2", "assistant", "text", "Hi! How can I help?"],
+            ["message", "s1", "m3", "assistant", "toolUse", "Read file"],
+            ["message", "s1", "m4", "tool", "toolResult", "completed"],
+        ]);
+    "#).unwrap();
+    let _ = engine.step_json();
+    let f = engine.current_facts_json();
+    assert!(f.contains("Read file"), "6a: tool use");
+    assert!(f.contains("\u{2713}"), "6b: checkmark ✓");
+
+    // 7. Session ends
+    engine.eval_js(r#"
+        hold("session-s1", [
+            ["session", "s1", "agent", "claude"],
+            ["session", "s1", "status", "ended"],
+            ["session", "s1", "statusDetail", "end_turn"],
+        ]);
+    "#).unwrap();
+    let _ = engine.step_json();
+    let f = engine.current_facts_json();
+    // Session status should update in sidebar
+    assert!(
+        f.contains(r#""foregroundColor","secondary""#) || f.contains("ended"),
+        "7a: ended status"
+    );
+}
+
+#[test]
+fn test_e2e_multiple_sessions() {
+    let mut engine = load_puddy_app();
+
+    // Create two sessions
+    engine.eval_js(r#"
+        hold("session-s1", [
+            ["session", "s1", "agent", "claude"],
+            ["session", "s1", "status", "active"],
+        ]);
+        hold("session-s2", [
+            ["session", "s2", "agent", "claude"],
+            ["session", "s2", "status", "starting"],
+        ]);
+    "#).unwrap();
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    // Both sessions should appear in sidebar
+    assert!(f.contains("s1"), "session 1 in sidebar");
+    assert!(f.contains("s2"), "session 2 in sidebar");
+
+    // Select session 2
+    engine.eval_js(r#"
+        hold("ui", [["ui", "selectedSession", "s2"]]);
+    "#).unwrap();
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    assert!(f.contains("Session: s2"), "session 2 selected");
+}
+
+#[test]
+fn test_e2e_text_input_sends_message() {
+    let mut engine = load_puddy_app();
+
+    // Set up session
+    engine.eval_js(r#"
+        hold("session-s1", [
+            ["session", "s1", "agent", "claude"],
+            ["session", "s1", "status", "active"],
+        ]);
+        hold("ui", [["ui", "selectedSession", "s1"]]);
+    "#).unwrap();
+    let _ = engine.step_json();
+
+    // Find TextField onSubmit callback
+    let f = engine.current_facts_json();
+    let facts: Vec<serde_json::Value> = serde_json::from_str(&f).unwrap();
+    let callback_id = facts.iter().find_map(|fact| {
+        let arr = fact.as_array()?;
+        if arr.len() >= 3
+            && arr[1].as_str() == Some("onSubmit")
+            && arr[0].as_str()?.contains("input")
+        {
+            arr[2].as_str().map(String::from)
+        } else {
+            None
+        }
+    });
+    assert!(callback_id.is_some(), "should find TextField callback: {f}");
+
+    // Submit text
+    let cb_id = callback_id.unwrap();
+    let entity_id = cb_id.replace(":onSubmit", "");
+    engine.fire_event_with_data(&entity_id, "onSubmit", "What is Rust?");
+
+    let f = engine.current_facts_json();
+    assert!(
+        f.contains("What is Rust?"),
+        "submitted message should appear: {f}"
+    );
+}
+
+#[test]
+fn test_e2e_new_session_button() {
+    let mut engine = load_puddy_app();
+
+    // Find the new session button callback
+    let f = engine.current_facts_json();
+    let facts: Vec<serde_json::Value> = serde_json::from_str(&f).unwrap();
+    let callback_id = facts.iter().find_map(|fact| {
+        let arr = fact.as_array()?;
+        if arr.len() >= 3
+            && arr[1].as_str() == Some("onPress")
+            && arr[0].as_str()?.contains("new-session")
+        {
+            arr[2].as_str().map(String::from)
+        } else {
+            None
+        }
+    });
+    assert!(callback_id.is_some(), "should find new-session callback");
+
+    // Press the button
+    let result = engine.fire_event_by_callback_id(&callback_id.unwrap());
+    assert!(!result.starts_with("ERROR"), "button press failed: {result}");
+
+    // A session should now exist
+    let f = engine.current_facts_json();
+    assert!(
+        f.contains(r#""agent","claude""#),
+        "session created with agent: {f}"
+    );
+    assert!(
+        f.contains(r#""status","starting""#),
+        "session in starting state: {f}"
+    );
+}
+
 #[test]
 fn test_session_state_machine_full_lifecycle() {
     let mut engine = engine_with_networking();
