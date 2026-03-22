@@ -146,6 +146,13 @@ impl JsRuntime {
         // Drive any async operations (top-level fetch, etc.)
         guard.idle();
 
+        // Finalize: register any imperative when() markers not consumed by render()
+        guard.with(|ctx| {
+            let jam: Object = ctx.globals().get("__jam").unwrap();
+            let finalize: Function = jam.get("finalize").unwrap();
+            finalize.call::<_, ()>(()).ok();
+        });
+
         // Extract claims and new rules
         let (claims, rule_data) = guard.with(|ctx| {
             let globals = ctx.globals();
@@ -182,10 +189,10 @@ impl JsRuntime {
 
     /// Fire a callback registered by render() (e.g., onPress).
     /// Returns any hold operations produced by the callback.
+    /// Fire a callback by its deterministic ID (e.g., "root/app/btn:onPress").
     pub fn fire_callback(
         &self,
-        entity_id: &str,
-        event_name: &str,
+        callback_id: &str,
     ) -> Result<Vec<HoldOp>, String> {
         let guard = self.shared.lock().unwrap();
 
@@ -194,12 +201,12 @@ impl JsRuntime {
             let fire: Function = jam.get("fireCallback").map_err(|e| format!("{e}"))?;
 
             let result: bool = fire
-                .call((entity_id, event_name))
+                .call((callback_id,))
                 .map_err(|e| format!("Callback error: {e}"))?;
 
             if !result {
                 return Err(format!(
-                    "No callback registered for {entity_id}:{event_name}"
+                    "No callback registered for {callback_id}"
                 ));
             }
             Ok(())
