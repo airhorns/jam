@@ -24,6 +24,8 @@
           sccache
           clang
           libclang.lib
+          pnpm
+          nodejs_24
         ]);
 
         LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";

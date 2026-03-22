@@ -9,7 +9,7 @@ check:
 
 test:
     cargo test
-    cd ts && npx tsc --noEmit
+    pnpm --dir ts typecheck
 
 watch *ARGS:
 	bacon --job run -- -- {{ ARGS }}

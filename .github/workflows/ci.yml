@@ -40,10 +40,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
+      - uses: ./.github/actions/setup-nix
       - name: Install dependencies
-        run: cd ts && npm install
+        run: nix develop -c pnpm --dir ts install --frozen-lockfile
       - name: Run typecheck
-        run: cd ts && npx tsc --noEmit
+        run: nix develop -c pnpm --dir ts typecheck
