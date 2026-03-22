@@ -29,9 +29,7 @@ pub fn transpile_ts_to_js(source: &str, filename: &str) -> Result<String, String
     let mut program = parsed.program;
 
     // Build semantic analysis (required by transformer for scoping)
-    let semantic = SemanticBuilder::new()
-        .build(&program)
-        .semantic;
+    let semantic = SemanticBuilder::new().build(&program).semantic;
     let scoping = semantic.into_scoping();
 
     let path = Path::new(filename);

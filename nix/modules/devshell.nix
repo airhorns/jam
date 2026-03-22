@@ -22,7 +22,11 @@
           nixd
           bacon
           sccache
+          clang
+          libclang.lib
         ]);
+
+        LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
 
         shellHook = ''
           # Only use sccache locally -- in CI it has no warm cache and adds overhead
