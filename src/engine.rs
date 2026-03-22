@@ -725,8 +725,7 @@ mod tests {
         //     Claim [x] is impressive     (nested when)
         let mut engine = Engine::new();
 
-        engine.add_program(
-            Program::new("cool_with_nested").with_rules(vec![
+        engine.add_program(Program::new("cool_with_nested").with_rules(vec![
                 RuleSpec::new(
                     vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
                     |bindings| {
@@ -741,8 +740,7 @@ mod tests {
                         vec![stmt![x, Term::sym("is"), Term::sym("impressive")]]
                     },
                 )]),
-            ]),
-        );
+            ]));
 
         // Assert cool and tall
         engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
@@ -794,8 +792,7 @@ mod tests {
         //   When [x] has-mood sad:   claim [x] should cry
         let mut engine = Engine::new();
 
-        engine.add_program(
-            Program::new("mood_reactions").with_rules(vec![
+        engine.add_program(Program::new("mood_reactions").with_rules(vec![
                 RuleSpec::new(
                     vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
                     |_| vec![],
@@ -816,8 +813,7 @@ mod tests {
                         },
                     ),
                 ]),
-            ]),
-        );
+            ]));
 
         // omar is cool+happy, alice is cool+sad
         engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
@@ -1076,8 +1072,7 @@ mod tests {
         //     Claim [x] should celebrate
         let mut engine = Engine::new();
 
-        engine.add_program(
-            Program::new("or_with_nested").with_rules(vec![
+        engine.add_program(Program::new("or_with_nested").with_rules(vec![
                 RuleSpec::new(
                     any([
                         pat![bind("x"), exact_sym("is"), exact_sym("cool")],
@@ -1092,8 +1087,7 @@ mod tests {
                         vec![stmt![x, Term::sym("should"), Term::sym("celebrate")]]
                     },
                 )]),
-            ]),
-        );
+            ]));
 
         // cool + happy → should celebrate
         engine.assert_fact(stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")]);
