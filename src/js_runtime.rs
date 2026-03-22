@@ -51,7 +51,7 @@ pub struct JsRuntime {
 
 impl JsRuntime {
     pub fn new() -> Self {
-        let tokio_rt = tokio::runtime::Builder::new_current_thread()
+        let tokio_rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .expect("Failed to create tokio runtime");
@@ -83,14 +83,21 @@ impl JsRuntime {
             .block_on(async { AsyncContext::full(&self.extract_runtime).await })
             .expect("Failed to create extract context");
 
-        let (claims, rule_data) = self.tokio_rt.block_on(extract_ctx.with(|ctx| {
+        // Phase 1: eval the runtime + user script
+        self.tokio_rt.block_on(extract_ctx.with(|ctx| {
             init_llrt_globals(&ctx).map_err(|e| format!("LLRT init error: {e}"))?;
-
             ctx.eval::<(), _>(runtime_js)
                 .map_err(|e| format!("Runtime eval error: {e}"))?;
             ctx.eval::<(), _>(js.as_str())
                 .map_err(|e| format!("Script eval error: {e}"))?;
+            Ok::<_, String>(())
+        }))?;
 
+        // Phase 2: drive any async operations (top-level fetch, etc.)
+        self.tokio_rt.block_on(self.extract_runtime.idle());
+
+        // Phase 3: extract claims and rules (after async operations have completed)
+        let (claims, rule_data) = self.tokio_rt.block_on(extract_ctx.with(|ctx| {
             let globals = ctx.globals();
             let jam: Object = globals.get("__jam").map_err(|e| format!("{e}"))?;
 
@@ -103,12 +110,9 @@ impl JsRuntime {
             Ok::<_, String>((claims, rule_data))
         }))?;
 
-        // Drive any async operations from program initialization
-        self.tokio_rt.block_on(self.extract_runtime.idle());
-
         // Create async runtime+context for body execution.
         // AsyncRuntime is required so that fetch() Promises can be driven via tokio.
-        let tokio_rt = tokio::runtime::Builder::new_current_thread()
+        let tokio_rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .expect("Failed to create tokio runtime");

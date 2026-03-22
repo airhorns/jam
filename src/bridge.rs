@@ -1429,4 +1429,31 @@ mod tests {
         assert!(f.contains(r#""has_then",true"#), "fetch result should have .then(): {f}");
     }
 
+    #[test]
+    fn test_fetch_resolves_with_then() {
+        // Test that fetch().then() chains resolve during load_program's idle()
+        let mut engine = JamEngine::new();
+
+        let ts = r#"
+            fetch("https://httpbin.org/get")
+                .then(response => {
+                    claim("status", response.status);
+                    claim("ok", response.ok);
+                })
+                .catch(err => {
+                    claim("fetch_error", String(err));
+                });
+        "#;
+        let result = engine.load_program("test", ts);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        let has_status = f.contains(r#""status""#);
+        let has_error = f.contains(r#""fetch_error""#);
+        assert!(
+            has_status || has_error,
+            "fetch should produce status or error claim: {f}"
+        );
+    }
 }
