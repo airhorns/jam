@@ -126,6 +126,14 @@ impl Engine {
         }
     }
 
+    /// Get all currently-live facts (weight > 0).
+    pub fn current_facts(&self) -> impl Iterator<Item = &Statement> {
+        self.current_facts
+            .iter()
+            .filter(|(_, w)| **w > 0)
+            .map(|(stmt, _)| stmt)
+    }
+
     /// Install a program (claims + rules). Triggers circuit rebuild on next step.
     pub fn add_program(&mut self, program: Program) -> ProgramId {
         let id = self.next_program_id;

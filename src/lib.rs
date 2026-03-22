@@ -1,3 +1,4 @@
+pub mod bridge;
 pub mod circuit;
 pub mod engine;
 pub mod js_runtime;

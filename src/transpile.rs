@@ -5,15 +5,18 @@ use oxc::codegen::Codegen;
 use oxc::parser::Parser;
 use oxc::semantic::SemanticBuilder;
 use oxc::span::SourceType;
-use oxc::transformer::{TransformOptions, Transformer};
+use oxc::transformer::{JsxOptions, JsxRuntime, TransformOptions, Transformer};
 
 /// Transpile TypeScript source to JavaScript by stripping type annotations.
 /// This is type-erasure only (like tsc --isolatedModules) — no type checking.
+/// If the filename ends with .tsx, JSX is transformed using the classic runtime
+/// with `h` as the factory function and `Fragment` as the fragment factory.
 pub fn transpile_ts_to_js(source: &str, filename: &str) -> Result<String, String> {
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(filename)
         .unwrap_or_default()
-        .with_typescript(true);
+        .with_typescript(true)
+        .with_jsx(filename.ends_with(".tsx") || filename.ends_with(".jsx"));
 
     let parsed = Parser::new(&allocator, source, source_type).parse();
 
@@ -35,7 +38,20 @@ pub fn transpile_ts_to_js(source: &str, filename: &str) -> Result<String, String
     let scoping = semantic.into_scoping();
 
     let path = Path::new(filename);
-    let transform_options = TransformOptions::default();
+    let mut transform_options = TransformOptions::default();
+
+    // Configure JSX transform: classic runtime with h() factory
+    if source_type.is_jsx() {
+        transform_options.jsx = JsxOptions {
+            jsx_plugin: true,
+            runtime: JsxRuntime::Classic,
+            pragma: Some("h".to_string()),
+            pragma_frag: Some("Fragment".to_string()),
+            pure: false,
+            ..JsxOptions::disable()
+        };
+    }
+
     let result = Transformer::new(&allocator, path, &transform_options)
         .build_with_scoping(scoping, &mut program);
 
@@ -48,13 +64,23 @@ pub fn transpile_ts_to_js(source: &str, filename: &str) -> Result<String, String
     Ok(js)
 }
 
-/// Strip import declarations from transpiled JS.
-/// The jam runtime is loaded as globals, so imports are unnecessary.
+/// Strip import declarations and export keywords from transpiled JS.
+/// The jam runtime is loaded as globals, so imports are unnecessary,
+/// and exports don't work in QuickJS's non-module evaluation mode.
 pub fn strip_imports(js: &str) -> String {
     js.lines()
         .filter(|line| {
             let trimmed = line.trim();
+            // Remove import lines entirely
             !trimmed.starts_with("import ")
+        })
+        .map(|line| {
+            // Strip "export " prefix from declarations
+            if line.trim_start().starts_with("export ") {
+                line.replacen("export ", "", 1)
+            } else {
+                line.to_string()
+            }
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -120,6 +146,74 @@ mod tests {
         assert!(js.contains(r#"claim("omar", "is", "cool")"#));
         assert!(js.contains("when("));
         assert!(!js.contains("type MyType"));
+    }
+
+    #[test]
+    fn test_jsx_transpile() {
+        let tsx = r#"
+            const el = <VStack spacing={20}>
+                <Text font="title">Hello</Text>
+            </VStack>;
+        "#;
+        let js = transpile_ts_to_js(tsx, "test.tsx").unwrap();
+        assert!(js.contains("h(VStack"), "should use h() factory: {js}");
+        assert!(js.contains("spacing: 20"), "should have spacing prop: {js}");
+        assert!(
+            js.contains("h(Text"),
+            "should transpile nested elements: {js}"
+        );
+    }
+
+    #[test]
+    fn test_jsx_fragment() {
+        let tsx = r#"
+            const el = <>
+                <Text>A</Text>
+                <Text>B</Text>
+            </>;
+        "#;
+        let js = transpile_ts_to_js(tsx, "test.tsx").unwrap();
+        assert!(
+            js.contains("Fragment"),
+            "should use Fragment for <>: {js}"
+        );
+    }
+
+    #[test]
+    fn test_jsx_with_expressions() {
+        let tsx = r#"
+            const name = "world";
+            const el = <Text>{`Hello ${name}`}</Text>;
+        "#;
+        let js = transpile_ts_to_js(tsx, "test.tsx").unwrap();
+        assert!(js.contains("h(Text"), "should transpile JSX: {js}");
+    }
+
+    #[test]
+    fn test_tsx_with_types() {
+        let tsx = r#"
+            interface Props { label: string; }
+            function MyComponent(props: Props) {
+                return <Text>{props.label}</Text>;
+            }
+            const el = <MyComponent label="hi" />;
+        "#;
+        let js = transpile_ts_to_js(tsx, "test.tsx").unwrap();
+        assert!(!js.contains("interface"), "should strip interface: {js}");
+        assert!(
+            js.contains("h(MyComponent"),
+            "should transpile custom component: {js}"
+        );
+    }
+
+    #[test]
+    fn test_ts_file_no_jsx() {
+        // .ts files should NOT have JSX enabled
+        let ts = r#"
+            const x = 1;
+        "#;
+        let js = transpile_ts_to_js(ts, "test.ts").unwrap();
+        assert!(js.contains("const x = 1"));
     }
 
     #[test]

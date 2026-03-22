@@ -8,14 +8,23 @@ use crate::term::{Statement, Term};
 use crate::transpile;
 
 /// The Jam runtime JavaScript source, transpiled from TypeScript at first use.
+/// Includes both the core runtime and the SwiftUI component library.
 fn get_runtime_js() -> &'static str {
     use std::sync::OnceLock;
     static RUNTIME_JS: OnceLock<String> = OnceLock::new();
     RUNTIME_JS.get_or_init(|| {
-        let ts = include_str!("../ts/runtime.ts");
-        let js = transpile::transpile_ts_to_js(ts, "runtime.ts")
+        let runtime_ts = include_str!("../ts/runtime.ts");
+        let components_ts = include_str!("../ts/components.ts");
+
+        let runtime_js = transpile::transpile_ts_to_js(runtime_ts, "runtime.ts")
             .expect("Failed to transpile jam runtime");
-        transpile::strip_imports(&js)
+        let components_js = transpile::transpile_ts_to_js(components_ts, "components.ts")
+            .expect("Failed to transpile jam components");
+
+        let runtime_js = transpile::strip_imports(&runtime_js);
+        let components_js = transpile::strip_imports(&components_js);
+
+        format!("{runtime_js}\n{components_js}")
     })
 }
 
@@ -31,8 +40,15 @@ impl JsRuntime {
     }
 
     /// Load a TypeScript program and extract its rules and claims.
+    /// If the name ends with .tsx, JSX syntax is enabled.
     pub fn load_program(&self, name: &str, ts_source: &str) -> Result<Program, String> {
-        let js = transpile::transpile_ts_to_js(ts_source, &format!("{name}.ts"))?;
+        // Use the provided name as filename if it has an extension, otherwise default to .ts
+        let filename = if name.contains('.') {
+            name.to_string()
+        } else {
+            format!("{name}.ts")
+        };
+        let js = transpile::transpile_ts_to_js(ts_source, &filename)?;
         let js = transpile::strip_imports(&js);
         let runtime_js = get_runtime_js();
 

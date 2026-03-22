@@ -205,6 +205,87 @@ export declare function when<
 export declare function claim(...terms: Term[]): void;
 export declare function wish(...terms: Term[]): void;
 
+// $this — current entity identity (like Folk's $this)
+// Scoped by child() calls. Defaults to "root".
+export declare const $this: string;
+
+// child() — create a nested entity scope
+// Derives child ID as `${parent}/${name}`, auto-claims parent-child relationship,
+// and sets $this to the child ID for the duration of fn.
+export declare function child(name: string, fn: () => void): void;
+
+// ============================================================================
+// JSX SUPPORT
+// ============================================================================
+
+// Element descriptor returned by h()
+export interface JamElement {
+  readonly __jamElement: true;
+  readonly type: string | Function;
+  readonly props: Record<string, any>;
+  readonly children: any[];
+  readonly key?: string;
+}
+
+// JSX factory function — transpiled from JSX syntax by OXC
+export declare function h(
+  type: string | Function,
+  props: Record<string, any> | null,
+  ...children: any[]
+): JamElement;
+
+// Fragment — for grouping elements without a wrapper entity
+export declare const Fragment: symbol;
+
+// Render a JSX element tree into claims
+export declare function render(element: JamElement, parentId?: string): void;
+
+// Re-export component types for convenience
+export type {
+  Font,
+  Color,
+  Alignment,
+  VStackProps,
+  HStackProps,
+  ZStackProps,
+  TextProps,
+  ButtonProps,
+  SpacerProps,
+  ImageProps,
+} from "./components";
+
+// Re-export components
+export {
+  VStack,
+  HStack,
+  ZStack,
+  Text,
+  Button,
+  Spacer,
+  Image,
+} from "./components";
+
+// ============================================================================
+// JSX IntrinsicElements — TypeScript uses this for JSX type checking
+// ============================================================================
+
+import type {
+  VStackProps,
+  HStackProps,
+  ZStackProps,
+  TextProps,
+  ButtonProps,
+  SpacerProps,
+  ImageProps,
+} from "./components";
+
+declare global {
+  namespace JSX {
+    type Element = JamElement;
+    interface IntrinsicElements {}
+  }
+}
+
 // ============================================================================
 // GENERATED: KnownSkeletons
 // This interface is the ONLY part that changes. It's augmented by skeletons.d.ts.
