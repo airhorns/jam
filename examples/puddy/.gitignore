@@ -1,0 +1,7 @@
+.build/
+Sources/PuddyApp/Generated/SwiftBridgeCore.h
+Sources/PuddyApp/Generated/SwiftBridgeCore.swift
+Sources/PuddyApp/Generated/jam.h
+Sources/PuddyApp/Generated/jam.swift
+ts/node_modules/
+ts/package-lock.json
