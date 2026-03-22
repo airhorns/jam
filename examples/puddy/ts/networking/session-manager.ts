@@ -6,7 +6,8 @@ import { type AgentSession, applyEvent, createSession } from "../models/session"
 import { SandboxAgentClient, SandboxAgentError, type AgentInfo } from "./client";
 
 // These are available as globals from the Jam runtime
-declare function hold(key: string, stmts: any[][]): void;
+declare function hold(keyOrFn: string | (() => void), maybeFn?: () => void): void;
+declare function claim(...terms: any[]): void;
 
 let _nextUserMsgId = 0;
 
@@ -116,9 +117,9 @@ export class SessionManager {
 
   async destroySession(id: string): Promise<void> {
     this.sessions.delete(id);
-    // Clear session facts
-    hold(`session-${id}`, []);
-    hold(`session-${id}-msgs`, []);
+    // Clear session facts (empty hold = retract all)
+    hold(`session-${id}`, () => {});
+    hold(`session-${id}-msgs`, () => {});
 
     try {
       await this.client.destroySession(id);
@@ -156,45 +157,45 @@ export class SessionManager {
   // Push manager state into hold() facts so when() rules can react.
 
   private syncConnectionState(): void {
-    hold("connection", [
-      ["connection", "status", this.isConnected ? "connected" : "disconnected"],
-      ["connection", "hostname", this.hostname],
-      ...(this.connectionError ? [["connection", "error", this.connectionError]] : []),
-    ]);
+    hold("connection", () => {
+      claim("connection", "status", this.isConnected ? "connected" : "disconnected");
+      claim("connection", "hostname", this.hostname);
+      if (this.connectionError) {
+        claim("connection", "error", this.connectionError);
+      }
+    });
   }
 
   private syncSessionState(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
-    const facts: any[][] = [
-      ["session", sessionId, "agent", session.agent],
-      ["session", sessionId, "status", session.status.type],
-    ];
+    hold(`session-${sessionId}`, () => {
+      claim("session", sessionId, "agent", session.agent);
+      claim("session", sessionId, "status", session.status.type);
 
-    if (session.status.type === "ended") {
-      facts.push(["session", sessionId, "statusDetail", (session.status as any).reason]);
-    } else if (session.status.type === "failed") {
-      facts.push(["session", sessionId, "statusDetail", (session.status as any).error]);
-    }
+      if (session.status.type === "ended") {
+        claim("session", sessionId, "statusDetail", (session.status as any).reason);
+      } else if (session.status.type === "failed") {
+        claim("session", sessionId, "statusDetail", (session.status as any).error);
+      }
 
-    if (session.streamingText) {
-      facts.push(["session", sessionId, "streamingText", session.streamingText]);
-    }
-
-    hold(`session-${sessionId}`, facts);
+      if (session.streamingText) {
+        claim("session", sessionId, "streamingText", session.streamingText);
+      }
+    });
 
     // Sync messages
-    const msgFacts: any[][] = [];
-    for (const msg of session.messages) {
-      const content =
-        msg.kind.type === "text" ? msg.kind.text :
-        msg.kind.type === "toolUse" ? msg.kind.name :
-        msg.kind.type === "toolResult" ? msg.kind.status :
-        "";
-      msgFacts.push(["message", sessionId, msg.id, msg.sender, msg.kind.type, content]);
-    }
-    hold(`session-${sessionId}-msgs`, msgFacts);
+    hold(`session-${sessionId}-msgs`, () => {
+      for (const msg of session.messages) {
+        const content =
+          msg.kind.type === "text" ? msg.kind.text :
+          msg.kind.type === "toolUse" ? msg.kind.name :
+          msg.kind.type === "toolResult" ? msg.kind.status :
+          "";
+        claim("message", sessionId, msg.id, msg.sender, msg.kind.type, content);
+      }
+    });
   }
 
   private addUserMessage(sessionId: string, text: string): void {

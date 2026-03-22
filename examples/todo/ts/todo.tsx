@@ -1,15 +1,15 @@
-import { $, _, when, hold, render } from "./jam";
+import { $, _, when, hold, claim, render } from "./jam";
 import { VStack, HStack, Text, Button, ScrollView, TextField, Divider } from "./components";
 
 // ============================================================================
 // Todo List Manager
 //
-// State schema (Folk-style EAV claims):
-//   hold("todo-{id}-title", [["todo", id, "has", "title", "..."]])
-//   hold("todo-{id}-done",  [["todo", id, "is", "done", false]])
+// State schema (Folk-style EAV claims inside hold):
+//   hold("todo-{id}-title", () => claim("todo", id, "has", "title", "..."))
+//   hold("todo-{id}-done",  () => claim("todo", id, "is", "done", false))
 //
 // Each attribute is its own hold key. Adding a todo asserts two facts.
-// Toggling flips one. Deleting retracts both by holding empty arrays.
+// Toggling flips one. Deleting retracts both by holding empty callbacks.
 // The reactive when() join drives the UI directly — no shadow state.
 // ============================================================================
 
@@ -20,21 +20,21 @@ let __nextId = 1;
 function addTodo(title: string) {
   if (!title.trim()) return;
   const id = __nextId++;
-  hold(`todo-${id}-title`, [["todo", id, "has", "title", title.trim()]]);
-  hold(`todo-${id}-done`, [["todo", id, "is", "done", false]]);
+  hold(`todo-${id}-title`, () => { claim("todo", id, "has", "title", title.trim()); });
+  hold(`todo-${id}-done`, () => { claim("todo", id, "is", "done", false); });
 }
 
 function toggleTodo(id: number, currentDone: boolean) {
-  hold(`todo-${id}-done`, [["todo", id, "is", "done", !currentDone]]);
+  hold(`todo-${id}-done`, () => { claim("todo", id, "is", "done", !currentDone); });
 }
 
 function editTodo(id: number, title: string) {
-  hold(`todo-${id}-title`, [["todo", id, "has", "title", title]]);
+  hold(`todo-${id}-title`, () => { claim("todo", id, "has", "title", title); });
 }
 
 function deleteTodo(id: number) {
-  hold(`todo-${id}-title`, []);
-  hold(`todo-${id}-done`, []);
+  hold(`todo-${id}-title`, () => {}); // empty = retract
+  hold(`todo-${id}-done`, () => {});
 }
 
 // --- UI ---

@@ -90,6 +90,15 @@ function or(...values: any[]): OrMarker {
 }
 
 // --- hold(): persistent mutable state ---
+//
+// hold() creates a scope where claim() calls accumulate facts.
+// When called again with the same key, old facts are retracted and new ones asserted.
+//
+// Usage:
+//   hold(() => { claim("counter", "count", 0); });              // auto-key from context
+//   hold("counter", () => { claim("counter", "count", 0); });   // explicit key
+//
+// Inside a hold callback, claim() is allowed (unlike inside event callbacks).
 
 interface HoldOp {
   key: string;
@@ -98,8 +107,42 @@ interface HoldOp {
 
 const __holdOps: HoldOp[] = [];
 
-function hold(key: string, stmts: any[][]): void {
-  __holdOps.push({ key, stmts });
+// Track auto-key counters per $this context
+const __holdAutoKeyCounters: Map<string, number> = new Map();
+let __inHold = false;
+let __holdCollector: any[][] | null = null;
+
+function hold(keyOrFn: string | (() => void), maybeFn?: () => void): void {
+  let key: string;
+  let fn: () => void;
+
+  if (typeof keyOrFn === "function") {
+    // hold(() => { ... }) — auto-key from $this + call order
+    fn = keyOrFn;
+    const counter = __holdAutoKeyCounters.get($this) ?? 0;
+    __holdAutoKeyCounters.set($this, counter + 1);
+    key = `${$this}:hold:${counter}`;
+  } else {
+    // hold("key", () => { ... }) — explicit key
+    key = keyOrFn;
+    fn = maybeFn!;
+  }
+
+  // Execute the callback, collecting claims
+  const prevHoldCollector = __holdCollector;
+  const prevInHold = __inHold;
+  __holdCollector = [];
+  __inHold = true;
+  try {
+    fn();
+  } finally {
+    const stmts = __holdCollector;
+    __holdCollector = prevHoldCollector;
+    __inHold = prevInHold;
+
+    // Push the hold operation with collected claims
+    __holdOps.push({ key, stmts: stmts! });
+  }
 }
 
 // --- Callback table: maps deterministic callback IDs to functions ---
@@ -118,11 +161,16 @@ const __callbackTable = new Map<string, Function>();
 let __inCallback = false;
 
 function claim(...terms: any[]): void {
-  if (__inCallback && __collector === null) {
+  // Inside a hold() callback — collect for the hold operation
+  if (__holdCollector !== null) {
+    __holdCollector.push(terms);
+    return;
+  }
+  // Inside an event callback (not in hold) — error
+  if (__inCallback) {
     throw new Error(
-      "claim() cannot be called inside a callback. " +
-      "Use hold() instead — callbacks are imperative, not reactive. " +
-      "hold() provides persistent state that when() rules can react to."
+      "claim() cannot be called directly inside a callback. " +
+      "Wrap it in hold() — e.g., hold(() => { claim(...) })."
     );
   }
   if (__collector !== null) {

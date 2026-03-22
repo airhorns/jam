@@ -40,6 +40,20 @@ fn find_callback(facts: &str, substring: &str) -> Option<String> {
     })
 }
 
+/// Helper: count todo entity claims in the facts JSON.
+fn count_todo_claims(facts: &str) -> usize {
+    let parsed: Vec<serde_json::Value> = serde_json::from_str(facts).unwrap();
+    parsed
+        .iter()
+        .filter(|fact| {
+            let arr = fact.as_array().unwrap();
+            arr.len() >= 3
+                && arr[0].as_str() == Some("todo")
+                && arr[1].is_number()
+        })
+        .count()
+}
+
 // ============================================================================
 // App Loading
 // ============================================================================
@@ -52,9 +66,10 @@ fn test_todo_app_loads() {
     // Should have the header
     assert!(f.contains("Todos"), "should show Todos header: {f}");
     // Should have the text field
-    assert!(f.contains(r#""isa","TextField""#), "should have input field: {f}");
-    // Should have the initial nextId
-    assert!(f.contains(r#""todo","nextId",1"#), "should have nextId=1: {f}");
+    assert!(
+        f.contains(r#""isa","TextField""#),
+        "should have input field: {f}"
+    );
 }
 
 #[test]
@@ -62,18 +77,8 @@ fn test_todo_app_starts_empty() {
     let engine = load_todo_app();
     let f = engine.current_facts_json();
 
-    // No todo title claims should exist
-    assert!(!f.contains(r#""title","#) || f.contains(r#""largeTitle""#),
-        "should have no todo items initially");
-    // Verify no "done" claims for todos
-    let parsed: Vec<serde_json::Value> = serde_json::from_str(&f).unwrap();
-    let todo_done_claims = parsed.iter().filter(|fact| {
-        let arr = fact.as_array().unwrap();
-        arr.len() >= 4
-            && arr[0].as_str() == Some("todo")
-            && arr[2].as_str() == Some("done")
-    }).count();
-    assert_eq!(todo_done_claims, 0, "should have no todo done claims");
+    // No todo claims should exist
+    assert_eq!(count_todo_claims(&f), 0, "should have no todo claims initially");
 }
 
 // ============================================================================
@@ -85,41 +90,51 @@ fn test_add_single_todo() {
     let mut engine = load_todo_app();
     let f = eval_and_get_facts(&mut engine, r#"addTodo("Buy groceries");"#);
 
-    assert!(f.contains(r#""todo",1,"title","Buy groceries""#), "todo title: {f}");
-    assert!(f.contains(r#""todo",1,"done",false"#), "todo not done: {f}");
-    assert!(f.contains(r#""todo","nextId",2"#), "nextId incremented: {f}");
+    assert!(
+        f.contains(r#""todo",1,"has","title","Buy groceries""#),
+        "todo title: {f}"
+    );
+    assert!(
+        f.contains(r#""todo",1,"is","done",false"#),
+        "todo not done: {f}"
+    );
 }
 
 #[test]
 fn test_add_multiple_todos() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("First");
         addTodo("Second");
         addTodo("Third");
-    "#);
+    "#,
+    );
 
-    assert!(f.contains(r#""todo",1,"title","First""#), "first: {f}");
-    assert!(f.contains(r#""todo",2,"title","Second""#), "second: {f}");
-    assert!(f.contains(r#""todo",3,"title","Third""#), "third: {f}");
-    assert!(f.contains(r#""todo","nextId",4"#), "nextId=4: {f}");
+    assert!(f.contains(r#""todo",1,"has","title","First""#), "first: {f}");
+    assert!(f.contains(r#""todo",2,"has","title","Second""#), "second: {f}");
+    assert!(f.contains(r#""todo",3,"has","title","Third""#), "third: {f}");
 
     // All should be not done
-    assert!(f.contains(r#""todo",1,"done",false"#), "first not done: {f}");
-    assert!(f.contains(r#""todo",2,"done",false"#), "second not done: {f}");
-    assert!(f.contains(r#""todo",3,"done",false"#), "third not done: {f}");
+    assert!(f.contains(r#""todo",1,"is","done",false"#), "first not done: {f}");
+    assert!(f.contains(r#""todo",2,"is","done",false"#), "second not done: {f}");
+    assert!(f.contains(r#""todo",3,"is","done",false"#), "third not done: {f}");
 }
 
 #[test]
 fn test_add_empty_title_ignored() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("");
         addTodo("   ");
-    "#);
+    "#,
+    );
 
-    // nextId should still be 1 — nothing was added
-    assert!(f.contains(r#""todo","nextId",1"#), "nextId unchanged: {f}");
+    // No todo claims should exist — nothing was added
+    assert_eq!(count_todo_claims(&f), 0, "nothing added: {f}");
 }
 
 #[test]
@@ -127,7 +142,10 @@ fn test_add_trims_whitespace() {
     let mut engine = load_todo_app();
     let f = eval_and_get_facts(&mut engine, r#"addTodo("  Clean house  ");"#);
 
-    assert!(f.contains(r#""todo",1,"title","Clean house""#), "trimmed: {f}");
+    assert!(
+        f.contains(r#""todo",1,"has","title","Clean house""#),
+        "trimmed: {f}"
+    );
 }
 
 // ============================================================================
@@ -137,40 +155,52 @@ fn test_add_trims_whitespace() {
 #[test]
 fn test_mark_todo_done() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("Buy milk");
-        toggleTodo(1);
-    "#);
+        toggleTodo(1, false);
+    "#,
+    );
 
-    assert!(f.contains(r#""todo",1,"done",true"#), "should be done: {f}");
-    assert!(f.contains(r#""todo",1,"title","Buy milk""#), "title preserved: {f}");
+    assert!(f.contains(r#""todo",1,"is","done",true"#), "should be done: {f}");
+    assert!(
+        f.contains(r#""todo",1,"has","title","Buy milk""#),
+        "title preserved: {f}"
+    );
 }
 
 #[test]
 fn test_unmark_todo_done() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("Buy milk");
-        toggleTodo(1);
-        toggleTodo(1);
-    "#);
+        toggleTodo(1, false);
+        toggleTodo(1, true);
+    "#,
+    );
 
-    assert!(f.contains(r#""todo",1,"done",false"#), "should be undone: {f}");
+    assert!(f.contains(r#""todo",1,"is","done",false"#), "should be undone: {f}");
 }
 
 #[test]
 fn test_toggle_specific_todo_in_list() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("First");
         addTodo("Second");
         addTodo("Third");
-        toggleTodo(2);
-    "#);
+        toggleTodo(2, false);
+    "#,
+    );
 
-    assert!(f.contains(r#""todo",1,"done",false"#), "first untouched: {f}");
-    assert!(f.contains(r#""todo",2,"done",true"#), "second toggled: {f}");
-    assert!(f.contains(r#""todo",3,"done",false"#), "third untouched: {f}");
+    assert!(f.contains(r#""todo",1,"is","done",false"#), "first untouched: {f}");
+    assert!(f.contains(r#""todo",2,"is","done",true"#), "second toggled: {f}");
+    assert!(f.contains(r#""todo",3,"is","done",false"#), "third untouched: {f}");
 }
 
 // ============================================================================
@@ -180,39 +210,57 @@ fn test_toggle_specific_todo_in_list() {
 #[test]
 fn test_edit_todo_title() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("Buy groceries");
         editTodo(1, "Buy organic groceries");
-    "#);
+    "#,
+    );
 
-    assert!(f.contains(r#""todo",1,"title","Buy organic groceries""#), "edited: {f}");
+    assert!(
+        f.contains(r#""todo",1,"has","title","Buy organic groceries""#),
+        "edited: {f}"
+    );
     assert!(!f.contains(r#""Buy groceries""#), "old title gone: {f}");
 }
 
 #[test]
 fn test_edit_preserves_done_state() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("Buy groceries");
-        toggleTodo(1);
+        toggleTodo(1, false);
         editTodo(1, "Buy organic groceries");
-    "#);
+    "#,
+    );
 
-    assert!(f.contains(r#""todo",1,"done",true"#), "still done: {f}");
-    assert!(f.contains(r#""todo",1,"title","Buy organic groceries""#), "title edited: {f}");
+    assert!(f.contains(r#""todo",1,"is","done",true"#), "still done: {f}");
+    assert!(
+        f.contains(r#""todo",1,"has","title","Buy organic groceries""#),
+        "title edited: {f}"
+    );
 }
 
 #[test]
 fn test_edit_only_affects_target() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("First");
         addTodo("Second");
         editTodo(1, "Modified");
-    "#);
+    "#,
+    );
 
-    assert!(f.contains(r#""todo",1,"title","Modified""#), "first edited: {f}");
-    assert!(f.contains(r#""todo",2,"title","Second""#), "second unchanged: {f}");
+    assert!(f.contains(r#""todo",1,"has","title","Modified""#), "first edited: {f}");
+    assert!(
+        f.contains(r#""todo",2,"has","title","Second""#),
+        "second unchanged: {f}"
+    );
 }
 
 // ============================================================================
@@ -222,48 +270,50 @@ fn test_edit_only_affects_target() {
 #[test]
 fn test_delete_todo() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("Buy milk");
         deleteTodo(1);
-    "#);
+    "#,
+    );
 
-    assert!(!f.contains(r#""todo",1,"title""#), "todo removed: {f}");
-    assert!(!f.contains(r#""todo",1,"done""#), "done claim removed: {f}");
+    assert!(!f.contains(r#""todo",1,"has","title""#), "todo removed: {f}");
+    assert!(!f.contains(r#""todo",1,"is","done""#), "done claim removed: {f}");
 }
 
 #[test]
 fn test_delete_middle_todo() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("First");
         addTodo("Second");
         addTodo("Third");
         deleteTodo(2);
-    "#);
+    "#,
+    );
 
-    assert!(f.contains(r#""todo",1,"title","First""#), "first survives: {f}");
-    assert!(!f.contains(r#""todo",2,"title""#), "second gone: {f}");
-    assert!(f.contains(r#""todo",3,"title","Third""#), "third survives: {f}");
+    assert!(f.contains(r#""todo",1,"has","title","First""#), "first survives: {f}");
+    assert!(!f.contains(r#""todo",2,"has","title""#), "second gone: {f}");
+    assert!(f.contains(r#""todo",3,"has","title","Third""#), "third survives: {f}");
 }
 
 #[test]
 fn test_delete_all_todos() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("First");
         addTodo("Second");
         deleteTodo(1);
         deleteTodo(2);
-    "#);
+    "#,
+    );
 
-    let parsed: Vec<serde_json::Value> = serde_json::from_str(&f).unwrap();
-    let todo_claims = parsed.iter().filter(|fact| {
-        let arr = fact.as_array().unwrap();
-        arr.len() >= 4
-            && arr[0].as_str() == Some("todo")
-            && arr[1].is_number()
-    }).count();
-    assert_eq!(todo_claims, 0, "all todos removed: {f}");
+    assert_eq!(count_todo_claims(&f), 0, "all todos removed: {f}");
 }
 
 // ============================================================================
@@ -273,40 +323,49 @@ fn test_delete_all_todos() {
 #[test]
 fn test_add_complete_delete_sequence() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("Task A");
         addTodo("Task B");
         addTodo("Task C");
-        toggleTodo(1);
-        toggleTodo(3);
+        toggleTodo(1, false);
+        toggleTodo(3, false);
         deleteTodo(2);
         editTodo(3, "Task C (updated)");
-    "#);
+    "#,
+    );
 
     // Task A: done
-    assert!(f.contains(r#""todo",1,"done",true"#), "A done: {f}");
-    assert!(f.contains(r#""todo",1,"title","Task A""#), "A title: {f}");
+    assert!(f.contains(r#""todo",1,"is","done",true"#), "A done: {f}");
+    assert!(f.contains(r#""todo",1,"has","title","Task A""#), "A title: {f}");
 
     // Task B: deleted
-    assert!(!f.contains(r#""todo",2,"title""#), "B gone: {f}");
+    assert!(!f.contains(r#""todo",2,"has","title""#), "B gone: {f}");
 
     // Task C: done + edited
-    assert!(f.contains(r#""todo",3,"done",true"#), "C done: {f}");
-    assert!(f.contains(r#""todo",3,"title","Task C (updated)""#), "C edited: {f}");
+    assert!(f.contains(r#""todo",3,"is","done",true"#), "C done: {f}");
+    assert!(
+        f.contains(r#""todo",3,"has","title","Task C (updated)""#),
+        "C edited: {f}"
+    );
 }
 
 #[test]
 fn test_delete_and_add_new_gets_fresh_id() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("Old");
         deleteTodo(1);
         addTodo("New");
-    "#);
+    "#,
+    );
 
     // The new todo should get id=2, not reuse id=1
-    assert!(!f.contains(r#""todo",1,"title""#), "old deleted: {f}");
-    assert!(f.contains(r#""todo",2,"title","New""#), "new has id 2: {f}");
+    assert!(!f.contains(r#""todo",1,"has","title""#), "old deleted: {f}");
+    assert!(f.contains(r#""todo",2,"has","title","New""#), "new has id 2: {f}");
 }
 
 // ============================================================================
@@ -316,10 +375,13 @@ fn test_delete_and_add_new_gets_fresh_id() {
 #[test]
 fn test_ui_renders_todo_items() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("Buy groceries");
         addTodo("Walk the dog");
-    "#);
+    "#,
+    );
 
     // The when() rule should match and render UI elements for each todo
     // Check that todo text appears in rendered claims
@@ -330,10 +392,13 @@ fn test_ui_renders_todo_items() {
 #[test]
 fn test_ui_shows_check_mark_for_done() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("Buy groceries");
-        toggleTodo(1);
-    "#);
+        toggleTodo(1, false);
+    "#,
+    );
 
     // The done todo should render with a checkmark label
     assert!(f.contains(r#""label","✓""#), "done shows checkmark: {f}");
@@ -342,9 +407,12 @@ fn test_ui_shows_check_mark_for_done() {
 #[test]
 fn test_ui_shows_circle_for_undone() {
     let mut engine = load_todo_app();
-    let f = eval_and_get_facts(&mut engine, r#"
+    let f = eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("Buy groceries");
-    "#);
+    "#,
+    );
 
     // The undone todo should render with a circle label
     assert!(f.contains(r#""label","○""#), "undone shows circle: {f}");
@@ -359,21 +427,24 @@ fn test_ui_updates_after_toggle() {
     assert!(f.contains(r#""label","○""#), "initially circle: {f}");
 
     // Toggle it — should show checkmark
-    let f = eval_and_get_facts(&mut engine, r#"toggleTodo(1);"#);
+    let f = eval_and_get_facts(&mut engine, r#"toggleTodo(1, false);"#);
     assert!(f.contains(r#""label","✓""#), "after toggle shows check: {f}");
 
     // Toggle again — back to circle
-    let f = eval_and_get_facts(&mut engine, r#"toggleTodo(1);"#);
+    let f = eval_and_get_facts(&mut engine, r#"toggleTodo(1, true);"#);
     assert!(f.contains(r#""label","○""#), "after re-toggle shows circle: {f}");
 }
 
 #[test]
 fn test_ui_removes_item_after_delete() {
     let mut engine = load_todo_app();
-    eval_and_get_facts(&mut engine, r#"
+    eval_and_get_facts(
+        &mut engine,
+        r#"
         addTodo("Keep me");
         addTodo("Delete me");
-    "#);
+    "#,
+    );
     let f = eval_and_get_facts(&mut engine, r#"deleteTodo(2);"#);
 
     assert!(f.contains("Keep me"), "kept todo still visible: {f}");
@@ -400,7 +471,10 @@ fn test_toggle_via_button_callback() {
     assert!(!result.starts_with("ERROR"), "fire_event failed: {result}");
 
     let f = engine.current_facts_json();
-    assert!(f.contains(r#""todo",1,"done",true"#), "toggled via callback: {f}");
+    assert!(
+        f.contains(r#""todo",1,"is","done",true"#),
+        "toggled via callback: {f}"
+    );
 }
 
 #[test]
@@ -436,10 +510,16 @@ fn test_text_field_submit_adds_todo() {
 
     // Fire the callback with data, just like the Swift host does
     let result = engine.fire_event_with_data(entity_id, event_name, "Buy groceries");
-    assert!(!result.starts_with("ERROR"), "fire_event_with_data failed: {result}");
+    assert!(
+        !result.starts_with("ERROR"),
+        "fire_event_with_data failed: {result}"
+    );
 
     let f = engine.current_facts_json();
-    assert!(f.contains(r#""todo",1,"title","Buy groceries""#), "todo added via text field: {f}");
+    assert!(
+        f.contains(r#""todo",1,"has","title","Buy groceries""#),
+        "todo added via text field: {f}"
+    );
 }
 
 #[test]
@@ -455,9 +535,9 @@ fn test_text_field_submit_multiple_times() {
     assert!(!result.starts_with("ERROR"), "fire failed: {result}");
 
     let f = engine.current_facts_json();
-    assert!(f.contains(r#""todo",1,"title","First todo""#), "first: {f}");
-    assert!(f.contains(r#""todo",2,"title","Second todo""#), "second: {f}");
-    assert!(f.contains(r#""todo",3,"title","Third todo""#), "third: {f}");
+    assert!(f.contains(r#""todo",1,"has","title","First todo""#), "first: {f}");
+    assert!(f.contains(r#""todo",2,"has","title","Second todo""#), "second: {f}");
+    assert!(f.contains(r#""todo",3,"has","title","Third todo""#), "third: {f}");
 }
 
 #[test]
@@ -471,7 +551,8 @@ fn test_text_field_submit_empty_ignored() {
     engine.fire_event_with_data(entity_id, event_name, "   ");
 
     let f = engine.current_facts_json();
-    assert!(f.contains(r#""todo","nextId",1"#), "nothing added: {f}");
+    // No todo claims should exist — empty titles are ignored
+    assert_eq!(count_todo_claims(&f), 0, "nothing added: {f}");
 }
 
 #[test]
@@ -485,8 +566,11 @@ fn test_full_ui_flow_add_toggle_delete_via_callbacks() {
     engine.fire_event_with_data(eid, ename, "Walk the dog");
 
     let f = engine.current_facts_json();
-    assert!(f.contains(r#""todo",1,"title","Walk the dog""#), "added: {f}");
-    assert!(f.contains(r#""todo",1,"done",false"#), "not done: {f}");
+    assert!(
+        f.contains(r#""todo",1,"has","title","Walk the dog""#),
+        "added: {f}"
+    );
+    assert!(f.contains(r#""todo",1,"is","done",false"#), "not done: {f}");
 
     // Toggle via button callback
     let toggle_cb = find_callback(&f, "toggle").expect("toggle callback");
@@ -494,7 +578,7 @@ fn test_full_ui_flow_add_toggle_delete_via_callbacks() {
     assert!(!result.starts_with("ERROR"), "toggle failed: {result}");
 
     let f = engine.current_facts_json();
-    assert!(f.contains(r#""todo",1,"done",true"#), "toggled done: {f}");
+    assert!(f.contains(r#""todo",1,"is","done",true"#), "toggled done: {f}");
 
     // Delete via button callback
     let delete_cb = find_callback(&f, "delete").expect("delete callback");

@@ -1,55 +1,27 @@
 // Puddy — reactive chat app built entirely on Jam's claim system.
-//
-// All state lives in hold() facts. when() rules derive the UI from facts.
-// No imperative object references in the render tree.
 
-import { $, when, hold, render, claim, h } from "./jam";
+import { $, when, hold, claim, render, h } from "./jam";
 import {
   VStack, HStack, Text, Button, ScrollView, TextField,
   NavigationSplitView, Divider, Circle, ProgressView,
 } from "./components";
 
-// ============================================================================
-// State Schema (all facts managed via hold)
-//
-// hold("connection", [
-//   ["connection", "status", "disconnected" | "connected" | "checking"],
-//   ["connection", "hostname", "localhost"],
-// ])
-//
-// hold("sessions", [
-//   ["session", sessionId, "agent", agentName],
-//   ["session", sessionId, "status", "starting" | "active" | "ended" | "failed"],
-//   ["session", sessionId, "statusDetail", "..."],
-//   ["session", sessionId, "streamingText", "..."],
-// ])
-//
-// hold("messages-{sessionId}", [
-//   ["message", sessionId, msgId, sender, kindType, content],
-//   // sender: "user" | "assistant" | "tool"
-//   // kindType: "text" | "toolUse" | "toolResult"
-//   // content: the text, tool name, or status string
-// ])
-//
-// hold("ui", [["ui", "selectedSession", ""]])
-// ============================================================================
-
 // --- Initial state ---
 
-hold("connection", [
-  ["connection", "status", "disconnected"],
-  ["connection", "hostname", "localhost"],
-]);
+hold("connection", () => {
+  claim("connection", "status", "disconnected");
+  claim("connection", "hostname", "localhost");
+});
 
-hold("sessions", []);
+hold("sessions", () => {
+  // initially empty
+});
 
-hold("ui", [
-  ["ui", "selectedSession", ""],
-]);
+hold("ui", () => {
+  claim("ui", "selectedSession", "");
+});
 
 // --- Helper: add a message to a session ---
-// Each message is a separate hold key so messages accumulate independently.
-// hold() is used (not claim()) because callbacks are imperative, not reactive.
 let _msgCounter = 0;
 function addMessage(
   sessionId: string,
@@ -58,9 +30,9 @@ function addMessage(
   content: string
 ) {
   const msgId = `msg-${_msgCounter++}`;
-  hold(`msg-${sessionId}-${msgId}`, [
-    ["message", sessionId, msgId, sender, kindType, content],
-  ]);
+  hold(`msg-${sessionId}-${msgId}`, () => {
+    claim("message", sessionId, msgId, sender, kindType, content);
+  });
 }
 
 // --- Render ---
@@ -93,7 +65,9 @@ render(
         {when(["session", $.sid, "agent", $.agent], ({ sid, agent }) =>
           when(["session", $.sid, "status", $.status], ({ status }) =>
             <Button key={`row-${sid}`} label=""
-              onPress={() => hold("ui", [["ui", "selectedSession", sid]])}
+              onPress={() => hold("ui", () => {
+                claim("ui", "selectedSession", sid);
+              })}
             >
               <HStack spacing={8}>
                 <Circle
@@ -115,11 +89,13 @@ render(
         <Button key="new-session" label="+ New Session"
           onPress={() => {
             const id = "s-" + Date.now();
-            hold("sessions", [
-              ["session", id, "agent", "claude"],
-              ["session", id, "status", "starting"],
-            ]);
-            hold("ui", [["ui", "selectedSession", id]]);
+            hold("sessions", () => {
+              claim("session", id, "agent", "claude");
+              claim("session", id, "status", "starting");
+            });
+            hold("ui", () => {
+              claim("ui", "selectedSession", id);
+            });
           }}
         />
       </VStack>

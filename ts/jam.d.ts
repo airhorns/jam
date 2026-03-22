@@ -206,9 +206,14 @@ export declare function claim(...terms: Term[]): void;
 export declare function wish(...terms: Term[]): void;
 
 // hold() — persistent mutable state (like Folk's Hold!)
-// Each call with the same key replaces the previous state.
-// Used inside event callbacks (onPress, etc.) to update state.
-export declare function hold(key: string, stmts: Term[][]): void;
+// Creates a scope where claim() calls accumulate facts.
+// When called again with the same key, old facts are retracted and new ones asserted.
+//
+// Usage:
+//   hold(() => { claim("counter", "count", 0); });              // auto-key from context
+//   hold("counter", () => { claim("counter", "count", 0); });   // explicit key
+export declare function hold(fn: () => void): void;
+export declare function hold(key: string, fn: () => void): void;
 
 // $this — current entity identity (like Folk's $this)
 // Scoped by child() calls. Defaults to "root".

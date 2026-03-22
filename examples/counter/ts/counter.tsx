@@ -1,4 +1,4 @@
-import { $, when, hold, render } from "./jam";
+import { $, when, hold, claim, render } from "./jam";
 import { VStack, HStack, Text, Button } from "./components";
 
 function CounterButton({
@@ -11,7 +11,9 @@ function CounterButton({
   return <Button label={label} onPress={onPress} />;
 }
 
-hold("counter", [["counter", "count", 0]]);
+hold("counter", () => {
+  claim("counter", "count", 0);
+});
 
 render(
   <VStack key="app">
@@ -23,14 +25,18 @@ render(
             key="dec"
             label="-"
             onPress={() => {
-              hold("counter", [["counter", "count", value - 1]]);
+              hold("counter", () => {
+                claim("counter", "count", value - 1);
+              });
             }}
           />
           <CounterButton
             key="inc"
             label="+"
             onPress={() => {
-              hold("counter", [["counter", "count", value + 1]]);
+              hold("counter", () => {
+                claim("counter", "count", value + 1);
+              });
             }}
           />
         </HStack>

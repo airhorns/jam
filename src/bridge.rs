@@ -814,7 +814,7 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("mystate", [["greeting", "is", "hello"]]);
+            hold("mystate", () => { claim("greeting", "is", "hello"); });
             render(<Text key="msg">hi</Text>);
         "#;
         let result = engine.load_program("test.tsx", tsx);
@@ -853,10 +853,10 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("state", [["clicked", false]]);
+            hold("state", () => { claim("clicked", false); });
             render(
                 <Button key="btn" label="Click" onPress={() => {
-                    hold("state", [["clicked", true]]);
+                    hold("state", () => { claim("clicked", true); });
                 }} />
             );
         "#;
@@ -889,7 +889,7 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("counter", [["counter", "count", 0]]);
+            hold("counter", () => { claim("counter", "count", 0); });
 
             render(
                 <VStack key="app">
@@ -898,10 +898,10 @@ mod tests {
                             <Text key="display" font="largeTitle">{"Count: " + value}</Text>
                             <HStack key="buttons">
                                 <Button key="dec" label="-" onPress={() => {
-                                    hold("counter", [["counter", "count", value - 1]]);
+                                    hold("counter", () => { claim("counter", "count", value - 1); });
                                 }} />
                                 <Button key="inc" label="+" onPress={() => {
-                                    hold("counter", [["counter", "count", value + 1]]);
+                                    hold("counter", () => { claim("counter", "count", value + 1); });
                                 }} />
                             </HStack>
                         </>
@@ -951,7 +951,7 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("counter", [["counter", "count", 0]]);
+            hold("counter", () => { claim("counter", "count", 0); });
 
             render(
                 <VStack key="app">
@@ -960,10 +960,10 @@ mod tests {
                             <Text key="display" font="largeTitle">{"Count: " + value}</Text>
                             <HStack key="buttons">
                                 <Button key="dec" label="-" onPress={() => {
-                                    hold("counter", [["counter", "count", value - 1]]);
+                                    hold("counter", () => { claim("counter", "count", value - 1); });
                                 }} />
                                 <Button key="inc" label="+" onPress={() => {
-                                    hold("counter", [["counter", "count", value + 1]]);
+                                    hold("counter", () => { claim("counter", "count", value + 1); });
                                 }} />
                             </HStack>
                         </>
@@ -1003,7 +1003,7 @@ mod tests {
 
         // This program uses imperative style (no JSX) to test the closure
         let ts = r#"
-            hold("s", [["val", 0]]);
+            hold("s", () => { claim("val", 0); });
 
             when(["val", $.v], ({ v }) => {
                 // Register a callback that closes over v
@@ -1033,12 +1033,12 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("s", [["val", 0]]);
+            hold("s", () => { claim("val", 0); });
             render(
                 <VStack key="x">
                     {when(["val", $.v], ({ v }) =>
                         <Button key="btn" label="go" onPress={() => {
-                            hold("s", [["val", v + 1]]);
+                            hold("s", () => { claim("val", v + 1); });
                         }} />
                     )}
                 </VStack>
@@ -1070,14 +1070,14 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("s", [["a", "b", 0]]);
+            hold("s", () => { claim("a", "b", 0); });
             render(
                 <VStack key="x">
                     {when(["a", "b", $.v], ({ v }) =>
                         <>
                             <Text key="d">{"v=" + v + " type=" + typeof v}</Text>
                             <Button key="btn" label="go" onPress={() => {
-                                hold("s", [["a", "b", v + 1]]);
+                                hold("s", () => { claim("a", "b", v + 1); });
                             }} />
                         </>
                     )}
@@ -1109,7 +1109,7 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("v", [["v", 0]]);
+            hold("v", () => { claim("v", 0); });
 
             render(
                 <VStack key="app">
@@ -1117,10 +1117,10 @@ mod tests {
                         <>
                             <Text key="d">{"n=" + n}</Text>
                             <Button key="inc" label="+" onPress={() => {
-                                hold("v", [["v", n + 1]]);
+                                hold("v", () => { claim("v", n + 1); });
                             }} />
                             <Button key="dec" label="-" onPress={() => {
-                                hold("v", [["v", n - 1]]);
+                                hold("v", () => { claim("v", n - 1); });
                             }} />
                         </>
                     )}
@@ -1169,7 +1169,7 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("val", [["val", 0]]);
+            hold("val", () => { claim("val", 0); });
 
             render(
                 <VStack key="app">
@@ -1177,7 +1177,7 @@ mod tests {
                         <>
                             <Text key="display">{"v=" + v}</Text>
                             <Button key="inc" label="+" onPress={() => {
-                                hold("val", [["val", v + 1]]);
+                                hold("val", () => { claim("val", v + 1); });
                             }} />
                         </>
                     )}
@@ -1254,15 +1254,155 @@ mod tests {
     }
 
     #[test]
+    fn test_hold_with_multiple_claims() {
+        // hold() callback can make multiple claims, all managed as a unit
+        let mut engine = JamEngine::new();
+        let ts = r#"
+            hold("person", () => {
+                claim("name", "Alice");
+                claim("age", 30);
+                claim("role", "engineer");
+            });
+        "#;
+        engine.load_program("test", ts);
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""name","Alice""#), "name: {f}");
+        assert!(f.contains(r#""age",30"#), "age: {f}");
+        assert!(f.contains(r#""role","engineer""#), "role: {f}");
+    }
+
+    #[test]
+    fn test_hold_replaces_all_previous_claims() {
+        // When hold() is called again with same key, ALL old facts are retracted
+        let mut engine = JamEngine::new();
+        let ts = r#"
+            hold("data", () => {
+                claim("a", 1);
+                claim("b", 2);
+                claim("c", 3);
+            });
+        "#;
+        engine.load_program("test", ts);
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""a",1"#), "initial a: {f}");
+        assert!(f.contains(r#""b",2"#), "initial b: {f}");
+        assert!(f.contains(r#""c",3"#), "initial c: {f}");
+
+        // Replace with different claims
+        engine.eval_js(r#"
+            hold("data", () => {
+                claim("x", 10);
+                claim("y", 20);
+            });
+        "#).unwrap();
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""x",10"#), "new x: {f}");
+        assert!(f.contains(r#""y",20"#), "new y: {f}");
+        assert!(!f.contains(r#""a",1"#), "old a retracted: {f}");
+        assert!(!f.contains(r#""b",2"#), "old b retracted: {f}");
+        assert!(!f.contains(r#""c",3"#), "old c retracted: {f}");
+    }
+
+    #[test]
+    fn test_hold_with_conditional_claims() {
+        // hold() can use if/else logic inside the callback
+        let mut engine = JamEngine::new();
+        let ts = r#"
+            let showDetails = false;
+            hold("profile", () => {
+                claim("user", "name", "Bob");
+                if (showDetails) {
+                    claim("user", "email", "bob@example.com");
+                    claim("user", "phone", "555-1234");
+                }
+            });
+        "#;
+        engine.load_program("test", ts);
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""name","Bob""#), "name: {f}");
+        assert!(!f.contains("email"), "no email initially: {f}");
+
+        // Toggle showDetails and re-hold
+        engine.eval_js(r#"
+            showDetails = true;
+            hold("profile", () => {
+                claim("user", "name", "Bob");
+                if (showDetails) {
+                    claim("user", "email", "bob@example.com");
+                    claim("user", "phone", "555-1234");
+                }
+            });
+        "#).unwrap();
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""name","Bob""#), "name still: {f}");
+        assert!(f.contains("bob@example.com"), "email now shown: {f}");
+        assert!(f.contains("555-1234"), "phone now shown: {f}");
+    }
+
+    #[test]
+    fn test_hold_with_loop() {
+        // hold() can use loops to generate multiple claims
+        let mut engine = JamEngine::new();
+        let ts = r#"
+            hold("numbers", () => {
+                for (let i = 1; i <= 3; i++) {
+                    claim("number", i);
+                }
+            });
+        "#;
+        engine.load_program("test", ts);
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""number",1"#), "1: {f}");
+        assert!(f.contains(r#""number",2"#), "2: {f}");
+        assert!(f.contains(r#""number",3"#), "3: {f}");
+    }
+
+    #[test]
+    fn test_hold_empty_retracts_all() {
+        // hold(() => {}) with no claims retracts everything under that key
+        let mut engine = JamEngine::new();
+        let ts = r#"
+            hold("data", () => {
+                claim("exists", true);
+            });
+        "#;
+        engine.load_program("test", ts);
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""exists",true"#), "exists initially: {f}");
+
+        engine.eval_js(r#"
+            hold("data", () => {}); // empty = retract all
+        "#).unwrap();
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(!f.contains(r#""exists""#), "retracted: {f}");
+    }
+
+    #[test]
     fn test_hold_inside_callback_works() {
         // hold() is the correct way to mutate state from callbacks
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("s", [["value", "before"]]);
+            hold("s", () => { claim("value", "before"); });
             render(
                 <Button key="btn" label="Update" onPress={() => {
-                    hold("s", [["value", "after"]]);
+                    hold("s", () => { claim("value", "after"); });
                 }} />
             );
         "#;
@@ -1285,11 +1425,11 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("items", []);
+            hold("items", () => {});
             render(
                 <VStack key="app">
                     <Button key="add" label="Add" onPress={() => {
-                        hold("items", [["item", "first"]]);
+                        hold("items", () => { claim("item", "first"); });
                     }} />
                     {when(["item", $.name], ({ name }) =>
                         <Text key={"item-" + name}>{name}</Text>
@@ -1317,12 +1457,12 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("msg", []);
+            hold("msg", () => {});
             render(
                 <VStack key="app">
                     <TextField key="input" placeholder="Type..."
                         onSubmit={(text) => {
-                            hold("msg", [["message", text]]);
+                            hold("msg", () => { claim("message", text); });
                         }}
                     />
                     {when(["message", $.text], ({ text }) =>
@@ -1356,7 +1496,7 @@ mod tests {
                 <VStack key="app">
                     <Button key="add" label="Add" onPress={() => {
                         counter++;
-                        hold("item-" + counter, [["item", "item-" + counter]]);
+                        hold("item-" + counter, () => { claim("item", "item-" + counter); });
                     }} />
                     {when(["item", $.name], ({ name }) =>
                         <Text key={"t-" + name}>{name}</Text>
@@ -1385,11 +1525,11 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("s", [["submitted", ""]]);
+            hold("s", () => { claim("submitted", ""); });
             render(
                 <VStack key="app">
                     <TextField key="input" placeholder="Type..." onSubmit={(text) => {
-                        hold("s", [["submitted", text]]);
+                        hold("s", () => { claim("submitted", text); });
                     }} />
                 </VStack>
             );
@@ -1415,10 +1555,10 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("s", [["pressed", false]]);
+            hold("s", () => { claim("pressed", false); });
             render(
                 <Button key="btn" label="Go" onPress={() => {
-                    hold("s", [["pressed", true]]);
+                    hold("s", () => { claim("pressed", true); });
                 }} />
             );
         "#;
@@ -1442,13 +1582,13 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("s", [["toggled", false]]);
+            hold("s", () => { claim("toggled", false); });
             render(
                 <VStack key="app">
                     <Button key="btn" label="Toggle"
-                        onPress={() => { hold("s", [["toggled", true]]); }}
-                        onLongPress={() => { hold("s", [["toggled", "long"]]); }}
-                        onDoubleTap={() => { hold("s", [["toggled", "double"]]); }}
+                        onPress={() => { hold("s", () => { claim("toggled", true); }); }}
+                        onLongPress={() => { hold("s", () => { claim("toggled", "long"); }); }}
+                        onDoubleTap={() => { hold("s", () => { claim("toggled", "double"); }); }}
                     />
                 </VStack>
             );
@@ -1486,12 +1626,12 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("s", [["state", "idle"]]);
+            hold("s", () => { claim("state", "idle"); });
             render(
                 <VStack key="app">
                     <Button key="btn" label="X"
-                        activate={() => { hold("s", [["state", "active"]]); }}
-                        dismiss={() => { hold("s", [["state", "dismissed"]]); }}
+                        activate={() => { hold("s", () => { claim("state", "active"); }); }}
+                        dismiss={() => { hold("s", () => { claim("state", "dismissed"); }); }}
                     />
                 </VStack>
             );
@@ -1520,14 +1660,14 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("s", [["a", 0], ["b", 0]]);
+            hold("s", () => { claim("a", 0); claim("b", 0); });
             render(
                 <HStack key="row">
                     <Button key="inc-a" label="A+" onPress={() => {
-                        hold("s", [["a", 1], ["b", 0]]);
+                        hold("s", () => { claim("a", 1); claim("b", 0); });
                     }} />
                     <Button key="inc-b" label="B+" onPress={() => {
-                        hold("s", [["a", 0], ["b", 1]]);
+                        hold("s", () => { claim("a", 0); claim("b", 1); });
                     }} />
                 </HStack>
             );
@@ -1559,16 +1699,16 @@ mod tests {
                 return <Button label={props.label} onPress={props.onPress} />;
             }
 
-            hold("s", [["count", 0]]);
+            hold("s", () => { claim("count", 0); });
             render(
                 <VStack key="app">
                     {when(["count", $.n], ({ n }) =>
                         <>
                             <Text key="display">{"n=" + n}</Text>
                             <ActionButton key="inc" label="+"
-                                onPress={() => { hold("s", [["count", n + 1]]); }} />
+                                onPress={() => { hold("s", () => { claim("count", n + 1); }); }} />
                             <ActionButton key="dec" label="-"
-                                onPress={() => { hold("s", [["count", n - 1]]); }} />
+                                onPress={() => { hold("s", () => { claim("count", n - 1); }); }} />
                         </>
                     )}
                 </VStack>
@@ -1607,12 +1747,12 @@ mod tests {
         let mut engine = JamEngine::new();
 
         let tsx = r#"
-            hold("pos", [["x", 0]]);
-            hold("vel", [["dx", 1]]);
+            hold("pos", () => { claim("x", 0); });
+            hold("vel", () => { claim("dx", 1); });
             render(
                 <Button key="step" label="Step" onPress={() => {
-                    hold("pos", [["x", 99]]);
-                    hold("vel", [["dx", -1]]);
+                    hold("pos", () => { claim("x", 99); });
+                    hold("vel", () => { claim("dx", -1); });
                 }} />
             );
         "#;

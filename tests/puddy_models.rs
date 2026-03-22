@@ -723,10 +723,10 @@ fn test_puddy_session_appears_in_sidebar() {
 
     // Inject a session via hold
     engine.eval_js(r#"
-        hold("sessions", [
-            ["session", "test-session", "agent", "claude"],
-            ["session", "test-session", "status", "active"],
-        ]);
+        hold("sessions", () => {
+            claim("session", "test-session", "agent", "claude");
+            claim("session", "test-session", "status", "active");
+        });
     "#).unwrap();
     let _ = engine.step_json();
 
@@ -744,11 +744,11 @@ fn test_puddy_select_session_shows_detail() {
 
     // Inject a session and select it
     engine.eval_js(r#"
-        hold("sessions", [
-            ["session", "test-session", "agent", "claude"],
-            ["session", "test-session", "status", "active"],
-        ]);
-        hold("ui", [["ui", "selectedSession", "test-session"]]);
+        hold("sessions", () => {
+            claim("session", "test-session", "agent", "claude");
+            claim("session", "test-session", "status", "active");
+        });
+        hold("ui", () => { claim("ui", "selectedSession", "test-session"); });
     "#).unwrap();
     let _ = engine.step_json();
 
@@ -772,10 +772,10 @@ fn test_puddy_connection_status_updates_reactively() {
 
     // Update connection status via hold
     engine.eval_js(r#"
-        hold("connection", [
-            ["connection", "status", "connected"],
-            ["connection", "hostname", "myserver.local"],
-        ]);
+        hold("connection", () => {
+            claim("connection", "status", "connected");
+            claim("connection", "hostname", "myserver.local");
+        });
     "#).unwrap();
     let _ = engine.step_json();
 
@@ -835,10 +835,10 @@ fn test_nested_when_in_jsx() {
     // Minimal repro: nested when() in JSX where inner when has no shared vars
     let mut engine = JamEngine::new();
     let tsx = r#"
-        hold("state", [
-            ["color", "red"],
-            ["size", 10],
-        ]);
+        hold("state", () => {
+            claim("color", "red");
+            claim("size", 10);
+        });
 
         render(
             <VStack key="app">
@@ -879,11 +879,11 @@ fn test_nested_when_with_shared_vars_in_jsx() {
     // Test nested when with shared variable binding across levels
     let mut engine = JamEngine::new();
     let tsx = r#"
-        hold("s", [
-            ["selected", "item-1"],
-            ["detail", "item-1", "description", "First item"],
-            ["detail", "item-2", "description", "Second item"],
-        ]);
+        hold("s", () => {
+            claim("selected", "item-1");
+            claim("detail", "item-1", "description", "First item");
+            claim("detail", "item-2", "description", "Second item");
+        });
 
         render(
             <VStack key="app">
@@ -916,10 +916,10 @@ fn test_join_3_and_6_term_patterns() {
     // Test the exact pattern combination used in puddy messages
     let mut engine = JamEngine::new();
     let tsx = r#"
-        hold("s", [
-            ["ui", "selected", "s1"],
-            ["msg", "s1", "m1", "user", "text", "Hello"],
-        ]);
+        hold("s", () => {
+            claim("ui", "selected", "s1");
+            claim("msg", "s1", "m1", "user", "text", "Hello");
+        });
 
         render(
             <VStack key="app">
@@ -949,7 +949,7 @@ fn test_join_with_late_fact_insertion() {
     // Test that asserting facts AFTER load_program still triggers join rules
     let mut engine = JamEngine::new();
     let tsx = r#"
-        hold("s", [["ui", "selected", "s1"]]);
+        hold("s", () => { claim("ui", "selected", "s1"); });
 
         render(
             <VStack key="app">
@@ -988,7 +988,7 @@ fn test_join_6_term_late_fact() {
     // Same as late fact test but with 6-term message pattern (matching puddy)
     let mut engine = JamEngine::new();
     let tsx = r#"
-        hold("s", [["ui", "selected", "s1"]]);
+        hold("s", () => { claim("ui", "selected", "s1"); });
 
         render(
             <VStack key="app">
@@ -1024,11 +1024,11 @@ fn test_puddy_simplified_message_render() {
     // Minimal version of puddy's detail view with messages
     let mut engine = JamEngine::new();
     let tsx = r#"
-        hold("sessions", [
-            ["session", "s1", "agent", "claude"],
-            ["session", "s1", "status", "active"],
-        ]);
-        hold("ui", [["ui", "selectedSession", "s1"]]);
+        hold("sessions", () => {
+            claim("session", "s1", "agent", "claude");
+            claim("session", "s1", "status", "active");
+        });
+        hold("ui", () => { claim("ui", "selectedSession", "s1"); });
 
         render(
             <VStack key="app">
@@ -1065,18 +1065,18 @@ fn test_puddy_messages_render_in_detail() {
 
     // Create a session and select it
     engine.eval_js(r#"
-        hold("sessions", [
-            ["session", "s1", "agent", "claude"],
-            ["session", "s1", "status", "active"],
-        ]);
-        hold("ui", [["ui", "selectedSession", "s1"]]);
+        hold("sessions", () => {
+            claim("session", "s1", "agent", "claude");
+            claim("session", "s1", "status", "active");
+        });
+        hold("ui", () => { claim("ui", "selectedSession", "s1"); });
     "#).unwrap();
     let _ = engine.step_json();
 
     // Add messages via hold (the same way the app's addMessage does it)
     engine.eval_js(r#"
-        hold("msg-s1-m1", [["message", "s1", "m1", "user", "text", "Hello agent!"]]);
-        hold("msg-s1-m2", [["message", "s1", "m2", "assistant", "text", "Hi! How can I help?"]]);
+        hold("msg-s1-m1", () => { claim("message", "s1", "m1", "user", "text", "Hello agent!"); });
+        hold("msg-s1-m2", () => { claim("message", "s1", "m2", "assistant", "text", "Hi! How can I help?"); });
     "#).unwrap();
     let _ = engine.step_json();
 
@@ -1096,17 +1096,17 @@ fn test_puddy_tool_messages_render() {
     let mut engine = load_puddy_app();
 
     engine.eval_js(r#"
-        hold("sessions", [
-            ["session", "s1", "agent", "claude"],
-            ["session", "s1", "status", "active"],
-        ]);
-        hold("ui", [["ui", "selectedSession", "s1"]]);
+        hold("sessions", () => {
+            claim("session", "s1", "agent", "claude");
+            claim("session", "s1", "status", "active");
+        });
+        hold("ui", () => { claim("ui", "selectedSession", "s1"); });
     "#).unwrap();
     let _ = engine.step_json();
 
     engine.eval_js(r#"
-        hold("msg-s1-m1", [["message", "s1", "m1", "assistant", "toolUse", "Read file"]]);
-        hold("msg-s1-m2", [["message", "s1", "m2", "tool", "toolResult", "completed"]]);
+        hold("msg-s1-m1", () => { claim("message", "s1", "m1", "assistant", "toolUse", "Read file"); });
+        hold("msg-s1-m2", () => { claim("message", "s1", "m2", "tool", "toolResult", "completed"); });
     "#).unwrap();
     let _ = engine.step_json();
 
@@ -1121,12 +1121,12 @@ fn test_puddy_streaming_text_shows() {
     let mut engine = load_puddy_app();
 
     engine.eval_js(r#"
-        hold("sessions", [
-            ["session", "s1", "agent", "claude"],
-            ["session", "s1", "status", "active"],
-            ["session", "s1", "streamingText", "I am thinking..."],
-        ]);
-        hold("ui", [["ui", "selectedSession", "s1"]]);
+        hold("sessions", () => {
+            claim("session", "s1", "agent", "claude");
+            claim("session", "s1", "status", "active");
+            claim("session", "s1", "streamingText", "I am thinking...");
+        });
+        hold("ui", () => { claim("ui", "selectedSession", "s1"); });
     "#).unwrap();
     let _ = engine.step_json();
 
@@ -1140,11 +1140,11 @@ fn test_puddy_text_input_adds_message() {
 
     // Create and select a session
     engine.eval_js(r#"
-        hold("sessions", [
-            ["session", "s1", "agent", "claude"],
-            ["session", "s1", "status", "active"],
-        ]);
-        hold("ui", [["ui", "selectedSession", "s1"]]);
+        hold("sessions", () => {
+            claim("session", "s1", "agent", "claude");
+            claim("session", "s1", "status", "active");
+        });
+        hold("ui", () => { claim("ui", "selectedSession", "s1"); });
     "#).unwrap();
     let _ = engine.step_json();
 
@@ -1197,10 +1197,10 @@ fn test_e2e_full_session_lifecycle() {
 
     // 2. Simulate connection
     engine.eval_js(r#"
-        hold("connection", [
-            ["connection", "status", "connected"],
-            ["connection", "hostname", "agent.local"],
-        ]);
+        hold("connection", () => {
+            claim("connection", "status", "connected");
+            claim("connection", "hostname", "agent.local");
+        });
     "#).unwrap();
     let _ = engine.step_json();
     let f = engine.current_facts_json();
@@ -1209,11 +1209,11 @@ fn test_e2e_full_session_lifecycle() {
 
     // 3. Create a session (simulating what the button callback does)
     engine.eval_js(r#"
-        hold("session-s1", [
-            ["session", "s1", "agent", "claude"],
-            ["session", "s1", "status", "starting"],
-        ]);
-        hold("ui", [["ui", "selectedSession", "s1"]]);
+        hold("session-s1", () => {
+            claim("session", "s1", "agent", "claude");
+            claim("session", "s1", "status", "starting");
+        });
+        hold("ui", () => { claim("ui", "selectedSession", "s1"); });
     "#).unwrap();
     let _ = engine.step_json();
     let f = engine.current_facts_json();
@@ -1223,11 +1223,11 @@ fn test_e2e_full_session_lifecycle() {
 
     // 4. Session becomes active with streaming text
     engine.eval_js(r#"
-        hold("session-s1", [
-            ["session", "s1", "agent", "claude"],
-            ["session", "s1", "status", "active"],
-            ["session", "s1", "streamingText", "Let me help you with that..."],
-        ]);
+        hold("session-s1", () => {
+            claim("session", "s1", "agent", "claude");
+            claim("session", "s1", "status", "active");
+            claim("session", "s1", "streamingText", "Let me help you with that...");
+        });
     "#).unwrap();
     let _ = engine.step_json();
     let f = engine.current_facts_json();
@@ -1235,10 +1235,10 @@ fn test_e2e_full_session_lifecycle() {
 
     // 5. Messages arrive
     engine.eval_js(r#"
-        hold("session-s1-msgs", [
-            ["message", "s1", "m1", "user", "text", "Hello Claude!"],
-            ["message", "s1", "m2", "assistant", "text", "Hi! How can I help?"],
-        ]);
+        hold("session-s1-msgs", () => {
+            claim("message", "s1", "m1", "user", "text", "Hello Claude!");
+            claim("message", "s1", "m2", "assistant", "text", "Hi! How can I help?");
+        });
     "#).unwrap();
     let _ = engine.step_json();
     let f = engine.current_facts_json();
@@ -1249,12 +1249,12 @@ fn test_e2e_full_session_lifecycle() {
 
     // 6. Tool call
     engine.eval_js(r#"
-        hold("session-s1-msgs", [
-            ["message", "s1", "m1", "user", "text", "Hello Claude!"],
-            ["message", "s1", "m2", "assistant", "text", "Hi! How can I help?"],
-            ["message", "s1", "m3", "assistant", "toolUse", "Read file"],
-            ["message", "s1", "m4", "tool", "toolResult", "completed"],
-        ]);
+        hold("session-s1-msgs", () => {
+            claim("message", "s1", "m1", "user", "text", "Hello Claude!");
+            claim("message", "s1", "m2", "assistant", "text", "Hi! How can I help?");
+            claim("message", "s1", "m3", "assistant", "toolUse", "Read file");
+            claim("message", "s1", "m4", "tool", "toolResult", "completed");
+        });
     "#).unwrap();
     let _ = engine.step_json();
     let f = engine.current_facts_json();
@@ -1263,11 +1263,11 @@ fn test_e2e_full_session_lifecycle() {
 
     // 7. Session ends
     engine.eval_js(r#"
-        hold("session-s1", [
-            ["session", "s1", "agent", "claude"],
-            ["session", "s1", "status", "ended"],
-            ["session", "s1", "statusDetail", "end_turn"],
-        ]);
+        hold("session-s1", () => {
+            claim("session", "s1", "agent", "claude");
+            claim("session", "s1", "status", "ended");
+            claim("session", "s1", "statusDetail", "end_turn");
+        });
     "#).unwrap();
     let _ = engine.step_json();
     let f = engine.current_facts_json();
@@ -1284,14 +1284,14 @@ fn test_e2e_multiple_sessions() {
 
     // Create two sessions
     engine.eval_js(r#"
-        hold("session-s1", [
-            ["session", "s1", "agent", "claude"],
-            ["session", "s1", "status", "active"],
-        ]);
-        hold("session-s2", [
-            ["session", "s2", "agent", "claude"],
-            ["session", "s2", "status", "starting"],
-        ]);
+        hold("session-s1", () => {
+            claim("session", "s1", "agent", "claude");
+            claim("session", "s1", "status", "active");
+        });
+        hold("session-s2", () => {
+            claim("session", "s2", "agent", "claude");
+            claim("session", "s2", "status", "starting");
+        });
     "#).unwrap();
     let _ = engine.step_json();
 
@@ -1302,7 +1302,7 @@ fn test_e2e_multiple_sessions() {
 
     // Select session 2
     engine.eval_js(r#"
-        hold("ui", [["ui", "selectedSession", "s2"]]);
+        hold("ui", () => { claim("ui", "selectedSession", "s2"); });
     "#).unwrap();
     let _ = engine.step_json();
 
@@ -1316,11 +1316,11 @@ fn test_e2e_text_input_sends_message() {
 
     // Set up session
     engine.eval_js(r#"
-        hold("session-s1", [
-            ["session", "s1", "agent", "claude"],
-            ["session", "s1", "status", "active"],
-        ]);
-        hold("ui", [["ui", "selectedSession", "s1"]]);
+        hold("session-s1", () => {
+            claim("session", "s1", "agent", "claude");
+            claim("session", "s1", "status", "active");
+        });
+        hold("ui", () => { claim("ui", "selectedSession", "s1"); });
     "#).unwrap();
     let _ = engine.step_json();
 
