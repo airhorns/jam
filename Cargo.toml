@@ -18,6 +18,7 @@ oxc = { version = "0.121", features = ["transformer", "semantic", "codegen"] }
 rquickjs = { version = "0.11", features = ["bindgen", "classes", "properties", "parallel", "futures"] }
 swift-bridge = "0.1"
 tokio = { version = "1", features = ["rt", "macros", "time"] }
+futures = "0.3"
 
 # LLRT modules for fetch(), timers, console in QuickJS
 llrt_modules = { git = "https://github.com/awslabs/llrt.git", tag = "v0.8.1-beta", default-features = false, features = ["fetch", "timers", "console", "path", "tls-ring"] }

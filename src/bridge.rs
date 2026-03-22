@@ -1406,4 +1406,27 @@ mod tests {
         assert!(f.contains(r#""fetch_type","function""#), "fetch should be a function: {f}");
         assert!(f.contains(r#""fetch_exists",true"#), "fetch should exist: {f}");
     }
+
+    #[test]
+    fn test_fetch_returns_promise() {
+        // fetch() should return a Promise that we can .then() on
+        let mut engine = JamEngine::new();
+
+        let ts = r#"
+            const p = fetch("http://localhost:1/nonexistent");
+            claim("promise_type", typeof p);
+            claim("has_then", typeof p.then === "function");
+
+            // Catch the error (connection refused) to prevent unhandled rejection
+            p.catch(() => {});
+        "#;
+        let result = engine.load_program("test", ts);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""promise_type","object""#), "fetch should return an object: {f}");
+        assert!(f.contains(r#""has_then",true"#), "fetch result should have .then(): {f}");
+    }
+
 }

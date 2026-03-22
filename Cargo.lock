@@ -2305,6 +2305,7 @@ dependencies = [
  "dbsp",
  "feldera-macros",
  "feldera-size-of",
+ "futures",
  "llrt_modules",
  "llrt_utils",
  "ordered-float 4.6.0",

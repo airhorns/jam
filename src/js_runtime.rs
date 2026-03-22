@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use rquickjs::{Context, Function, Object, Runtime, Value};
+use rquickjs::{AsyncContext, AsyncRuntime, Context, Function, Object, Runtime, Value};
 
 use crate::pattern::{Pattern, PatternTerm};
 use crate::rule::{BodyFn, HoldOp, PatternExpr, Program, RuleSpec};
@@ -40,16 +40,26 @@ fn get_runtime_js() -> &'static str {
 
 /// A JavaScript runtime for loading Jam programs written in TypeScript.
 pub struct JsRuntime {
-    runtime: Runtime,
+    /// Tokio runtime for driving async operations (fetch, timers).
+    /// Shared between extract and body contexts.
+    tokio_rt: tokio::runtime::Runtime,
+    /// Async QuickJS runtime for the extraction context.
+    extract_runtime: AsyncRuntime,
     /// Stored body context for callback invocation after program load.
     body_ctx: Option<Arc<Mutex<BodyContext>>>,
 }
 
 impl JsRuntime {
     pub fn new() -> Self {
-        let runtime = Runtime::new().expect("Failed to create QuickJS runtime");
+        let tokio_rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime");
+        let extract_runtime = tokio_rt
+            .block_on(async { AsyncRuntime::new().expect("Failed to create async runtime") });
         JsRuntime {
-            runtime,
+            tokio_rt,
+            extract_runtime,
             body_ctx: None,
         }
     }
@@ -67,12 +77,14 @@ impl JsRuntime {
         let js = transpile::strip_imports(&js);
         let runtime_js = get_runtime_js();
 
-        // Create a context for extraction
-        let extract_ctx = Context::full(&self.runtime).expect("Failed to create context");
+        // Create an async context for extraction (async required for fetch/timers support)
+        let extract_ctx = self
+            .tokio_rt
+            .block_on(async { AsyncContext::full(&self.extract_runtime).await })
+            .expect("Failed to create extract context");
 
-        let (claims, rule_data) = extract_ctx.with(|ctx| {
-            // Register console as a global
-            init_llrt_globals(&ctx).map_err(|e| format!("Console init error: {e}"))?;
+        let (claims, rule_data) = self.tokio_rt.block_on(extract_ctx.with(|ctx| {
+            init_llrt_globals(&ctx).map_err(|e| format!("LLRT init error: {e}"))?;
 
             ctx.eval::<(), _>(runtime_js)
                 .map_err(|e| format!("Runtime eval error: {e}"))?;
@@ -82,33 +94,45 @@ impl JsRuntime {
             let globals = ctx.globals();
             let jam: Object = globals.get("__jam").map_err(|e| format!("{e}"))?;
 
-            // Extract claims
             let claims_val: Value = jam.get("topLevelClaims").map_err(|e| format!("{e}"))?;
             let claims = js_array_to_statements(&claims_val)?;
 
-            // Extract rule metadata (patterns only — bodies will be called in a separate context)
             let rules_val: Value = jam.get("rules").map_err(|e| format!("{e}"))?;
             let rule_data = extract_rule_patterns(&ctx, &rules_val)?;
 
             Ok::<_, String>((claims, rule_data))
-        })?;
+        }))?;
 
-        // Create a separate runtime+context for body execution (owned by BodyFn closures)
-        let body_runtime = Runtime::new().expect("Failed to create body runtime");
-        let body_ctx = Context::full(&body_runtime).expect("Failed to create body context");
+        // Drive any async operations from program initialization
+        self.tokio_rt.block_on(self.extract_runtime.idle());
 
-        body_ctx.with(|ctx| {
-            // Register console as a global
-            init_llrt_globals(&ctx).expect("Failed to init console");
+        // Create async runtime+context for body execution.
+        // AsyncRuntime is required so that fetch() Promises can be driven via tokio.
+        let tokio_rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime");
 
+        let body_runtime =
+            tokio_rt.block_on(async { AsyncRuntime::new().expect("Failed to create async runtime") });
+        let body_ctx = tokio_rt
+            .block_on(async { AsyncContext::full(&body_runtime).await })
+            .expect("Failed to create async context");
+
+        tokio_rt.block_on(body_ctx.with(|ctx| {
+            init_llrt_globals(&ctx).expect("Failed to init LLRT globals");
             ctx.eval::<(), _>(runtime_js).expect("Failed to eval runtime");
             ctx.eval::<(), _>(js.as_str()).expect("Failed to eval script");
-        });
+        }));
+
+        // Drive any pending futures from program initialization (e.g., top-level fetch)
+        tokio_rt.block_on(body_runtime.idle());
 
         // Wrap in Arc<Mutex> for Send+Sync (BodyFn requirement)
         let shared = Arc::new(Mutex::new(BodyContext {
-            _runtime: body_runtime,
+            runtime: body_runtime,
             context: body_ctx,
+            tokio_rt,
         }));
 
         // Store body context for later callback invocation
@@ -140,7 +164,7 @@ impl JsRuntime {
             .as_ref()
             .ok_or("No program loaded")?;
         let guard = body_ctx.lock().unwrap();
-        guard.context.with(|ctx| {
+        let result = guard.tokio_rt.block_on(guard.context.with(|ctx| {
             let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
             let fire: Function = jam.get("fireCallback").map_err(|e| format!("{e}"))?;
 
@@ -154,9 +178,15 @@ impl JsRuntime {
                 ));
             }
 
-            // Read hold operations produced by the callback
-            Self::read_hold_ops(&ctx)
-        })
+            Ok(())
+        }));
+        result?;
+
+        // Drive any async operations started by the callback (e.g., fetch)
+        guard.tokio_rt.block_on(guard.runtime.idle());
+
+        // Read hold operations produced by the callback
+        guard.tokio_rt.block_on(guard.context.with(|ctx| Self::read_hold_ops(&ctx)))
     }
 
     /// Refresh callbacks by re-deriving them from current facts.
@@ -164,7 +194,7 @@ impl JsRuntime {
     pub fn refresh_callbacks(&self, facts_json: &str) -> Result<(), String> {
         let body_ctx = self.body_ctx.as_ref().ok_or("No body context")?;
         let guard = body_ctx.lock().unwrap();
-        guard.context.with(|ctx| {
+        guard.tokio_rt.block_on(guard.context.with(|ctx| {
             let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
             let refresh: Function =
                 jam.get("refreshCallbacks").map_err(|e| format!("{e}"))?;
@@ -172,14 +202,14 @@ impl JsRuntime {
                 .call::<_, ()>((facts_json,))
                 .map_err(|e| format!("Callback refresh error: {e}"))?;
             Ok(())
-        })
+        }))
     }
 
     /// Extract pending hold operations from the JS context.
     fn extract_hold_ops(&self) -> Result<Vec<HoldOp>, String> {
         let body_ctx = self.body_ctx.as_ref().ok_or("No body context")?;
         let guard = body_ctx.lock().unwrap();
-        guard.context.with(|ctx| Self::read_hold_ops(&ctx))
+        guard.tokio_rt.block_on(guard.context.with(|ctx| Self::read_hold_ops(&ctx)))
     }
 
     /// Read and clear hold operations from the JS __jam object.
@@ -211,11 +241,14 @@ impl Default for JsRuntime {
     }
 }
 
-/// Holds the QuickJS runtime + context for body function execution.
+/// Holds the QuickJS async runtime + context for body function execution.
+/// Uses AsyncRuntime so that fetch() Promises can be driven via tokio.
 /// Must be kept alive as long as any BodyFn closures reference it.
 struct BodyContext {
-    _runtime: Runtime,
-    context: Context,
+    runtime: AsyncRuntime,
+    context: AsyncContext,
+    /// Tokio runtime for blocking on async operations from sync code (DBSP flat_map).
+    tokio_rt: tokio::runtime::Runtime,
 }
 
 // Safety: QuickJS is single-threaded. We protect access with a Mutex
@@ -429,7 +462,9 @@ fn build_rule_specs(
 fn create_body_fn(rule_index: usize, shared: Arc<Mutex<BodyContext>>) -> BodyFn {
     Arc::new(move |bindings, is_insertion| {
         let guard = shared.lock().unwrap();
-        guard.context.with(|ctx| {
+        // Use futures::executor::block_on instead of tokio because DBSP's
+        // worker thread already runs inside a tokio runtime (nested block_on panics).
+        futures::executor::block_on(guard.context.with(|ctx| {
             // Set empty collector for accumulating claims from the body
             let jam: Object = ctx.globals().get("__jam").unwrap();
             let set_collector: Function = jam.get("setCollector").unwrap();
@@ -484,7 +519,7 @@ fn create_body_fn(rule_index: usize, shared: Arc<Mutex<BodyContext>>) -> BodyFn 
             } else {
                 vec![]
             }
-        })
+        }))
     })
 }
 
