@@ -1280,6 +1280,106 @@ mod tests {
     }
 
     #[test]
+    fn test_hold_from_callback_triggers_when_rerender() {
+        // hold() from a callback should trigger when() rules to re-derive UI
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("items", []);
+            render(
+                <VStack key="app">
+                    <Button key="add" label="Add" onPress={() => {
+                        hold("items", [["item", "first"]]);
+                    }} />
+                    {when(["item", $.name], ({ name }) =>
+                        <Text key={"item-" + name}>{name}</Text>
+                    )}
+                </VStack>
+            );
+        "#;
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Initially no items
+        let f = engine.current_facts_json();
+        assert!(!f.contains(r#""text","first""#), "no items initially: {f}");
+
+        // Press add — hold creates a new fact, when() fires, Text renders
+        engine.fire_event("root/app/add", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""text","first""#), "item should render after hold: {f}");
+    }
+
+    #[test]
+    fn test_hold_from_callback_with_data() {
+        // TextField onSubmit passes data which hold() uses to create state
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("msg", []);
+            render(
+                <VStack key="app">
+                    <TextField key="input" placeholder="Type..."
+                        onSubmit={(text) => {
+                            hold("msg", [["message", text]]);
+                        }}
+                    />
+                    {when(["message", $.text], ({ text }) =>
+                        <Text key="display">{text}</Text>
+                    )}
+                </VStack>
+            );
+        "#;
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Submit text via TextField
+        engine.fire_event_with_data("root/app/input", "onSubmit", "Hello from TextField");
+
+        let f = engine.current_facts_json();
+        assert!(
+            f.contains(r#""text","Hello from TextField""#),
+            "submitted text should render via when: {f}"
+        );
+    }
+
+    #[test]
+    fn test_hold_accumulation_via_separate_keys() {
+        // Multiple hold() calls with different keys accumulate facts
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            let counter = 0;
+            render(
+                <VStack key="app">
+                    <Button key="add" label="Add" onPress={() => {
+                        counter++;
+                        hold("item-" + counter, [["item", "item-" + counter]]);
+                    }} />
+                    {when(["item", $.name], ({ name }) =>
+                        <Text key={"t-" + name}>{name}</Text>
+                    )}
+                </VStack>
+            );
+        "#;
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Add three items
+        engine.fire_event("root/app/add", "onPress");
+        engine.fire_event("root/app/add", "onPress");
+        engine.fire_event("root/app/add", "onPress");
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""text","item-1""#), "item 1: {f}");
+        assert!(f.contains(r#""text","item-2""#), "item 2: {f}");
+        assert!(f.contains(r#""text","item-3""#), "item 3: {f}");
+    }
+
+    #[test]
     fn test_fire_event_with_data() {
         // Callback receives data argument (e.g., text from TextField onSubmit)
         let mut engine = JamEngine::new();
