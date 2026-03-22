@@ -10,3 +10,5 @@ rkyv = { version = "0.7.45", default-features = false, features = ["std", "size_
 serde = { version = "1", features = ["derive"] }
 size-of = { version = "0.1.7", package = "feldera-size-of" }
 feldera-macros = "0.272"
+oxc = { version = "0.121", features = ["transformer", "semantic", "codegen"] }
+rquickjs = { version = "0.11", features = ["bindgen", "classes", "properties", "parallel"] }

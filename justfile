@@ -9,6 +9,7 @@ check:
 
 test:
     cargo test
+    cd ts && npx tsc --noEmit
 
 watch *ARGS:
 	bacon --job run -- -- {{ ARGS }}
