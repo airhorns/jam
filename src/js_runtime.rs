@@ -183,7 +183,8 @@ impl JsRuntime {
         // Only build RuleSpecs for the NEW rules (from this program)
         let new_rules = &rule_data[rules_before..];
         let shared = self.shared.clone();
-        let rules = build_rule_specs(new_rules, &shared, rules_before);
+        let root_path: Vec<RulePathSegment> = vec![];
+        let rules = build_rule_specs(new_rules, &shared, rules_before, &root_path);
 
         // Extract hold ops from this program's top-level evaluation
         let hold_ops = guard.with(|ctx| read_hold_ops(&ctx)).unwrap_or_default();
@@ -254,7 +255,7 @@ impl Default for JsRuntime {
 }
 
 /// Read and clear hold operations from the JS __jam object.
-fn read_hold_ops(ctx: &rquickjs::Ctx<'_>) -> Result<Vec<HoldOp>, String> {
+pub(crate) fn read_hold_ops(ctx: &rquickjs::Ctx<'_>) -> Result<Vec<HoldOp>, String> {
     let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
     let get_hold_ops: Function = jam.get("getHoldOps").map_err(|e| format!("{e}"))?;
     let hold_ops_val: Value = get_hold_ops.call(()).map_err(|e| format!("{e}"))?;
@@ -461,16 +462,22 @@ fn extract_rule_patterns(
 
 /// Build RuleSpecs from extracted rule data + shared context.
 /// `rule_index_offset` adjusts indices for programs loaded after the first.
+/// `parent_path` is the JS path to reach the parent's whens array (for nested rules).
 fn build_rule_specs(
     rule_data: &[RuleData],
     shared: &Arc<Mutex<JsContext>>,
     rule_index_offset: usize,
+    parent_path: &[RulePathSegment],
 ) -> Vec<RuleSpec> {
     rule_data
         .iter()
         .map(|rd| {
-            let body = create_body_fn(rd.rule_index + rule_index_offset, shared.clone());
-            let whens = build_rule_specs(&rd.whens, shared, rule_index_offset);
+            let mut path = parent_path.to_vec();
+            path.push(RulePathSegment::Index(rd.rule_index + rule_index_offset));
+            let body = create_body_fn(path.clone(), shared.clone());
+            let mut child_path = path.clone();
+            child_path.push(RulePathSegment::Whens);
+            let whens = build_rule_specs(&rd.whens, shared, 0, &child_path);
             RuleSpec {
                 pattern: rd.pattern.clone(),
                 body,
@@ -480,20 +487,27 @@ fn build_rule_specs(
         .collect()
 }
 
-/// Create a BodyFn that calls a JS function by rule index.
-fn create_body_fn(rule_index: usize, shared: Arc<Mutex<JsContext>>) -> BodyFn {
+/// Path segments for navigating the JS __rules tree to find a body function.
+#[derive(Clone)]
+enum RulePathSegment {
+    /// Index into an array (rules or whens)
+    Index(usize),
+    /// Navigate to the .whens property
+    Whens,
+}
+
+/// Create a BodyFn that calls a JS body function located at the given path in the __rules tree.
+/// For top-level rules: path = [Index(0)]
+/// For nested whens: path = [Index(0), Whens, Index(0)]
+fn create_body_fn(path: Vec<RulePathSegment>, shared: Arc<Mutex<JsContext>>) -> BodyFn {
     Arc::new(move |bindings, is_insertion| {
         let guard = shared.lock().unwrap();
-        // Use futures::executor::block_on instead of tokio because DBSP's
-        // worker thread already runs inside a tokio runtime (nested block_on panics).
         futures::executor::block_on(guard.context.with(|ctx| {
-            // Set empty collector for accumulating claims from the body
             let jam: Object = ctx.globals().get("__jam").unwrap();
             let set_collector: Function = jam.get("setCollector").unwrap();
             let empty_arr = rquickjs::Array::new(ctx.clone()).unwrap();
             set_collector.call::<_, ()>((empty_arr,)).unwrap();
 
-            // Build bindings object
             let bindings_obj = Object::new(ctx.clone()).unwrap();
             for (name, term) in bindings {
                 match term {
@@ -514,9 +528,22 @@ fn create_body_fn(rule_index: usize, shared: Arc<Mutex<JsContext>>) -> BodyFn {
                 }
             }
 
-            // Call the body function
+            // Navigate the __rules tree to find the body function
             let rules: rquickjs::Array = jam.get("rules").unwrap();
-            let rule: Object = rules.get(rule_index).unwrap();
+            let mut current: Value = rules.into();
+            for segment in &path {
+                match segment {
+                    RulePathSegment::Index(i) => {
+                        let arr = current.into_array().expect("Expected array in rule path");
+                        current = arr.get(*i).expect("Index out of bounds in rule path");
+                    }
+                    RulePathSegment::Whens => {
+                        let obj = current.as_object().expect("Expected object in rule path");
+                        current = obj.get("whens").expect("No whens on rule");
+                    }
+                }
+            }
+            let rule = current.as_object().expect("Rule path did not resolve to object");
             let body: Function = rule.get("body").unwrap();
 
             if let Err(e) = body.call::<_, ()>((bindings_obj, is_insertion)) {

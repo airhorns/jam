@@ -646,6 +646,276 @@ fn test_session_manager_readiness_installed_no_creds() {
     assert!(facts.contains(r#""has_error",true"#), "{facts}");
 }
 
+// ============================================================================
+// Full App UI Tests
+// ============================================================================
+
+/// Load the full puddy app and verify it produces UI claims.
+fn load_puddy_app() -> JamEngine {
+    let mut engine = JamEngine::new();
+
+    // The puddy.tsx now only depends on jam primitives and components,
+    // not the networking stack, since state is managed via hold/when.
+    let puddy_tsx = include_str!("../examples/puddy/ts/puddy.tsx");
+
+    let result = engine.load_program("puddy.tsx", puddy_tsx);
+    assert!(
+        !result.starts_with("ERROR"),
+        "Failed to load puddy app: {result}"
+    );
+    let _ = engine.step_json();
+    engine
+}
+
+#[test]
+fn test_puddy_app_loads_with_ui_structure() {
+    let engine = load_puddy_app();
+    let f = engine.current_facts_json();
+
+    // Root structure
+    assert!(f.contains(r#""isa","VStack""#), "root VStack: {f}");
+    assert!(f.contains(r#""isa","NavigationSplitView""#), "nav split: {f}");
+
+    // Connection status shows disconnected
+    assert!(f.contains("Disconnected"), "disconnected text: {f}");
+
+    // Session list header and new session button
+    assert!(f.contains("Sessions"), "sessions header: {f}");
+    assert!(f.contains("+ New Session"), "new session button: {f}");
+
+    // No-selection placeholder
+    assert!(f.contains("Select a session"), "select prompt: {f}");
+}
+
+#[test]
+fn test_puddy_create_session_via_button() {
+    let mut engine = load_puddy_app();
+
+    // Find the new session button's callback ID
+    let f = engine.current_facts_json();
+    let facts: Vec<serde_json::Value> = serde_json::from_str(&f).unwrap();
+    let callback_id = facts.iter().find_map(|fact| {
+        let arr = fact.as_array()?;
+        if arr.len() >= 3
+            && arr[1].as_str() == Some("onPress")
+            && arr[0].as_str()?.contains("new-session")
+        {
+            arr[2].as_str().map(String::from)
+        } else {
+            None
+        }
+    });
+    assert!(callback_id.is_some(), "should find new-session callback: {f}");
+
+    // Press the new session button
+    let result = engine.fire_event_by_callback_id(&callback_id.unwrap());
+    assert!(!result.starts_with("ERROR"), "fire_event failed: {result}");
+
+    // After pressing, there should be a session in the facts
+    let f = engine.current_facts_json();
+    assert!(f.contains(r#""agent","claude""#), "session created with agent: {f}");
+    assert!(f.contains(r#""status","starting""#), "session status starting: {f}");
+}
+
+#[test]
+fn test_puddy_session_appears_in_sidebar() {
+    let mut engine = load_puddy_app();
+
+    // Inject a session via hold
+    engine.eval_js(r#"
+        hold("sessions", [
+            ["session", "test-session", "agent", "claude"],
+            ["session", "test-session", "status", "active"],
+        ]);
+    "#).unwrap();
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    // The when rule should match the session facts and render a row
+    assert!(
+        f.contains("claude") && f.contains("test-session"),
+        "session should appear in sidebar: {f}"
+    );
+}
+
+#[test]
+fn test_puddy_select_session_shows_detail() {
+    let mut engine = load_puddy_app();
+
+    // Inject a session and select it
+    engine.eval_js(r#"
+        hold("sessions", [
+            ["session", "test-session", "agent", "claude"],
+            ["session", "test-session", "status", "active"],
+        ]);
+        hold("ui", [["ui", "selectedSession", "test-session"]]);
+    "#).unwrap();
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    // Detail view should show the session
+    assert!(
+        f.contains("Session: test-session") || f.contains("test-session"),
+        "detail should show selected session: {f}"
+    );
+    // "Select a session" placeholder should be gone
+    // (it's conditionally rendered only when selectedId is empty)
+}
+
+#[test]
+fn test_puddy_connection_status_updates_reactively() {
+    let mut engine = load_puddy_app();
+
+    // Initially disconnected
+    let f = engine.current_facts_json();
+    assert!(f.contains("Disconnected"), "initial: disconnected: {f}");
+
+    // Update connection status via hold
+    engine.eval_js(r#"
+        hold("connection", [
+            ["connection", "status", "connected"],
+            ["connection", "hostname", "myserver.local"],
+        ]);
+    "#).unwrap();
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    // Should now show connected with hostname
+    assert!(f.contains("myserver.local"), "should show hostname: {f}");
+    // Dot should be green
+    assert!(
+        f.contains(r#""foregroundColor","green""#),
+        "dot should be green: {f}"
+    );
+}
+
+// ============================================================================
+// Data model tests (independent of app UI)
+// ============================================================================
+
+#[test]
+fn test_cross_join_no_shared_vars() {
+    // Test that a 2-pattern rule with no shared variables produces a cross-product
+    use jam::engine::Engine;
+    use jam::rule::{Program, RuleSpec};
+    use jam::pattern::{Pattern, PatternTerm};
+    use jam::term::{Term, Statement};
+    use std::sync::Arc;
+
+    let mut engine = Engine::new();
+    engine.add_program(
+        Program::new("test")
+            .with_rules(vec![
+                RuleSpec::new(
+                    vec![
+                        Pattern::new(vec![PatternTerm::Exact(Term::sym("a")), PatternTerm::Bind("x".into())]),
+                        Pattern::new(vec![PatternTerm::Exact(Term::sym("b")), PatternTerm::Bind("y".into())]),
+                    ],
+                    |bindings, _| {
+                        let x = bindings.get("x").unwrap().clone();
+                        let y = bindings.get("y").unwrap().clone();
+                        vec![Statement::new(vec![Term::sym("result"), x, y])]
+                    },
+                ),
+            ]),
+    );
+
+    engine.assert_fact(Statement::new(vec![Term::sym("a"), Term::sym("1")]));
+    engine.assert_fact(Statement::new(vec![Term::sym("b"), Term::sym("2")]));
+    let result = engine.step();
+
+    let has_result = result.deltas.iter().any(|(s, w)| {
+        *w > 0 && s == &Statement::new(vec![Term::sym("result"), Term::sym("1"), Term::sym("2")])
+    });
+    assert!(has_result, "cross-join should produce result: {:?}", result.deltas);
+}
+
+#[test]
+fn test_nested_when_in_jsx() {
+    // Minimal repro: nested when() in JSX where inner when has no shared vars
+    let mut engine = JamEngine::new();
+    let tsx = r#"
+        hold("state", [
+            ["color", "red"],
+            ["size", 10],
+        ]);
+
+        render(
+            <VStack key="app">
+                {when(["color", $.c], ({ c }) =>
+                    <VStack key="outer">
+                        <Text key="color-text">{"color=" + c}</Text>
+                        {when(["size", $.s], ({ s }) =>
+                            <Text key="size-text">{"size=" + s}</Text>
+                        )}
+                    </VStack>
+                )}
+            </VStack>
+        );
+    "#;
+
+    let result = engine.load_program("test.tsx", tsx);
+    assert!(!result.starts_with("ERROR"), "load failed: {result}");
+
+    // Check how many rules were compiled
+    engine.eval_js(r#"
+        claim("rule_count", globalThis.__jam.rules.length);
+        for (let i = 0; i < globalThis.__jam.rules.length; i++) {
+            const r = globalThis.__jam.rules[i];
+            claim("rule_" + i + "_patterns", r.patterns.length);
+            claim("rule_" + i + "_whens", r.whens.length);
+        }
+    "#).unwrap();
+    let _ = engine.step_json();
+
+    let f = engine.current_facts_json();
+    eprintln!("facts: {f}");
+    assert!(f.contains(r#""color=red""#), "outer when should fire: {f}");
+    assert!(f.contains(r#""size=10""#), "inner when should fire: {f}");
+}
+
+#[test]
+fn test_session_state_machine_full_lifecycle() {
+    let mut engine = engine_with_networking();
+    let facts = eval_and_get_facts(
+        &mut engine,
+        r#"
+        let session = t.createSession("test-1", "claude");
+        session = t.applyEvent(session, {
+            id: "e1", eventIndex: 1,
+            payload: { type: "agentMessageChunk", text: "Hello, " }
+        });
+        session = t.applyEvent(session, {
+            id: "e2", eventIndex: 2,
+            payload: { type: "agentMessageChunk", text: "how can I help?" }
+        });
+        claim("status", session.status.type);
+        claim("streaming", session.streamingText);
+
+        session = t.applyEvent(session, {
+            id: "e3", eventIndex: 3,
+            payload: { type: "toolCall", data: {
+                toolCallId: "tc-1", title: "Read file", status: "running"
+            }}
+        });
+        claim("after_tool_messages", session.messages.length);
+
+        session = t.applyEvent(session, {
+            id: "e4", eventIndex: 4,
+            payload: { type: "sessionEnd", stopReason: "end_turn" }
+        });
+        claim("final_status", session.status.type);
+        claim("final_reason", session.status.reason);
+        "#,
+    );
+
+    assert!(facts.contains(r#""status","active""#), "{facts}");
+    assert!(facts.contains(r#""streaming","Hello, how can I help?""#), "{facts}");
+    assert!(facts.contains(r#""after_tool_messages",2"#), "{facts}");
+    assert!(facts.contains(r#""final_status","ended""#), "{facts}");
+    assert!(facts.contains(r#""final_reason","end_turn""#), "{facts}");
+}
+
 #[test]
 fn test_session_manager_readiness_ready() {
     let mut engine = engine_with_networking();

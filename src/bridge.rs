@@ -44,12 +44,20 @@ impl JamEngine {
         }
     }
 
+    /// Fire an event callback by its full callback ID (e.g., "root/app/btn:onPress").
+    pub fn fire_event_by_callback_id(&mut self, callback_id: &str) -> String {
+        self.fire_callback_internal(callback_id)
+    }
+
     /// Fire an event callback on an entity (e.g., button press).
     /// Callback IDs are deterministic: "entityId:eventName".
     pub fn fire_event(&mut self, entity_id: &str, event_name: &str) -> String {
         let callback_id = format!("{entity_id}:{event_name}");
+        self.fire_callback_internal(&callback_id)
+    }
 
-        match self.js_runtime.fire_callback(&callback_id) {
+    fn fire_callback_internal(&mut self, callback_id: &str) -> String {
+        match self.js_runtime.fire_callback(callback_id) {
             Ok(hold_ops) => {
                 // Apply hold operations produced by the callback
                 let pid = self.active_program_id.unwrap_or(0);
@@ -119,10 +127,20 @@ impl JamEngine {
             let claims_val: rquickjs::Value = jam.get("topLevelClaims").unwrap();
             crate::js_runtime::js_array_to_statements(&claims_val).unwrap_or_default()
         });
+        // Extract hold ops
+        let hold_ops = guard.with(|ctx| {
+            crate::js_runtime::read_hold_ops(&ctx).unwrap_or_default()
+        });
         drop(guard);
 
         for claim in claims {
             self.engine.assert_fact(claim);
+        }
+
+        // Apply hold operations
+        let pid = self.active_program_id.unwrap_or(0);
+        for op in &hold_ops {
+            self.apply_hold_op(pid, op);
         }
 
         Ok(())
