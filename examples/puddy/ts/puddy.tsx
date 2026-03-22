@@ -38,72 +38,74 @@ function addMessage(
 // --- Render ---
 
 render(
-  <VStack key="app">
-    {/* Connection status bar */}
-    {when(["connection", "status", $.status], ({ status }) =>
-      <HStack key="connection-bar" spacing={8} padding={8}>
-        <Circle
-          key="dot"
-          foregroundColor={status === "connected" ? "green" : status === "checking" ? "orange" : "red"}
-          frame={8}
-        />
-        {when(["connection", "hostname", $.host], ({ host }) =>
-          <Text key="host" font="caption">{
-            status === "connected" ? host : "Disconnected"
-          }</Text>
-        )}
-      </HStack>
-    )}
+  <NavigationSplitView key="app">
+    {/* Sidebar: session list */}
+    <VStack key="sidebar" alignment="leading" spacing={4}>
+      <Text key="header" font="headline" padding={8}>Sessions</Text>
+      <Divider key="div-top" />
 
-    <NavigationSplitView key="nav">
-      {/* Sidebar: session list */}
-      <VStack key="sidebar" alignment="leading" spacing={4}>
-        <Text key="header" font="headline" padding={8}>Sessions</Text>
-        <Divider key="div-top" />
+      {/* Dynamic session rows — use $.sid binding in inner when for proper join */}
+      {when(["session", $.sid, "agent", $.agent], ({ sid, agent }) =>
+        when(["session", $.sid, "status", $.status], ({ status }) =>
+          <Button key={`row-${sid}`} label=""
+            onPress={() => hold("ui", () => {
+              claim("ui", "selectedSession", sid);
+            })}
+          >
+            <HStack spacing={8}>
+              <Circle
+                foregroundColor={
+                  status === "starting" ? "gray" :
+                  status === "active" ? "blue" :
+                  status === "failed" ? "red" : "secondary"
+                }
+                frame={8}
+              />
+              <Text font="body">{`${agent} — ${sid}`}</Text>
+              <Text font="caption" foregroundColor="secondary">{status}</Text>
+            </HStack>
+          </Button>
+        )
+      )}
 
-        {/* Dynamic session rows — use $.sid binding in inner when for proper join */}
-        {when(["session", $.sid, "agent", $.agent], ({ sid, agent }) =>
-          when(["session", $.sid, "status", $.status], ({ status }) =>
-            <Button key={`row-${sid}`} label=""
-              onPress={() => hold("ui", () => {
-                claim("ui", "selectedSession", sid);
-              })}
-            >
-              <HStack spacing={8}>
-                <Circle
-                  foregroundColor={
-                    status === "starting" ? "gray" :
-                    status === "active" ? "blue" :
-                    status === "failed" ? "red" : "secondary"
-                  }
-                  frame={8}
-                />
-                <Text font="body">{`${agent} — ${sid}`}</Text>
-                <Text font="caption" foregroundColor="secondary">{status}</Text>
-              </HStack>
-            </Button>
-          )
-        )}
+      <Divider key="div-bottom" />
+      <Button key="new-session" label="+ New Session"
+        onPress={() => {
+          const id = "s-" + Date.now();
+          hold("sessions", () => {
+            claim("session", id, "agent", "claude");
+            claim("session", id, "status", "starting");
+          });
+          hold("ui", () => {
+            claim("ui", "selectedSession", id);
+          });
+        }}
+      />
+    </VStack>
 
-        <Divider key="div-bottom" />
-        <Button key="new-session" label="+ New Session"
-          onPress={() => {
-            const id = "s-" + Date.now();
-            hold("sessions", () => {
-              claim("session", id, "agent", "claude");
-              claim("session", id, "status", "starting");
-            });
-            hold("ui", () => {
-              claim("ui", "selectedSession", id);
-            });
-          }}
-        />
-      </VStack>
+    {/* Detail: selected session */}
+    <VStack key="detail">
+      {/* Connection status bar */}
+      {when(["connection", "status", $.status], ({ status }) =>
+        <HStack key="connection-bar" spacing={8} padding={8}>
+          <Circle
+            key="dot"
+            foregroundColor={status === "connected" ? "green" : status === "checking" ? "orange" : "red"}
+            frame={8}
+          />
+          {when(["connection", "hostname", $.host], ({ host }) =>
+            <Text key="host" font="caption">{
+              status === "connected" ? host : "Disconnected"
+            }</Text>
+          )}
+        </HStack>
+      )}
 
-      {/* Detail: selected session — always render, join handles filtering */}
+      <Divider key="top-div" />
+
       {when(["ui", "selectedSession", $.selectedId], ({ selectedId }) =>
-        <VStack key="detail">
-          <Text key="detail-title" font="headline">{
+        <VStack key="content">
+          <Text key="detail-title" font="headline" padding={12}>{
             selectedId ? `Session: ${selectedId}` : "Select a session"
           }</Text>
 
@@ -170,6 +172,6 @@ render(
           ) : null}
         </VStack>
       )}
-    </NavigationSplitView>
-  </VStack>
+    </VStack>
+  </NavigationSplitView>
 );

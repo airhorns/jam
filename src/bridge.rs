@@ -346,7 +346,7 @@ mod tests {
         // Auto parent-child claim
         assert!(facts_arr
             .iter()
-            .any(|f| f == &serde_json::json!(["root", "child", "title", "root/title"])));
+            .any(|f| f == &serde_json::json!(["root", "child", "00000#title", "root/title"])));
         // Child claims
         assert!(facts_arr
             .iter()
@@ -382,10 +382,10 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // Root → buttons
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root", "child", "buttons", "root/buttons"])));
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root", "child", "00000#buttons", "root/buttons"])));
         // buttons → dec, inc
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons", "child", "dec", "root/buttons/dec"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons", "child", "inc", "root/buttons/inc"])));
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons", "child", "00000#dec", "root/buttons/dec"])));
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons", "child", "00001#inc", "root/buttons/inc"])));
         // Nested entity properties
         assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons", "isa", "HStack"])));
         assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons/dec", "isa", "Button"])));
@@ -417,7 +417,7 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // The when rule should have produced child claims
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root", "child", "display", "root/display"])),
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root", "child", "00000#display", "root/display"])),
             "missing child claim. facts: {facts_arr:?}");
         assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/display", "isa", "Text"])),
             "missing isa claim. facts: {facts_arr:?}");
@@ -1860,5 +1860,192 @@ mod tests {
             has_status || has_error,
             "fetch should produce status or error claim: {f}"
         );
+    }
+
+    // ========================================================================
+    // Child ordering tests — verify JSX source order is preserved
+    // ========================================================================
+
+    /// Helper: extract children of a parent entity from facts JSON,
+    /// returning (sortKey, childId) pairs sorted by sortKey.
+    fn get_children(facts: &str, parent_id: &str) -> Vec<(String, String)> {
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(facts).unwrap();
+        let mut children: Vec<(String, String)> = parsed
+            .iter()
+            .filter_map(|fact| {
+                let arr = fact.as_array()?;
+                if arr.len() >= 4
+                    && arr[0].as_str()? == parent_id
+                    && arr[1].as_str()? == "child"
+                {
+                    Some((
+                        arr[2].as_str()?.to_string(),
+                        arr[3].as_str()?.to_string(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        children.sort_by(|a, b| a.0.cmp(&b.0));
+        children
+    }
+
+    #[test]
+    fn test_jsx_children_preserve_source_order() {
+        // This reproduces the original NavigationSplitView bug:
+        // "detail" sorted before "sidebar" alphabetically, swapping
+        // sidebar and detail panes.
+        let mut engine = JamEngine::new();
+
+        let ts_source = r#"
+            render(
+                h("NavigationSplitView", { key: "nav" },
+                    h("VStack", { key: "sidebar" }),
+                    h("VStack", { key: "detail" })
+                )
+            );
+        "#;
+        let result = engine.load_program("test.tsx", ts_source);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let facts = engine.current_facts_json();
+        let children = get_children(&facts, "root/nav");
+
+        assert_eq!(children.len(), 2, "nav should have 2 children");
+        // sidebar (key="sidebar") should come first because it's declared first
+        assert!(
+            children[0].1.contains("sidebar"),
+            "first child should be sidebar, got: {:?}",
+            children
+        );
+        assert!(
+            children[1].1.contains("detail"),
+            "second child should be detail, got: {:?}",
+            children
+        );
+    }
+
+    #[test]
+    fn test_jsx_children_order_independent_of_key_names() {
+        // Keys that sort opposite to source order should still render
+        // in source order.
+        let mut engine = JamEngine::new();
+
+        let ts_source = r#"
+            render(
+                h("VStack", { key: "app" },
+                    h("Text", { key: "z-first" }),
+                    h("Text", { key: "a-second" }),
+                    h("Text", { key: "m-third" })
+                )
+            );
+        "#;
+        let result = engine.load_program("test.tsx", ts_source);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let facts = engine.current_facts_json();
+        let children = get_children(&facts, "root/app");
+
+        assert_eq!(children.len(), 3, "app should have 3 children");
+        assert!(children[0].1.ends_with("/z-first"), "first child: {:?}", children);
+        assert!(children[1].1.ends_with("/a-second"), "second child: {:?}", children);
+        assert!(children[2].1.ends_with("/m-third"), "third child: {:?}", children);
+    }
+
+    #[test]
+    fn test_when_children_preserve_position_among_static_siblings() {
+        // A when() in JSX should render its output at the same position
+        // as it appears in the source, not after all static children.
+        let mut engine = JamEngine::new();
+
+        let ts_source = r#"
+            claim("show", "yes");
+
+            render(
+                h("VStack", { key: "app" },
+                    h("Text", { key: "header" }),
+                    when(["show", $.val], ({ val }) =>
+                        h("Text", { key: "dynamic" })
+                    ),
+                    h("Text", { key: "footer" })
+                )
+            );
+        "#;
+        let result = engine.load_program("test.tsx", ts_source);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let facts = engine.current_facts_json();
+        let children = get_children(&facts, "root/app");
+
+        assert_eq!(children.len(), 3, "app should have 3 children: {:?}", children);
+        assert!(children[0].1.ends_with("/header"), "first should be header: {:?}", children);
+        assert!(children[1].1.ends_with("/dynamic"), "second should be dynamic: {:?}", children);
+        assert!(children[2].1.ends_with("/footer"), "third should be footer: {:?}", children);
+    }
+
+    #[test]
+    fn test_multiple_when_children_preserve_order() {
+        // Multiple when() markers among static children should all
+        // appear at their correct positions.
+        let mut engine = JamEngine::new();
+
+        let ts_source = r#"
+            claim("a", "val", "A");
+            claim("b", "val", "B");
+
+            render(
+                h("VStack", { key: "app" },
+                    when(["a", "val", $.v], ({ v }) =>
+                        h("Text", { key: "when-a" })
+                    ),
+                    h("Text", { key: "static-mid" }),
+                    when(["b", "val", $.v], ({ v }) =>
+                        h("Text", { key: "when-b" })
+                    )
+                )
+            );
+        "#;
+        let result = engine.load_program("test.tsx", ts_source);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let facts = engine.current_facts_json();
+        let children = get_children(&facts, "root/app");
+
+        assert_eq!(children.len(), 3, "app should have 3 children: {:?}", children);
+        assert!(children[0].1.ends_with("/when-a"), "first: {:?}", children);
+        assert!(children[1].1.ends_with("/static-mid"), "second: {:?}", children);
+        assert!(children[2].1.ends_with("/when-b"), "third: {:?}", children);
+    }
+
+    #[test]
+    fn test_child_order_with_manual_child_fn() {
+        // child() calls should also produce ordered sort keys.
+        let mut engine = JamEngine::new();
+
+        let ts_source = r#"
+            child("second", () => {
+                claim($this, "isa", "Text");
+            });
+            child("first", () => {
+                claim($this, "isa", "Text");
+            });
+        "#;
+        let result = engine.load_program("test", ts_source);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let facts = engine.current_facts_json();
+        let children = get_children(&facts, "root");
+
+        assert_eq!(children.len(), 2, "root should have 2 children: {:?}", children);
+        // "second" was declared first, so it should appear first despite
+        // alphabetical ordering of the name
+        assert!(children[0].1.ends_with("/second"), "first child: {:?}", children);
+        assert!(children[1].1.ends_with("/first"), "second child: {:?}", children);
     }
 }
