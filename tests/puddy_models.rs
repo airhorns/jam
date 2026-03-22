@@ -1073,9 +1073,11 @@ fn test_puddy_messages_render_in_detail() {
     "#).unwrap();
     let _ = engine.step_json();
 
-    // Add messages via claim (the same way the app's addMessage does it)
-    engine.assert_fact_json(r#"["message", "s1", "m1", "user", "text", "Hello agent!"]"#);
-    engine.assert_fact_json(r#"["message", "s1", "m2", "assistant", "text", "Hi! How can I help?"]"#);
+    // Add messages via hold (the same way the app's addMessage does it)
+    engine.eval_js(r#"
+        hold("msg-s1-m1", [["message", "s1", "m1", "user", "text", "Hello agent!"]]);
+        hold("msg-s1-m2", [["message", "s1", "m2", "assistant", "text", "Hi! How can I help?"]]);
+    "#).unwrap();
     let _ = engine.step_json();
 
     let f = engine.current_facts_json();
@@ -1102,8 +1104,10 @@ fn test_puddy_tool_messages_render() {
     "#).unwrap();
     let _ = engine.step_json();
 
-    engine.assert_fact_json(r#"["message", "s1", "m1", "assistant", "toolUse", "Read file"]"#);
-    engine.assert_fact_json(r#"["message", "s1", "m2", "tool", "toolResult", "completed"]"#);
+    engine.eval_js(r#"
+        hold("msg-s1-m1", [["message", "s1", "m1", "assistant", "toolUse", "Read file"]]);
+        hold("msg-s1-m2", [["message", "s1", "m2", "tool", "toolResult", "completed"]]);
+    "#).unwrap();
     let _ = engine.step_json();
 
     let f = engine.current_facts_json();

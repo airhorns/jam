@@ -76,10 +76,9 @@ impl JamEngine {
                     self.apply_hold_op(pid, op);
                 }
 
-                // Assert claims produced by the callback as base facts
-                for claim in result.claims {
-                    self.engine.assert_fact(claim);
-                }
+                // Note: claims from callbacks are intentionally ignored.
+                // claim() inside a callback is a runtime error — only hold() is allowed
+                // because callbacks are imperative (no automatic retraction lifecycle).
 
                 // Step the engine to propagate changes
                 self.step_json()
@@ -1230,9 +1229,9 @@ mod tests {
     }
 
     #[test]
-    fn test_claim_inside_callback_produces_facts() {
-        // BUG REPRO: claim() called inside a fire_event callback should
-        // produce facts that enter the engine, just like claim() at the top level.
+    fn test_claim_inside_callback_is_error() {
+        // claim() inside a callback is a runtime error — use hold() instead.
+        // Claims have no lifecycle management in callbacks (no automatic retraction).
         let mut engine = JamEngine::new();
 
         let tsx = r#"
@@ -1246,14 +1245,38 @@ mod tests {
         assert!(!result.starts_with("ERROR"), "load failed: {result}");
         let _ = engine.step_json();
 
-        // Press the button — the callback calls claim()
-        engine.fire_event("root/btn", "onPress");
+        // Press the button — the callback calls claim(), which should error
+        let result = engine.fire_event("root/btn", "onPress");
+        assert!(
+            result.starts_with("ERROR"),
+            "claim() in callback should produce an error: {result}"
+        );
+    }
+
+    #[test]
+    fn test_hold_inside_callback_works() {
+        // hold() is the correct way to mutate state from callbacks
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("s", [["value", "before"]]);
+            render(
+                <Button key="btn" label="Update" onPress={() => {
+                    hold("s", [["value", "after"]]);
+                }} />
+            );
+        "#;
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
 
         let f = engine.current_facts_json();
-        assert!(
-            f.contains(r#""added","fact","from","callback""#),
-            "claim() inside callback should produce a fact: {f}"
-        );
+        assert!(f.contains(r#""value","before""#), "initial: {f}");
+
+        engine.fire_event("root/btn", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""value","after""#), "hold should work: {f}");
+        assert!(!f.contains(r#""value","before""#), "old value retracted: {f}");
     }
 
     #[test]

@@ -112,7 +112,19 @@ const __callbackTable = new Map<string, Function>();
 
 // --- claim() and wish() ---
 
+// True while a fire_callback is executing. claim() is not allowed here
+// because callback-produced claims have no lifecycle management (no automatic
+// retraction). Use hold() instead.
+let __inCallback = false;
+
 function claim(...terms: any[]): void {
+  if (__inCallback && __collector === null) {
+    throw new Error(
+      "claim() cannot be called inside a callback. " +
+      "Use hold() instead — callbacks are imperative, not reactive. " +
+      "hold() provides persistent state that when() rules can react to."
+    );
+  }
   if (__collector !== null) {
     // Inside a rule body being fired — accumulate
     __collector.push(terms);
@@ -350,10 +362,15 @@ function render(element: any, parentId?: string, isInsertion?: boolean): void {
   fireCallback(callbackId: string, data?: any): boolean {
     const cb = __callbackTable.get(callbackId);
     if (cb) {
-      if (data !== undefined) {
-        cb(data);
-      } else {
-        cb();
+      __inCallback = true;
+      try {
+        if (data !== undefined) {
+          cb(data);
+        } else {
+          cb();
+        }
+      } finally {
+        __inCallback = false;
       }
       return true;
     }

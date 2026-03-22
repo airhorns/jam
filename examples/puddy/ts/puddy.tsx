@@ -48,6 +48,8 @@ hold("ui", [
 ]);
 
 // --- Helper: add a message to a session ---
+// Each message is a separate hold key so messages accumulate independently.
+// hold() is used (not claim()) because callbacks are imperative, not reactive.
 let _msgCounter = 0;
 function addMessage(
   sessionId: string,
@@ -56,7 +58,9 @@ function addMessage(
   content: string
 ) {
   const msgId = `msg-${_msgCounter++}`;
-  claim("message", sessionId, msgId, sender, kindType, content);
+  hold(`msg-${sessionId}-${msgId}`, [
+    ["message", sessionId, msgId, sender, kindType, content],
+  ]);
 }
 
 // --- Render ---
