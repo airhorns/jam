@@ -7,6 +7,16 @@ use crate::rule::{BodyFn, HoldOp, PatternExpr, Program, RuleSpec};
 use crate::term::{Statement, Term};
 use crate::transpile;
 
+/// Initialize LLRT globals (console, etc.) on a QuickJS context.
+/// Requires BasePrimordials initialization first (caches JS built-in constructors).
+fn init_llrt_globals(ctx: &rquickjs::Ctx<'_>) -> rquickjs::Result<()> {
+    use llrt_utils::primordials::{BasePrimordials, Primordial};
+    BasePrimordials::init(ctx)?;
+    llrt_modules::console::init(ctx)?;
+    llrt_modules::fetch::init(ctx)?;
+    Ok(())
+}
+
 /// The Jam runtime JavaScript source, transpiled from TypeScript at first use.
 /// Includes both the core runtime and the SwiftUI component library.
 fn get_runtime_js() -> &'static str {
@@ -61,6 +71,9 @@ impl JsRuntime {
         let extract_ctx = Context::full(&self.runtime).expect("Failed to create context");
 
         let (claims, rule_data) = extract_ctx.with(|ctx| {
+            // Register console as a global
+            init_llrt_globals(&ctx).map_err(|e| format!("Console init error: {e}"))?;
+
             ctx.eval::<(), _>(runtime_js)
                 .map_err(|e| format!("Runtime eval error: {e}"))?;
             ctx.eval::<(), _>(js.as_str())
@@ -85,6 +98,9 @@ impl JsRuntime {
         let body_ctx = Context::full(&body_runtime).expect("Failed to create body context");
 
         body_ctx.with(|ctx| {
+            // Register console as a global
+            init_llrt_globals(&ctx).expect("Failed to init console");
+
             ctx.eval::<(), _>(runtime_js).expect("Failed to eval runtime");
             ctx.eval::<(), _>(js.as_str()).expect("Failed to eval script");
         });

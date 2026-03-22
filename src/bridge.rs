@@ -1365,4 +1365,45 @@ mod tests {
         assert!(f.contains(r#"["x",99]"#), "x should be 99: {f}");
         assert!(f.contains(r#"["dx",-1]"#), "dx should be -1: {f}");
     }
+
+    // ========================================================================
+    // LLRT module tests
+    // ========================================================================
+
+    #[test]
+    fn test_console_log_works() {
+        // console.log should not crash — it's wired up via LLRT
+        let mut engine = JamEngine::new();
+
+        let ts = r#"
+            console.log("hello from jam!");
+            console.error("error test");
+            console.warn("warn test");
+            claim("console", "works");
+        "#;
+        let result = engine.load_program("test", ts);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""console","works""#), "program should run: {f}");
+    }
+
+    #[test]
+    fn test_fetch_is_available() {
+        // fetch() should be available as a global function
+        let mut engine = JamEngine::new();
+
+        let ts = r#"
+            claim("fetch_type", typeof fetch);
+            claim("fetch_exists", typeof fetch === "function");
+        "#;
+        let result = engine.load_program("test", ts);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""fetch_type","function""#), "fetch should be a function: {f}");
+        assert!(f.contains(r#""fetch_exists",true"#), "fetch should exist: {f}");
+    }
 }
