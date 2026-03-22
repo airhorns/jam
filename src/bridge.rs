@@ -8,9 +8,8 @@ use crate::term::{Statement, Term};
 pub struct JamEngine {
     engine: Engine,
     js_runtime: JsRuntime,
-    /// Maps body contexts to their program IDs for routing hold ops from callbacks.
-    /// Currently only one program's callbacks are active at a time (the most recently loaded).
-    /// TODO: support multiple concurrent programs with callbacks.
+    /// Program ID of the most recently loaded program. Used for routing hold ops
+    /// from callbacks to the correct program's hold key scope.
     active_program_id: Option<u64>,
 }
 
