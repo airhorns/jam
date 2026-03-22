@@ -1,0 +1,5 @@
+module CJamBridge {
+    header "SwiftBridgeCore.h"
+    header "jam.h"
+    export *
+}

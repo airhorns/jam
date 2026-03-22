@@ -2,16 +2,16 @@ import SwiftUI
 
 // MARK: - Entity model built from claims
 
-struct UIEntity {
-    var id: String
-    var type: String = ""
-    var properties: [String: JamTerm] = [:]
-    var children: [(sortKey: String, childId: String)] = []
+public struct UIEntity {
+    public var id: String
+    public var type: String = ""
+    public var properties: [String: JamTerm] = [:]
+    public var children: [(sortKey: String, childId: String)] = []
 }
 
 // MARK: - Build entity map from facts
 
-func buildEntityMap(from facts: [JamStatement]) -> [String: UIEntity] {
+public func buildEntityMap(from facts: [JamStatement]) -> [String: UIEntity] {
     var entities: [String: UIEntity] = [:]
 
     for fact in facts {
@@ -50,11 +50,16 @@ func buildEntityMap(from facts: [JamStatement]) -> [String: UIEntity] {
 
 // MARK: - SwiftUI renderer
 
-struct JamView: View {
-    let engine: JamEngineWrapper
-    let rootId: String
+public struct JamView: View {
+    public let engine: JamEngineWrapper
+    public let rootId: String
 
-    var body: some View {
+    public init(engine: JamEngineWrapper, rootId: String) {
+        self.engine = engine
+        self.rootId = rootId
+    }
+
+    public var body: some View {
         let entities = buildEntityMap(from: engine.currentFacts)
         if let root = entities[rootId] {
             renderEntity(root, entities: entities)
@@ -315,14 +320,14 @@ struct JamView: View {
 
 // MARK: - TextField with local state
 
-struct TextFieldView: View {
-    let placeholder: String
-    let font: Font?
-    let onSubmit: (String) -> Void
+public struct TextFieldView: View {
+    public let placeholder: String
+    public let font: Font?
+    public let onSubmit: (String) -> Void
 
     @State private var text = ""
 
-    var body: some View {
+    public var body: some View {
         SwiftUI.TextField(placeholder, text: $text)
             .font(font)
             .onSubmit {

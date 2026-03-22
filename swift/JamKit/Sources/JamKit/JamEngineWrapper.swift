@@ -3,13 +3,13 @@ import Observation
 
 // MARK: - JSON types for Jam data
 
-enum JamTerm: Hashable {
+public enum JamTerm: Hashable {
     case symbol(String)
     case int(Int)
     case bool(Bool)
     case null
 
-    var stringValue: String? {
+    public var stringValue: String? {
         switch self {
         case .symbol(let s): return s
         case .int(let n): return String(n)
@@ -18,34 +18,35 @@ enum JamTerm: Hashable {
         }
     }
 
-    var intValue: Int? {
+    public var intValue: Int? {
         if case .int(let n) = self { return n }
         return nil
     }
 }
 
-struct JamStatement: Hashable {
-    let terms: [JamTerm]
+public struct JamStatement: Hashable {
+    public let terms: [JamTerm]
+    public init(terms: [JamTerm]) { self.terms = terms }
 }
 
-struct JamDelta {
-    let statement: JamStatement
-    let weight: Int
+public struct JamDelta {
+    public let statement: JamStatement
+    public let weight: Int
 }
 
 // MARK: - Engine wrapper
 
 @Observable
-class JamEngineWrapper {
+public class JamEngineWrapper {
     private var engine: JamEngine
-    private(set) var currentFacts: [JamStatement] = []
+    public private(set) var currentFacts: [JamStatement] = []
 
-    init() {
+    public init() {
         self.engine = JamEngine()
     }
 
     @discardableResult
-    func loadProgram(name: String, source: String) throws -> UInt64 {
+    public func loadProgram(name: String, source: String) throws -> UInt64 {
         let result = engine.load_program(name, source).toString()
         if result.hasPrefix("ERROR: ") {
             throw JamError.loadFailed(String(result.dropFirst(7)))
@@ -56,11 +57,11 @@ class JamEngineWrapper {
         return id
     }
 
-    func removeProgram(_ id: UInt64) {
+    public func removeProgram(_ id: UInt64) {
         engine.remove_program(id)
     }
 
-    func assertFact(_ terms: [JamTerm]) throws {
+    public func assertFact(_ terms: [JamTerm]) throws {
         let json = encodeTerms(terms)
         let result = engine.assert_fact_json(json).toString()
         if result.hasPrefix("ERROR: ") {
@@ -68,7 +69,7 @@ class JamEngineWrapper {
         }
     }
 
-    func retractFact(_ terms: [JamTerm]) throws {
+    public func retractFact(_ terms: [JamTerm]) throws {
         let json = encodeTerms(terms)
         let result = engine.retract_fact_json(json).toString()
         if result.hasPrefix("ERROR: ") {
@@ -78,8 +79,13 @@ class JamEngineWrapper {
 
     /// Fire an event callback on an entity (e.g., button press).
     /// The Rust side invokes the JS callback, applies hold ops, and steps the engine.
-    func fireEvent(entityId: String, eventName: String) {
-        let result = engine.fire_event(entityId, eventName).toString()
+    public func fireEvent(entityId: String, eventName: String, data: String? = nil) {
+        let result: String
+        if let data = data {
+            result = engine.fire_event_with_data(entityId, eventName, data).toString()
+        } else {
+            result = engine.fire_event(entityId, eventName).toString()
+        }
         if result.hasPrefix("ERROR: ") {
             print("fireEvent error: \(result)")
         }
@@ -87,15 +93,20 @@ class JamEngineWrapper {
     }
 
     @discardableResult
-    func step() -> [JamDelta] {
+    public func step() -> [JamDelta] {
         let json = engine.step_json().toString()
         let deltas = parseDeltas(json)
         refreshFacts()
         return deltas
     }
 
+    /// Returns the raw JSON string of current facts (for debug server).
+    public func currentFactsJson() -> String {
+        return engine.current_facts_json().toString()
+    }
+
     private func refreshFacts() {
-        let json = engine.current_facts_json().toString()
+        let json = currentFactsJson()
         currentFacts = parseFacts(json)
     }
 
@@ -155,13 +166,13 @@ class JamEngineWrapper {
     }
 }
 
-enum JamError: Error, LocalizedError {
+public enum JamError: Error, LocalizedError {
     case loadFailed(String)
     case invalidProgramId(String)
     case assertFailed(String)
     case retractFailed(String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .loadFailed(let s): return "Load failed: \(s)"
         case .invalidProgramId(let s): return "Invalid program ID: \(s)"

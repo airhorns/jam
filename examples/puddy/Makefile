@@ -1,5 +1,4 @@
 RUST_ROOT = ../..
-BRIDGE_OUT_DIR = $(shell find $(RUST_ROOT)/target/release/build/jam-*/out -maxdepth 0 2>/dev/null | head -1)
 
 XCODE_DEV = /Applications/Xcode.app/Contents/Developer
 SWIFT = $(XCODE_DEV)/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift
@@ -11,21 +10,14 @@ SWIFT_ENV = env -i \
 	DEVELOPER_DIR=$(XCODE_DEV) \
 	SDKROOT=$(XCODE_SDK)
 
-.PHONY: build run clean build-rust copy-bridge build-swift
+.PHONY: build run clean build-rust build-swift
 
-build: build-rust copy-bridge build-swift
+build: build-rust build-swift
 
 build-rust:
 	cd $(RUST_ROOT) && cargo build --release
 
-copy-bridge: build-rust
-	@echo "Copying generated bridge files from $(BRIDGE_OUT_DIR)"
-	cp $(BRIDGE_OUT_DIR)/SwiftBridgeCore.h Sources/PuddyApp/Generated/
-	cp $(BRIDGE_OUT_DIR)/SwiftBridgeCore.swift Sources/PuddyApp/Generated/
-	cp $(BRIDGE_OUT_DIR)/jam/jam.h Sources/PuddyApp/Generated/
-	cp $(BRIDGE_OUT_DIR)/jam/jam.swift Sources/PuddyApp/Generated/
-
-build-swift: copy-bridge
+build-swift: build-rust
 	$(SWIFT_ENV) $(SWIFT) build
 
 run: build
@@ -34,5 +26,3 @@ run: build
 clean:
 	cd $(RUST_ROOT) && cargo clean
 	$(SWIFT_ENV) $(SWIFT) package clean
-	rm -f Sources/PuddyApp/Generated/SwiftBridgeCore.h Sources/PuddyApp/Generated/SwiftBridgeCore.swift
-	rm -f Sources/PuddyApp/Generated/jam.h Sources/PuddyApp/Generated/jam.swift

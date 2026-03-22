@@ -4,20 +4,16 @@ import PackageDescription
 let package = Package(
     name: "PuddyApp",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        .package(path: "../../swift/JamKit"),
+    ],
     targets: [
         .executableTarget(
             name: "PuddyApp",
-            path: "Sources/PuddyApp",
-            swiftSettings: [
-                .unsafeFlags(["-import-objc-header", "Sources/PuddyApp/Generated/bridging-header.h"]),
+            dependencies: [
+                .product(name: "JamKit", package: "JamKit"),
             ],
-            linkerSettings: [
-                .unsafeFlags([
-                    "-L../../target/release",
-                    "-ljam",
-                ]),
-                .linkedLibrary("c++"),
-            ]
+            path: "Sources/PuddyApp"
         ),
     ]
 )

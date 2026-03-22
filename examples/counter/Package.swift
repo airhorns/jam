@@ -4,20 +4,16 @@ import PackageDescription
 let package = Package(
     name: "CounterApp",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        .package(path: "../../swift/JamKit"),
+    ],
     targets: [
         .executableTarget(
             name: "CounterApp",
-            path: "Sources/CounterApp",
-            swiftSettings: [
-                .unsafeFlags(["-import-objc-header", "Sources/CounterApp/Generated/bridging-header.h"]),
+            dependencies: [
+                .product(name: "JamKit", package: "JamKit"),
             ],
-            linkerSettings: [
-                .unsafeFlags([
-                    "-L../../target/release",
-                    "-ljam",
-                ]),
-                .linkedLibrary("c++"),
-            ]
+            path: "Sources/CounterApp"
         ),
     ]
 )
