@@ -143,6 +143,22 @@ impl JsRuntime {
         })
     }
 
+    /// Refresh callbacks by re-deriving them from current facts.
+    /// Called after fire_event steps to fix stale closures from DBSP retraction ordering.
+    pub fn refresh_callbacks(&self, facts_json: &str) -> Result<(), String> {
+        let body_ctx = self.body_ctx.as_ref().ok_or("No body context")?;
+        let guard = body_ctx.lock().unwrap();
+        guard.context.with(|ctx| {
+            let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
+            let refresh: Function =
+                jam.get("refreshCallbacks").map_err(|e| format!("{e}"))?;
+            refresh
+                .call::<_, ()>((facts_json,))
+                .map_err(|e| format!("Callback refresh error: {e}"))?;
+            Ok(())
+        })
+    }
+
     /// Extract pending hold operations from the JS context.
     fn extract_hold_ops(&self) -> Result<Vec<HoldOp>, String> {
         let body_ctx = self.body_ctx.as_ref().ok_or("No body context")?;
@@ -222,14 +238,21 @@ fn js_term_array_to_statement(val: &Value) -> Result<Statement, String> {
 
 /// Convert a JS value to a Rust Term.
 fn js_value_to_term(val: &Value) -> Result<Term, String> {
+    // Try to extract as number first. QuickJS uses a tagged value representation
+    // where integers and floats are distinct. rquickjs's as_number() handles both.
+    if let Some(n) = val.as_number() {
+        return Ok(Term::Int(n as i64));
+    }
+    if let Some(n) = val.as_int() {
+        return Ok(Term::Int(n as i64));
+    }
+    if let Some(n) = val.as_float() {
+        return Ok(Term::Int(n as i64));
+    }
     if let Some(s) = val.as_string() {
         Ok(Term::Symbol(
             s.to_string().map_err(|e| format!("{e}"))?,
         ))
-    } else if let Some(n) = val.as_int() {
-        Ok(Term::Int(n as i64))
-    } else if let Some(n) = val.as_float() {
-        Ok(Term::Int(n as i64))
     } else if let Some(b) = val.as_bool() {
         Ok(Term::Bool(b))
     } else {
@@ -388,10 +411,10 @@ fn build_rule_specs(
 
 /// Create a BodyFn that calls a JS function by rule index.
 fn create_body_fn(rule_index: usize, shared: Arc<Mutex<BodyContext>>) -> BodyFn {
-    Arc::new(move |bindings| {
+    Arc::new(move |bindings, is_insertion| {
         let guard = shared.lock().unwrap();
         guard.context.with(|ctx| {
-            // Set empty collector
+            // Set empty collector for accumulating claims from the body
             let jam: Object = ctx.globals().get("__jam").unwrap();
             let set_collector: Function = jam.get("setCollector").unwrap();
             let empty_arr = rquickjs::Array::new(ctx.clone()).unwrap();
@@ -405,7 +428,12 @@ fn create_body_fn(rule_index: usize, shared: Arc<Mutex<BodyContext>>) -> BodyFn 
                         bindings_obj.set(name.as_str(), s.as_str()).ok();
                     }
                     Term::Int(n) => {
-                        bindings_obj.set(name.as_str(), *n as f64).ok();
+                        // Use i32 for small numbers to ensure QuickJS stores as integer
+                        if *n >= i32::MIN as i64 && *n <= i32::MAX as i64 {
+                            bindings_obj.set(name.as_str(), *n as i32).ok();
+                        } else {
+                            bindings_obj.set(name.as_str(), *n as f64).ok();
+                        }
                     }
                     Term::Bool(b) => {
                         bindings_obj.set(name.as_str(), *b).ok();
@@ -419,7 +447,7 @@ fn create_body_fn(rule_index: usize, shared: Arc<Mutex<BodyContext>>) -> BodyFn 
             let rule: Object = rules.get(rule_index).unwrap();
             let body: Function = rule.get("body").unwrap();
 
-            if let Err(e) = body.call::<_, ()>((bindings_obj,)) {
+            if let Err(e) = body.call::<_, ()>((bindings_obj, is_insertion)) {
                 eprintln!("Rule body error: {e}");
             }
 
@@ -532,7 +560,7 @@ mod tests {
         // Call the body function with test bindings
         let mut bindings = crate::pattern::Bindings::new();
         bindings.insert("x".to_string(), Term::sym("omar"));
-        let results = (program.rules[0].body)(&bindings);
+        let results = (program.rules[0].body)(&bindings, true);
 
         assert_eq!(results.len(), 1);
         assert_eq!(
@@ -565,12 +593,12 @@ mod tests {
         // With x = "omar", should produce 2 claims
         let mut bindings = crate::pattern::Bindings::new();
         bindings.insert("x".to_string(), Term::sym("omar"));
-        let results = (program.rules[0].body)(&bindings);
+        let results = (program.rules[0].body)(&bindings, true);
         assert_eq!(results.len(), 2);
 
         // With x = "alice", should produce 1 claim
         bindings.insert("x".to_string(), Term::sym("alice"));
-        let results = (program.rules[0].body)(&bindings);
+        let results = (program.rules[0].body)(&bindings, true);
         assert_eq!(results.len(), 1);
     }
 

@@ -360,7 +360,7 @@ mod tests {
     fn cool_to_awesome_program() -> Program {
         Program::new("cool_to_awesome").with_rules(vec![RuleSpec::new(
             vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
-            |bindings| {
+            |bindings, _is_insertion| {
                 let x = bindings.get("x").unwrap().clone();
                 vec![stmt![x, Term::sym("is"), Term::sym("awesome")]]
             },
@@ -437,7 +437,7 @@ mod tests {
                 ]])
                 .with_rules(vec![RuleSpec::new(
                     vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
-                    |bindings| {
+                    |bindings, _is_insertion| {
                         let x = bindings.get("x").unwrap().clone();
                         vec![stmt![x, Term::sym("is"), Term::sym("awesome")]]
                     },
@@ -580,7 +580,7 @@ mod tests {
         engine.add_program(
             Program::new("awesome_to_legendary").with_rules(vec![RuleSpec::new(
                 vec![pat![bind("x"), exact_sym("is"), exact_sym("awesome")]],
-                |bindings| {
+                |bindings, _is_insertion| {
                     let x = bindings.get("x").unwrap().clone();
                     vec![stmt![x, Term::sym("is"), Term::sym("legendary")]]
                 },
@@ -618,13 +618,13 @@ mod tests {
                 // Outer when: [x] is cool
                 RuleSpec::new(
                     vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
-                    |_| vec![], // outer body claims nothing on its own
+                    |_, _| vec![], // outer body claims nothing on its own
                 )
                 .with_whens(vec![
                     // Nested: when [x] has-mood happy → smile
                     RuleSpec::new(
                         vec![pat![bind("x"), exact_sym("has-mood"), exact_sym("happy")]],
-                        |bindings| {
+                        |bindings, _is_insertion| {
                             let x = bindings.get("x").unwrap().clone();
                             vec![stmt![x, Term::sym("should"), Term::sym("smile")]]
                         },
@@ -632,7 +632,7 @@ mod tests {
                     // Nested: when [x] has-mood sad → cry
                     RuleSpec::new(
                         vec![pat![bind("x"), exact_sym("has-mood"), exact_sym("sad")]],
-                        |bindings| {
+                        |bindings, _is_insertion| {
                             let x = bindings.get("x").unwrap().clone();
                             vec![stmt![x, Term::sym("should"), Term::sym("cry")]]
                         },
@@ -732,14 +732,14 @@ mod tests {
         engine.add_program(
             Program::new("cool_with_nested").with_rules(vec![RuleSpec::new(
                 vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
-                |bindings| {
+                |bindings, _is_insertion| {
                     let x = bindings.get("x").unwrap().clone();
                     vec![stmt![x, Term::sym("is"), Term::sym("awesome")]]
                 },
             )
             .with_whens(vec![RuleSpec::new(
                 vec![pat![bind("x"), exact_sym("is"), exact_sym("tall")]],
-                |bindings| {
+                |bindings, _is_insertion| {
                     let x = bindings.get("x").unwrap().clone();
                     vec![stmt![x, Term::sym("is"), Term::sym("impressive")]]
                 },
@@ -794,19 +794,19 @@ mod tests {
         engine.add_program(
             Program::new("mood_reactions").with_rules(vec![RuleSpec::new(
                 vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
-                |_| vec![],
+                |_, _| vec![],
             )
             .with_whens(vec![
                 RuleSpec::new(
                     vec![pat![bind("x"), exact_sym("has-mood"), exact_sym("happy")]],
-                    |bindings| {
+                    |bindings, _is_insertion| {
                         let x = bindings.get("x").unwrap().clone();
                         vec![stmt![x, Term::sym("should"), Term::sym("smile")]]
                     },
                 ),
                 RuleSpec::new(
                     vec![pat![bind("x"), exact_sym("has-mood"), exact_sym("sad")]],
-                    |bindings| {
+                    |bindings, _is_insertion| {
                         let x = bindings.get("x").unwrap().clone();
                         vec![stmt![x, Term::sym("should"), Term::sym("cry")]]
                     },
@@ -882,7 +882,7 @@ mod tests {
                     pat![bind("x"), exact_sym("is"), exact_sym("cool")],
                     pat![bind("x"), exact_sym("is"), exact_sym("tall")],
                 ],
-                |bindings| {
+                |bindings, _is_insertion| {
                     let x = bindings.get("x").unwrap().clone();
                     vec![stmt![x, Term::sym("is"), Term::sym("impressive")]]
                 },
@@ -916,7 +916,7 @@ mod tests {
                     pat![bind("x"), exact_sym("is"), exact_sym("cool")],
                     pat![bind("x"), exact_sym("is"), exact_sym("awesome")],
                 ]),
-                |bindings| {
+                |bindings, _is_insertion| {
                     let x = bindings.get("x").unwrap().clone();
                     vec![stmt![x, Term::sym("is"), Term::sym("notable")]]
                 },
@@ -965,7 +965,7 @@ mod tests {
                     pat![bind("x"), exact_sym("is"), exact_sym("cool")],
                     pat![bind("x"), exact_sym("is"), exact_sym("awesome")],
                 ]),
-                |bindings| {
+                |bindings, _is_insertion| {
                     let x = bindings.get("x").unwrap().clone();
                     vec![stmt![x, Term::sym("is"), Term::sym("notable")]]
                 },
@@ -1026,7 +1026,7 @@ mod tests {
                     ]),
                     pat![bind("x"), exact_sym("is"), exact_sym("tall")].into(),
                 ]),
-                |bindings| {
+                |bindings, _is_insertion| {
                     let x = bindings.get("x").unwrap().clone();
                     vec![stmt![x, Term::sym("is"), Term::sym("impressive")]]
                 },
@@ -1091,11 +1091,11 @@ mod tests {
                     pat![bind("x"), exact_sym("is"), exact_sym("cool")],
                     pat![bind("x"), exact_sym("is"), exact_sym("awesome")],
                 ]),
-                |_| vec![],
+                |_, _| vec![],
             )
             .with_whens(vec![RuleSpec::new(
                 vec![pat![bind("x"), exact_sym("has-mood"), exact_sym("happy")]],
-                |bindings| {
+                |bindings, _is_insertion| {
                     let x = bindings.get("x").unwrap().clone();
                     vec![stmt![x, Term::sym("should"), Term::sym("celebrate")]]
                 },

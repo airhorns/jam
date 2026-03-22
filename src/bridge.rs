@@ -57,7 +57,17 @@ impl JamEngine {
                 }
 
                 // Step the engine to propagate changes
-                self.step_json()
+                let result = self.step_json();
+
+                // Refresh callbacks: DBSP's flat_map doesn't expose weights,
+                // so retraction body calls may overwrite fresh callbacks with stale ones.
+                // Re-derive from current facts to fix this (one body call per matching rule).
+                let facts_json = self.current_facts_json();
+                if let Err(e) = self.js_runtime.refresh_callbacks(&facts_json) {
+                    eprintln!("Callback refresh error: {e}");
+                }
+
+                result
             }
             Err(e) => format!("ERROR: {e}"),
         }
@@ -926,6 +936,114 @@ mod tests {
     }
 
     #[test]
+    fn test_hold_closure_type_preservation() {
+        // Minimal repro: set a binding from Rust, capture in closure, call from Rust
+        let mut engine = JamEngine::new();
+
+        // This program uses imperative style (no JSX) to test the closure
+        let ts = r#"
+            hold("s", [["val", 0]]);
+
+            when(["val", $.v], ({ v }) => {
+                // Register a callback that closes over v
+                child("btn", () => {
+                    claim($this, "isa", "Button");
+                    claim($this, "label", "go");
+                    claim($this, "captured_type", typeof v);
+                    claim($this, "captured_value", v);
+                });
+            });
+        "#;
+
+        let result = engine.load_program("test", ts);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        eprintln!("facts: {f}");
+        // Check what type the captured v has
+        assert!(f.contains("\"captured_type\",\"number\""),
+            "v should be number type: {f}");
+    }
+
+    #[test]
+    fn test_hold_number_from_dbsp_binding() {
+        // Test: closure over a DBSP binding captures the number correctly
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("s", [["val", 0]]);
+            render(
+                <VStack key="x">
+                    {when(["val", $.v], ({ v }) =>
+                        <Button key="btn" label="go" onPress={() => {
+                            hold("s", [["val", v + 1]]);
+                        }} />
+                    )}
+                </VStack>
+            );
+        "#;
+
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Initial: val should be 0 (number)
+        let f = engine.current_facts_json();
+        assert!(f.contains("[\"val\",0]"), "initial: {f}");
+
+        // Press: v=0, v+1=1 → should be number 1
+        engine.fire_event("root/x/btn", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains("[\"val\",1]"), "after 1st press should be number 1: {f}");
+
+        // Press again: v=1, v+1=2 → should be number 2
+        engine.fire_event("root/x/btn", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains("[\"val\",2]"), "after 2nd press should be number 2: {f}");
+    }
+
+    #[test]
+    fn test_three_term_pattern_refresh() {
+        // Minimal repro: 3-term pattern with hold, fire_event, check value type
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("s", [["a", "b", 0]]);
+            render(
+                <VStack key="x">
+                    {when(["a", "b", $.v], ({ v }) =>
+                        <>
+                            <Text key="d">{"v=" + v + " type=" + typeof v}</Text>
+                            <Button key="btn" label="go" onPress={() => {
+                                hold("s", [["a", "b", v + 1]]);
+                            }} />
+                        </>
+                    )}
+                </VStack>
+            );
+        "#;
+
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        eprintln!("initial: {f}");
+        assert!(f.contains("\"v=0 type=number\""), "initial: {f}");
+
+        engine.fire_event("root/x/btn", "onPress");
+        let f = engine.current_facts_json();
+        eprintln!("after 1st press: {f}");
+        assert!(f.contains("\"v=1 type=number\""), "after 1st: {f}");
+
+        engine.fire_event("root/x/btn", "onPress");
+        let f = engine.current_facts_json();
+        eprintln!("after 2nd press: {f}");
+        assert!(f.contains("\"v=2 type=number\""), "after 2nd: {f}");
+    }
+
+    #[test]
     fn test_two_button_closures() {
         let mut engine = JamEngine::new();
 
@@ -954,19 +1072,16 @@ mod tests {
         let _ = engine.step_json();
 
         // n=0, inc → n=1
-        eprintln!("--- pressing inc (expect 0→1)");
         engine.fire_event("root/app/inc", "onPress");
         let f = engine.current_facts_json();
         assert!(f.contains("\"n=1\""), "expected n=1: {f}");
 
         // n=1, dec → n=0
-        eprintln!("--- pressing dec (expect 1→0)");
         engine.fire_event("root/app/dec", "onPress");
         let f = engine.current_facts_json();
         assert!(f.contains("\"n=0\""), "expected n=0: {f}");
 
         // n=0, inc → n=1
-        eprintln!("--- pressing inc again (expect 0→1)");
         engine.fire_event("root/app/inc", "onPress");
         let f = engine.current_facts_json();
         assert!(f.contains("\"n=1\""), "expected n=1 again: {f}");
@@ -1050,5 +1165,204 @@ mod tests {
 
         let result = engine.fire_event("root/nonexistent", "onPress");
         assert!(result.starts_with("ERROR"), "expected error for missing callback, got: {result}");
+    }
+
+    // ========================================================================
+    // Callback property tests
+    // ========================================================================
+
+    #[test]
+    fn test_any_function_prop_is_callback() {
+        // Callbacks aren't limited to onPress — any function prop works
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("s", [["toggled", false]]);
+            render(
+                <VStack key="app">
+                    <Button key="btn" label="Toggle"
+                        onPress={() => { hold("s", [["toggled", true]]); }}
+                        onLongPress={() => { hold("s", [["toggled", "long"]]); }}
+                        onDoubleTap={() => { hold("s", [["toggled", "double"]]); }}
+                    />
+                </VStack>
+            );
+        "#;
+
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // All three callbacks should be registered
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""onPress",true"#), "onPress marker missing: {f}");
+        assert!(f.contains(r#""onLongPress",true"#), "onLongPress marker missing: {f}");
+        assert!(f.contains(r#""onDoubleTap",true"#), "onDoubleTap marker missing: {f}");
+
+        // Fire onPress
+        engine.fire_event("root/app/btn", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""toggled",true"#), "onPress didn't fire: {f}");
+
+        // Reset and fire onLongPress
+        engine.fire_event("root/app/btn", "onLongPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""toggled","long""#), "onLongPress didn't fire: {f}");
+
+        // Fire onDoubleTap
+        engine.fire_event("root/app/btn", "onDoubleTap");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""toggled","double""#), "onDoubleTap didn't fire: {f}");
+    }
+
+    #[test]
+    fn test_custom_callback_names() {
+        // Callbacks can have any name, not just "on*"
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("s", [["state", "idle"]]);
+            render(
+                <VStack key="app">
+                    <Button key="btn" label="X"
+                        activate={() => { hold("s", [["state", "active"]]); }}
+                        dismiss={() => { hold("s", [["state", "dismissed"]]); }}
+                    />
+                </VStack>
+            );
+        "#;
+
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Custom callback names work
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""activate",true"#), "activate marker missing: {f}");
+        assert!(f.contains(r#""dismiss",true"#), "dismiss marker missing: {f}");
+
+        engine.fire_event("root/app/btn", "activate");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""state","active""#), "activate didn't fire: {f}");
+
+        engine.fire_event("root/app/btn", "dismiss");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""state","dismissed""#), "dismiss didn't fire: {f}");
+    }
+
+    #[test]
+    fn test_multiple_entities_with_independent_callbacks() {
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("s", [["a", 0], ["b", 0]]);
+            render(
+                <HStack key="row">
+                    <Button key="inc-a" label="A+" onPress={() => {
+                        hold("s", [["a", 1], ["b", 0]]);
+                    }} />
+                    <Button key="inc-b" label="B+" onPress={() => {
+                        hold("s", [["a", 0], ["b", 1]]);
+                    }} />
+                </HStack>
+            );
+        "#;
+
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Press A
+        engine.fire_event("root/row/inc-a", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#"["a",1]"#), "A should be 1: {f}");
+        assert!(f.contains(r#"["b",0]"#), "B should still be 0: {f}");
+
+        // Press B
+        engine.fire_event("root/row/inc-b", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#"["a",0]"#), "A should be 0: {f}");
+        assert!(f.contains(r#"["b",1]"#), "B should be 1: {f}");
+    }
+
+    #[test]
+    fn test_callback_inside_custom_component() {
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            function ActionButton(props) {
+                return <Button label={props.label} onPress={props.onPress} />;
+            }
+
+            hold("s", [["count", 0]]);
+            render(
+                <VStack key="app">
+                    {when(["count", $.n], ({ n }) =>
+                        <>
+                            <Text key="display">{"n=" + n}</Text>
+                            <ActionButton key="inc" label="+"
+                                onPress={() => { hold("s", [["count", n + 1]]); }} />
+                            <ActionButton key="dec" label="-"
+                                onPress={() => { hold("s", [["count", n - 1]]); }} />
+                        </>
+                    )}
+                </VStack>
+            );
+        "#;
+
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""n=0""#), "initial: {f}");
+
+        // Inc twice
+        engine.fire_event("root/app/inc", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""n=1""#), "after inc 1: {f}");
+
+        engine.fire_event("root/app/inc", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""n=2""#), "after inc 2: {f}");
+
+        // Dec twice
+        engine.fire_event("root/app/dec", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""n=1""#), "after dec 1: {f}");
+
+        engine.fire_event("root/app/dec", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""n=0""#), "after dec 2: {f}");
+    }
+
+    #[test]
+    fn test_callback_with_multiple_hold_keys() {
+        // A single callback can update multiple independent hold keys
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("pos", [["x", 0]]);
+            hold("vel", [["dx", 1]]);
+            render(
+                <Button key="step" label="Step" onPress={() => {
+                    hold("pos", [["x", 99]]);
+                    hold("vel", [["dx", -1]]);
+                }} />
+            );
+        "#;
+
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#"["x",0]"#), "initial x: {f}");
+        assert!(f.contains(r#"["dx",1]"#), "initial dx: {f}");
+
+        engine.fire_event("root/step", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#"["x",99]"#), "x should be 99: {f}");
+        assert!(f.contains(r#"["dx",-1]"#), "dx should be -1: {f}");
     }
 }

@@ -16,12 +16,15 @@ pub type RuleId = u64;
 /// Unique identifier for a program (a collection of rules + claims).
 pub type ProgramId = u64;
 
-/// The body function of a rule: takes bindings from pattern matching,
-/// returns zero or more derived statements.
+/// The body function of a rule: takes bindings from pattern matching
+/// and a flag indicating whether this is an insertion (true) or retraction (false).
+/// Returns zero or more derived statements.
 ///
-/// Must be deterministic — DBSP requires pure operators for correct
-/// incremental computation.
-pub type BodyFn = Arc<dyn Fn(&Bindings) -> Vec<Statement> + Send + Sync>;
+/// The claims produced must be the same regardless of is_insertion — DBSP requires
+/// deterministic operators. The flag exists so side effects like callback registration
+/// can be skipped during retractions (where DBSP's sort-order-dependent iteration
+/// would overwrite fresh callbacks with stale closures).
+pub type BodyFn = Arc<dyn Fn(&Bindings, bool) -> Vec<Statement> + Send + Sync>;
 
 /// A boolean expression over patterns, supporting AND, OR, and arbitrary nesting.
 ///
@@ -117,7 +120,7 @@ impl RuleSpec {
     /// Create a new rule. Accepts a single Pattern, Vec<Pattern>, or PatternExpr.
     pub fn new(
         pattern: impl Into<PatternExpr>,
-        body: impl Fn(&Bindings) -> Vec<Statement> + Send + Sync + 'static,
+        body: impl Fn(&Bindings, bool) -> Vec<Statement> + Send + Sync + 'static,
     ) -> Self {
         RuleSpec {
             pattern: pattern.into(),

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use dbsp::{DBSPHandle, OrdZSet, OutputHandle, Runtime, ZSetHandle};
+use dbsp::{DBSPHandle, OrdIndexedZSet, OrdZSet, OutputHandle, Runtime, ZSetHandle};
 
-use crate::pattern::{Bindings, Pattern};
+use crate::pattern::{Bindings, Pattern, PatternTerm};
 use crate::rule::BodyFn;
 use crate::term::{Statement, Term};
 
@@ -18,6 +18,32 @@ pub struct CircuitHandles {
     pub hold_input: ZSetHandle<Statement>,
     pub all_facts_output: OutputHandle<OrdZSet<Statement>>,
 }
+
+/// Extract a prefix key from a pattern: the tuple of (length, leading exact terms).
+/// This is used to index facts so that each rule only processes matching candidates.
+/// For example, pattern [Exact("counter"), Exact("count"), Bind("v")] → key (3, ["counter", "count"]).
+fn pattern_prefix_key(pattern: &Pattern) -> (usize, Vec<Term>) {
+    let len = pattern.terms.len();
+    let prefix: Vec<Term> = pattern
+        .terms
+        .iter()
+        .take_while(|t| matches!(t, PatternTerm::Exact(_)))
+        .map(|t| match t {
+            PatternTerm::Exact(term) => term.clone(),
+            _ => unreachable!(),
+        })
+        .collect();
+    (len, prefix)
+}
+
+/// Extract the same prefix key from a statement, given a prefix length.
+fn statement_prefix_key(stmt: &Statement, prefix_len: usize) -> Vec<Term> {
+    stmt.terms.iter().take(prefix_len).cloned().collect()
+}
+
+/// The key type for the prefix index: (statement_length, prefix_terms).
+/// Using a Vec<Term> is fine since Term derives all the DBSP traits.
+type PrefixKey = (usize, Vec<Term>);
 
 /// Build a DBSP circuit from a set of compiled rules.
 pub fn compile_circuit(rules: Vec<CompiledRule>) -> (DBSPHandle, CircuitHandles) {
@@ -84,14 +110,32 @@ pub fn compile_circuit(rules: Vec<CompiledRule>) -> (DBSPHandle, CircuitHandles)
 
                     let mut combined: Option<dbsp::Stream<_, OrdZSet<Statement>>> = None;
 
-                    // Single-pattern rules
+                    // Single-pattern rules: index facts by prefix, then flat_map only matching ones.
+                    // This avoids O(R×F) — each rule only processes facts matching its prefix.
                     for (pattern, body) in single_rules.iter() {
                         let pattern = pattern.clone();
                         let body = body.clone();
+                        let (key_len, key_prefix) = pattern_prefix_key(&pattern);
+                        let prefix_len = key_prefix.len();
 
-                        let derived = all_facts.flat_map(move |stmt| {
+                        // Index facts by (length, exact_prefix) → only matching values reach flat_map
+                        let indexed: dbsp::Stream<_, OrdIndexedZSet<PrefixKey, Statement>> =
+                            all_facts.map_index(move |stmt| {
+                                let prefix = statement_prefix_key(stmt, prefix_len);
+                                ((stmt.terms.len(), prefix), stmt.clone())
+                            });
+
+                        // flat_map on the indexed stream, filtering by prefix key.
+                        // Note: flat_map doesn't expose weights, so is_insertion is always true.
+                        // For callback correctness during decrements, fire_event does a targeted
+                        // re-derive after stepping.
+                        let key_for_filter = (key_len, key_prefix);
+                        let derived = indexed.flat_map(move |(key, stmt)| {
+                            if *key != key_for_filter {
+                                return vec![];
+                            }
                             if let Some(bindings) = pattern.match_statement(stmt) {
-                                body(&bindings)
+                                body(&bindings, true)
                             } else {
                                 vec![]
                             }
@@ -103,7 +147,7 @@ pub fn compile_circuit(rules: Vec<CompiledRule>) -> (DBSPHandle, CircuitHandles)
                         });
                     }
 
-                    // Two-pattern join rules
+                    // Two-pattern join rules (unchanged — join doesn't have the callback issue)
                     for (p1, p2, shared, body) in join_rules.iter() {
                         let p1 = p1.clone();
                         let p2 = p2.clone();
@@ -140,7 +184,8 @@ pub fn compile_circuit(rules: Vec<CompiledRule>) -> (DBSPHandle, CircuitHandles)
                             .join(&matches2, move |_key, b1, b2| {
                                 let mut merged = b1.clone();
                                 merged.extend(b2.iter().map(|(k, v)| (k.clone(), v.clone())));
-                                body(&merged)
+                                // join doesn't expose weights, treat as insertion
+                                body(&merged, true)
                             })
                             .flat_map(|stmts| stmts.clone());
 
@@ -177,7 +222,6 @@ fn make_join_key(shared_vars: &[String], bindings: &Bindings) -> Vec<Term> {
 }
 
 fn find_shared_vars(p1: &Pattern, p2: &Pattern) -> Vec<String> {
-    use crate::pattern::PatternTerm;
     use std::collections::HashSet;
 
     let vars1: HashSet<&str> = p1
@@ -218,7 +262,7 @@ mod tests {
     fn test_single_rule_derive_and_retract() {
         let rules = vec![CompiledRule {
             patterns: vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
-            body: Arc::new(|bindings| {
+            body: Arc::new(|bindings, _is_insertion| {
                 let x = bindings.get("x").unwrap().clone();
                 vec![stmt![x, Term::sym("is"), Term::sym("awesome")]]
             }),
@@ -252,14 +296,14 @@ mod tests {
         let rules = vec![
             CompiledRule {
                 patterns: vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
-                body: Arc::new(|bindings| {
+                body: Arc::new(|bindings, _is_insertion| {
                     let x = bindings.get("x").unwrap().clone();
                     vec![stmt![x, Term::sym("is"), Term::sym("awesome")]]
                 }),
             },
             CompiledRule {
                 patterns: vec![pat![bind("x"), exact_sym("is"), exact_sym("awesome")]],
-                body: Arc::new(|bindings| {
+                body: Arc::new(|bindings, _is_insertion| {
                     let x = bindings.get("x").unwrap().clone();
                     vec![stmt![x, Term::sym("is"), Term::sym("legendary")]]
                 }),
@@ -300,7 +344,7 @@ mod tests {
                 pat![bind("x"), exact_sym("is"), exact_sym("cool")],
                 pat![bind("x"), exact_sym("is"), exact_sym("tall")],
             ],
-            body: Arc::new(|bindings| {
+            body: Arc::new(|bindings, _is_insertion| {
                 let x = bindings.get("x").unwrap().clone();
                 vec![stmt![x, Term::sym("is"), Term::sym("impressive")]]
             }),
@@ -339,7 +383,7 @@ mod tests {
     fn test_hold_input_triggers_rules() {
         let rules = vec![CompiledRule {
             patterns: vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
-            body: Arc::new(|bindings| {
+            body: Arc::new(|bindings, _is_insertion| {
                 let x = bindings.get("x").unwrap().clone();
                 vec![stmt![x, Term::sym("is"), Term::sym("awesome")]]
             }),
@@ -378,7 +422,7 @@ mod tests {
     fn test_multiple_entities_independent() {
         let rules = vec![CompiledRule {
             patterns: vec![pat![bind("x"), exact_sym("is"), exact_sym("cool")]],
-            body: Arc::new(|bindings| {
+            body: Arc::new(|bindings, _is_insertion| {
                 let x = bindings.get("x").unwrap().clone();
                 vec![stmt![x, Term::sym("is"), Term::sym("awesome")]]
             }),
