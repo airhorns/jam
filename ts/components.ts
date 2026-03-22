@@ -75,6 +75,8 @@ export type ButtonProps = {
   font?: Font;
   foregroundColor?: Color;
   padding?: number;
+  onPress?: () => void;
+  [callbackName: string]: any; // allow arbitrary callback props
 };
 
 export type SpacerProps = {
@@ -126,6 +128,68 @@ export function Image(props: ImageProps) {
   return h("Image", props);
 }
 
+// --- Additional components for richer UIs ---
+
+export type ScrollViewProps = {
+  key?: string;
+  axis?: "vertical" | "horizontal";
+  padding?: number;
+  children?: any;
+};
+
+export type TextFieldProps = {
+  key?: string;
+  placeholder?: string;
+  font?: Font;
+  onSubmit?: (text: string) => void;
+  onChange?: (text: string) => void;
+  padding?: number;
+};
+
+export type NavigationSplitViewProps = {
+  key?: string;
+  children?: any; // expects exactly 2 children: sidebar and detail
+};
+
+export type ProgressViewProps = {
+  key?: string;
+  label?: string;
+};
+
+export type DividerProps = {
+  key?: string;
+};
+
+export type CircleProps = {
+  key?: string;
+  foregroundColor?: Color;
+  frame?: number; // width=height for circles
+};
+
+export function ScrollView(props: ScrollViewProps) {
+  return h("ScrollView", props, ...(asArray(props.children)));
+}
+
+export function TextField(props: TextFieldProps) {
+  return h("TextField", props);
+}
+
+export function NavigationSplitView(props: NavigationSplitViewProps) {
+  return h("NavigationSplitView", props, ...(asArray(props.children)));
+}
+
+export function ProgressView(props: ProgressViewProps = {}) {
+  return h("ProgressView", props);
+}
+
+export function Divider(props: DividerProps = {}) {
+  return h("Divider", props);
+}
+
+export function Circle(props: CircleProps = {}) {
+  return h("Circle", props);
+}
+
 // --- Helpers ---
 
 function asArray(children: any): any[] {
@@ -143,4 +207,7 @@ function propsWithout(props: any, ...keys: string[]): any {
 }
 
 // Export to globalThis for QuickJS
-Object.assign(globalThis, { VStack, HStack, ZStack, Text, Button, Spacer, Image });
+Object.assign(globalThis, {
+  VStack, HStack, ZStack, Text, Button, Spacer, Image,
+  ScrollView, TextField, NavigationSplitView, ProgressView, Divider, Circle,
+});

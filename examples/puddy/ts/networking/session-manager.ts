@@ -11,7 +11,7 @@ import {
 } from "../models/session";
 import { SandboxAgentClient, SandboxAgentError, type AgentInfo } from "./client";
 
-// _nextMsgId is defined in session.ts (shared scope when concatenated)
+let _nextUserMsgId = 0;
 
 export class SessionManager {
   private client: SandboxAgentClient;
@@ -96,7 +96,7 @@ export class SessionManager {
 
       if (initialPrompt) {
         const userMsg: ConversationItem = {
-          id: `msg-${_nextMsgId++}`,
+          id: `umsg-${_nextUserMsgId++}`,
           sender: "user",
           kind: { type: "text", text: initialPrompt },
           timestamp: Date.now(),
@@ -126,7 +126,7 @@ export class SessionManager {
     }
 
     const userMsg: ConversationItem = {
-      id: `msg-${_nextMsgId++}`,
+      id: `umsg-${_nextUserMsgId++}`,
       sender: "user",
       kind: { type: "text", text: message },
       timestamp: Date.now(),
