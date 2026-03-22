@@ -40,7 +40,7 @@ fn get_runtime_js() -> &'static str {
 
 /// Holds the QuickJS async runtime + context.
 /// Shared across all programs and body functions.
-struct JsContext {
+pub(crate) struct JsContext {
     runtime: AsyncRuntime,
     context: AsyncContext,
     tokio_rt: tokio::runtime::Runtime,
@@ -79,20 +79,33 @@ impl JsContext {
     }
 
     /// Eval additional JS code in the context (e.g., a new program).
-    fn eval(&self, js: &str) -> Result<(), String> {
+    pub(crate) fn eval(&self, js: &str) -> Result<(), String> {
         self.tokio_rt.block_on(self.context.with(|ctx| {
             ctx.eval::<(), _>(js)
-                .map_err(|e| format!("Eval error: {e}"))
+                .map_err(|e| {
+                    // Try to get the actual exception message
+                    let catch = ctx.catch();
+                    let detail = if let Some(exc) = catch.as_exception() {
+                        let msg = exc.message().unwrap_or_default();
+                        let stack = exc.stack().unwrap_or_default();
+                        format!("{msg}\n{stack}")
+                    } else if let Some(s) = catch.as_string() {
+                        s.to_string().unwrap_or_default()
+                    } else {
+                        format!("{e}")
+                    };
+                    format!("Eval error: {detail}")
+                })
         }))
     }
 
     /// Drive any pending async operations (fetch, timers) to completion.
-    fn idle(&self) {
+    pub(crate) fn idle(&self) {
         self.tokio_rt.block_on(self.runtime.idle());
     }
 
     /// Run a sync closure on the context (for reading state).
-    fn with<R: Send>(&self, f: impl FnOnce(rquickjs::Ctx<'_>) -> R + Send) -> R {
+    pub(crate) fn with<R: Send>(&self, f: impl FnOnce(rquickjs::Ctx<'_>) -> R + Send) -> R {
         self.tokio_rt.block_on(self.context.with(f))
     }
 }
@@ -101,7 +114,7 @@ impl JsContext {
 /// Uses a single persistent QuickJS context that all programs share.
 pub struct JsRuntime {
     /// Shared context for all programs, body functions, and callbacks.
-    shared: Arc<Mutex<JsContext>>,
+    pub(crate) shared: Arc<Mutex<JsContext>>,
     /// Number of rules before the latest program load (for extracting new rules).
     rules_before_load: usize,
 }
@@ -270,7 +283,7 @@ struct RuleData {
 }
 
 /// Convert a JS array of term arrays to Vec<Statement>.
-fn js_array_to_statements(val: &Value) -> Result<Vec<Statement>, String> {
+pub fn js_array_to_statements(val: &Value) -> Result<Vec<Statement>, String> {
     let arr = val.clone().into_array().ok_or("Expected array")?;
     let mut stmts = Vec::new();
     for i in 0..arr.len() {

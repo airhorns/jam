@@ -2,6 +2,7 @@ use crate::engine::{Engine, HoldKey};
 use crate::js_runtime::JsRuntime;
 use crate::rule::HoldOp;
 use crate::term::{Statement, Term};
+use crate::transpile;
 
 /// Combined engine wrapper exposed to Swift via swift-bridge.
 /// Owns both the DBSP Engine and the QuickJS JsRuntime.
@@ -95,6 +96,36 @@ impl JamEngine {
             }
             Err(e) => format!("ERROR: {e}"),
         }
+    }
+
+    /// Eval JS code in the shared context (for testing/scripting).
+    /// Claims produced go to __topLevelClaims.
+    pub fn eval_js(&mut self, code: &str) -> Result<(), String> {
+        let js = transpile::transpile_ts_to_js(code, "eval.ts")?;
+        let js = transpile::strip_imports(&js);
+
+        let guard = self.js_runtime.shared.lock().unwrap();
+        guard.with(|ctx| {
+            ctx.eval::<(), _>("__jam.topLevelClaims.length = 0;").ok();
+        });
+        guard.eval(&js)?;
+        guard.idle();
+        drop(guard);
+
+        // Extract any new claims and add them as base facts
+        let guard = self.js_runtime.shared.lock().unwrap();
+        let claims = guard.with(|ctx| {
+            let jam: rquickjs::Object = ctx.globals().get("__jam").unwrap();
+            let claims_val: rquickjs::Value = jam.get("topLevelClaims").unwrap();
+            crate::js_runtime::js_array_to_statements(&claims_val).unwrap_or_default()
+        });
+        drop(guard);
+
+        for claim in claims {
+            self.engine.assert_fact(claim);
+        }
+
+        Ok(())
     }
 
     pub fn step_json(&mut self) -> String {

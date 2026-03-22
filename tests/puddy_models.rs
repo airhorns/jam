@@ -8,18 +8,14 @@ use jam::bridge::JamEngine;
 fn engine_with_models() -> JamEngine {
     let mut engine = JamEngine::new();
 
-    // Load the event parser and session model as a TS program.
-    // We use the actual source files from the example directory.
     let events_ts = include_str!("../examples/puddy/ts/models/events.ts");
     let session_ts = include_str!("../examples/puddy/ts/models/session.ts");
 
-    // Combine into a single program that exposes test helpers
     let test_harness = format!(
         r#"
         {events_ts}
         {session_ts}
 
-        // Test harness: expose functions to the global scope for testing
         globalThis.__test = {{
             parseACPMessage,
             createSession,
@@ -38,21 +34,49 @@ fn engine_with_models() -> JamEngine {
     engine
 }
 
-/// Helper: evaluate JS in the engine's context and return claims as JSON string
-fn eval_and_get_facts(engine: &mut JamEngine, setup_js: &str) -> String {
-    // Load a new program that uses the test harness
-    let ts = format!(
-        r#"
-        const t = globalThis.__test;
-        {setup_js}
-        "#
+/// Helper: create an engine with the full puddy stack loaded (models + networking).
+/// All files are concatenated into a single program so class/function declarations
+/// are visible to each other within the same eval scope.
+fn engine_with_networking() -> JamEngine {
+    let mut engine = JamEngine::new();
+
+    let events_ts = include_str!("../examples/puddy/ts/models/events.ts");
+    let session_ts = include_str!("../examples/puddy/ts/models/session.ts");
+    let client_ts = include_str!("../examples/puddy/ts/networking/client.ts");
+    let manager_ts = include_str!("../examples/puddy/ts/networking/session-manager.ts");
+
+    // Concatenate all files and add test harness.
+    // Must be a single load_program call so all declarations share the same scope.
+    let combined = format!(
+        "{events_ts}\n{session_ts}\n{client_ts}\n{manager_ts}\n\
+        globalThis.__test = {{\
+            parseACPMessage,\
+            createSession,\
+            applyEvent,\
+            isTerminal,\
+            SandboxAgentClient,\
+            SandboxAgentError,\
+            SessionManager,\
+        }};"
     );
 
-    let result = engine.load_program("test-script", &ts);
+    let result = engine.load_program("puddy-full", &combined);
     assert!(
         !result.starts_with("ERROR"),
-        "Failed to load test script: {result}"
+        "Failed to load puddy networking: {result}"
     );
+    let _ = engine.step_json();
+    engine
+}
+
+/// Helper: evaluate JS in the engine's existing context and return claims as JSON string.
+/// Uses eval_js() so the code runs in the same scope as the loaded models.
+fn eval_and_get_facts(engine: &mut JamEngine, setup_js: &str) -> String {
+    let ts = format!(
+        "const t = globalThis.__test;\n{setup_js}"
+    );
+
+    engine.eval_js(&ts).expect("Failed to eval test script");
     let _ = engine.step_json();
     engine.current_facts_json()
 }
@@ -500,4 +524,144 @@ fn test_is_terminal() {
     assert!(facts.contains(r#""active",false"#), "{facts}");
     assert!(facts.contains(r#""ended",true"#), "{facts}");
     assert!(facts.contains(r#""failed",true"#), "{facts}");
+}
+
+// ============================================================================
+// Networking Client Tests
+// ============================================================================
+
+#[test]
+fn test_client_code_loads_alone() {
+    let mut engine = JamEngine::new();
+    let events_ts = include_str!("../examples/puddy/ts/models/events.ts");
+    let session_ts = include_str!("../examples/puddy/ts/models/session.ts");
+    let client_ts = include_str!("../examples/puddy/ts/networking/client.ts");
+
+    let combined = format!("{events_ts}\n{session_ts}\n{client_ts}\nclaim(\"loaded\", true);");
+    let result = engine.load_program("test-client", &combined);
+    assert!(
+        !result.starts_with("ERROR"),
+        "Client code failed to load: {result}"
+    );
+}
+
+
+#[test]
+fn test_manager_loads_in_combined() {
+    let mut engine = JamEngine::new();
+    let events_ts = include_str!("../examples/puddy/ts/models/events.ts");
+    let session_ts = include_str!("../examples/puddy/ts/models/session.ts");
+    let client_ts = include_str!("../examples/puddy/ts/networking/client.ts");
+    let manager_ts = include_str!("../examples/puddy/ts/networking/session-manager.ts");
+
+    // Try each file incrementally
+    let result = engine.load_program("step1", &format!("{events_ts}\n{session_ts}\n{client_ts}"));
+    assert!(!result.starts_with("ERROR"), "Phase 1 failed: {result}");
+
+    // Now try adding manager via eval_js (same context)
+    let js = jam::transpile::transpile_ts_to_js(manager_ts, "session-manager.ts").unwrap();
+    let js = jam::transpile::strip_imports(&js);
+    engine.eval_js(&js).expect("Manager eval failed");
+}
+
+#[test]
+fn test_networking_code_loads() {
+    // Verify the full networking stack loads without errors
+    let mut engine = engine_with_networking();
+    let facts = eval_and_get_facts(
+        &mut engine,
+        r#"
+        claim("has_client", typeof t.SandboxAgentClient === "function");
+        claim("has_error", typeof t.SandboxAgentError === "function");
+        claim("has_manager", typeof t.SessionManager === "function");
+        "#,
+    );
+
+    assert!(facts.contains(r#""has_client",true"#), "SandboxAgentClient: {facts}");
+    assert!(facts.contains(r#""has_error",true"#), "SandboxAgentError: {facts}");
+    assert!(facts.contains(r#""has_manager",true"#), "SessionManager: {facts}");
+}
+
+#[test]
+fn test_client_constructs_with_defaults() {
+    let mut engine = engine_with_networking();
+    let facts = eval_and_get_facts(
+        &mut engine,
+        r#"
+        const client = new t.SandboxAgentClient();
+        claim("hostname", client.hostname);
+        "#,
+    );
+
+    assert!(facts.contains(r#""hostname","localhost""#), "{facts}");
+}
+
+#[test]
+fn test_client_constructs_with_custom_url() {
+    let mut engine = engine_with_networking();
+    let facts = eval_and_get_facts(
+        &mut engine,
+        r#"
+        const client = new t.SandboxAgentClient("http://myserver:9999");
+        claim("hostname", client.hostname);
+        "#,
+    );
+
+    assert!(facts.contains(r#""hostname","myserver""#), "{facts}");
+}
+
+#[test]
+fn test_session_manager_readiness_no_agents() {
+    let mut engine = engine_with_networking();
+    let facts = eval_and_get_facts(
+        &mut engine,
+        r#"
+        const mgr = new t.SessionManager();
+        mgr.isConnected = true;
+        mgr.agents = [];
+        claim("ready", mgr.hasReadyAgent);
+        claim("error", mgr.agentReadinessError);
+        "#,
+    );
+
+    assert!(facts.contains(r#""ready",false"#), "{facts}");
+    assert!(facts.contains(r#""error","No agents found on server""#), "{facts}");
+}
+
+#[test]
+fn test_session_manager_readiness_installed_no_creds() {
+    let mut engine = engine_with_networking();
+    let facts = eval_and_get_facts(
+        &mut engine,
+        r#"
+        const mgr = new t.SessionManager();
+        mgr.isConnected = true;
+        mgr.agents = [{ id: "claude", installed: true, credentialsAvailable: false }];
+        claim("ready", mgr.hasReadyAgent);
+        claim("has_error", mgr.agentReadinessError !== undefined);
+        "#,
+    );
+
+    assert!(facts.contains(r#""ready",false"#), "{facts}");
+    assert!(facts.contains(r#""has_error",true"#), "{facts}");
+}
+
+#[test]
+fn test_session_manager_readiness_ready() {
+    let mut engine = engine_with_networking();
+    let facts = eval_and_get_facts(
+        &mut engine,
+        r#"
+        const mgr = new t.SessionManager();
+        mgr.isConnected = true;
+        mgr.agents = [{ id: "claude", installed: true, credentialsAvailable: true }];
+        claim("ready", mgr.hasReadyAgent);
+        claim("preferred", mgr.preferredAgent.id);
+        claim("no_error", mgr.agentReadinessError === undefined);
+        "#,
+    );
+
+    assert!(facts.contains(r#""ready",true"#), "{facts}");
+    assert!(facts.contains(r#""preferred","claude""#), "{facts}");
+    assert!(facts.contains(r#""no_error",true"#), "{facts}");
 }
