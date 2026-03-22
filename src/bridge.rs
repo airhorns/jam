@@ -45,10 +45,11 @@ impl JamEngine {
     }
 
     /// Fire an event callback on an entity (e.g., button press).
-    /// Invokes the JS callback, applies any hold operations, steps the engine,
-    /// and returns the step result as JSON.
+    /// Callback IDs are deterministic: "entityId:eventName".
     pub fn fire_event(&mut self, entity_id: &str, event_name: &str) -> String {
-        match self.js_runtime.fire_callback(entity_id, event_name) {
+        let callback_id = format!("{entity_id}:{event_name}");
+
+        match self.js_runtime.fire_callback(&callback_id) {
             Ok(hold_ops) => {
                 // Apply hold operations produced by the callback
                 let pid = self.active_program_id.unwrap_or(0);
@@ -57,17 +58,7 @@ impl JamEngine {
                 }
 
                 // Step the engine to propagate changes
-                let result = self.step_json();
-
-                // Refresh callbacks: DBSP's flat_map doesn't expose weights,
-                // so retraction body calls may overwrite fresh callbacks with stale ones.
-                // Re-derive from current facts to fix this (one body call per matching rule).
-                let facts_json = self.current_facts_json();
-                if let Err(e) = self.js_runtime.refresh_callbacks(&facts_json) {
-                    eprintln!("Callback refresh error: {e}");
-                }
-
-                result
+                self.step_json()
             }
             Err(e) => format!("ERROR: {e}"),
         }
@@ -782,9 +773,9 @@ mod tests {
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
-        // onPress should be registered as a boolean claim (marking the entity as interactive)
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/btn", "onPress", true])),
-            "onPress marker missing. facts: {facts_arr:?}");
+        // onPress should have a deterministic callback ID: "entityId:eventName"
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/btn", "onPress", "root/btn:onPress"])),
+            "onPress callback ID missing. facts: {facts_arr:?}");
     }
 
     #[test]
@@ -1193,11 +1184,11 @@ mod tests {
         assert!(!result.starts_with("ERROR"), "load failed: {result}");
         let _ = engine.step_json();
 
-        // All three callbacks should be registered
+        // All three callbacks should have deterministic callback IDs
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""onPress",true"#), "onPress marker missing: {f}");
-        assert!(f.contains(r#""onLongPress",true"#), "onLongPress marker missing: {f}");
-        assert!(f.contains(r#""onDoubleTap",true"#), "onDoubleTap marker missing: {f}");
+        assert!(f.contains(r#""onPress","root/app/btn:onPress""#), "onPress callback missing: {f}");
+        assert!(f.contains(r#""onLongPress","root/app/btn:onLongPress""#), "onLongPress callback missing: {f}");
+        assert!(f.contains(r#""onDoubleTap","root/app/btn:onDoubleTap""#), "onDoubleTap callback missing: {f}");
 
         // Fire onPress
         engine.fire_event("root/app/btn", "onPress");
@@ -1236,10 +1227,10 @@ mod tests {
         assert!(!result.starts_with("ERROR"), "load failed: {result}");
         let _ = engine.step_json();
 
-        // Custom callback names work
+        // Custom callback names work — IDs are entityId:propName
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""activate",true"#), "activate marker missing: {f}");
-        assert!(f.contains(r#""dismiss",true"#), "dismiss marker missing: {f}");
+        assert!(f.contains(r#""activate","root/app/btn:activate""#), "activate callback missing: {f}");
+        assert!(f.contains(r#""dismiss","root/app/btn:dismiss""#), "dismiss callback missing: {f}");
 
         engine.fire_event("root/app/btn", "activate");
         let f = engine.current_facts_json();

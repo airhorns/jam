@@ -102,12 +102,13 @@ function hold(key: string, stmts: any[][]): void {
   __holdOps.push({ key, stmts });
 }
 
-// --- Callback registry for event handling (onPress, etc.) ---
-// Callbacks are stored during render() and replaced each time the when body
-// re-fires via DBSP (which produces fresh closures with current values).
-// Only registered during insertions, not retractions (controlled by __jam.isInsertion).
+// --- Callback table: maps deterministic callback IDs to functions ---
+// Callback IDs are derived from entityId:propName, making them deterministic
+// across DBSP retraction/insertion cycles so claims cancel properly.
+// Only insertion body calls store the function (isInsertion guard), so
+// stale closures from retraction bodies never overwrite fresh ones.
 
-const __callbackRegistry = new Map<string, Function>();
+const __callbackTable = new Map<string, Function>();
 
 // --- claim() and wish() ---
 
@@ -127,44 +128,55 @@ function wish(...terms: any[]): void {
 }
 
 // --- when() ---
+// Returns a marker object. Two paths consume it:
+//   1. render() encounters it as a JSX child — registers the rule with the
+//      correct parent from render's own parent stack.
+//   2. finalize() finds unconsumed markers after script evaluation — registers
+//      them as imperative rules with the $this captured at call time.
+// No probe needed. No mutable parent refs.
 
-function when(...args: any[]): any {
-  // Last argument is always the body function
+interface WhenMarker {
+  __whenMarker: true;
+  patterns: any[][];
+  body: Function;
+  capturedThis: string;
+}
+
+// All markers created during evaluation, and the set consumed by render()
+const __pendingWhens: WhenMarker[] = [];
+const __consumedWhens = new Set<WhenMarker>();
+
+function when(...args: any[]): WhenMarker {
   const body = args.pop();
   const patterns: any[][] = args;
 
-  // Check if the body returns JSX (returns a JamElement).
-  // If so, return an element for the JSX tree — render() will register the rule
-  // with the correct parent scope. No probe needed: just check the return type.
-  const probeResult = (() => {
-    __registrationDepth++;
-    try {
-      const dummyBindings = new Proxy({}, { get() { return 0; } });
-      return body(dummyBindings);
-    } catch {
-      return undefined;
-    } finally {
-      __registrationDepth--;
-    }
-  })();
+  const marker: WhenMarker = {
+    __whenMarker: true,
+    patterns,
+    body,
+    capturedThis: $this,
+  };
 
-  if (probeResult && probeResult.__jamElement) {
-    // JSX-returning body — return an element. render() handles rule registration.
-    return h(when, { patterns, body });
-  }
+  __pendingWhens.push(marker);
+  return marker;
+}
 
-  // Imperative body — register the rule immediately
-  const capturedThis = $this;
-  const wrappedBody = (bindings: any) => {
-    __thisStack.push(capturedThis);
+// Register a when-marker as a rule under the given parentId.
+// Wraps the body to push parentId onto $this, and auto-renders JSX returns.
+function __registerWhen(marker: WhenMarker, parentId: string): void {
+  const wrappedBody = (bindings: any, isInsertion?: boolean) => {
+    __thisStack.push(parentId);
     try {
-      body(bindings);
+      const result = marker.body(bindings);
+      if (result && result.__jamElement) {
+        render(result, parentId, isInsertion);
+      }
     } finally {
       __thisStack.pop();
     }
   };
 
-  const rule: RegisteredRule = { patterns, body: wrappedBody, whens: [] };
+  const rule: RegisteredRule = { patterns: marker.patterns, body: wrappedBody, whens: [] };
 
   if (__registrationDepth === 0) {
     __rules.push(rule);
@@ -184,31 +196,6 @@ function when(...args: any[]): any {
 
 // Stack for tracking nested when() during registration
 const __ruleStack: RegisteredRule[] = [];
-
-// --- Pattern matching (for callback refresh) ---
-
-function __matchPattern(
-  pattern: any[],
-  fact: any[]
-): Record<string, any> | null {
-  if (pattern.length !== fact.length) return null;
-  const bindings: Record<string, any> = {};
-  for (let i = 0; i < pattern.length; i++) {
-    const p = pattern[i];
-    const f = fact[i];
-    if (p && typeof p === "object" && p.__binding) {
-      if (p.name in bindings && bindings[p.name] !== f) return null;
-      bindings[p.name] = f;
-    } else if (typeof p === "symbol") {
-      // Wildcard
-    } else if (p && typeof p === "object" && p.__or) {
-      if (!p.values.includes(f)) return null;
-    } else if (p !== f) {
-      return null;
-    }
-  }
-  return bindings;
-}
 
 // --- JSX support: h(), render(), Fragment ---
 
@@ -240,13 +227,21 @@ function h(
 const __childCounters: Map<string, number> = new Map();
 
 function render(element: any, parentId?: string, isInsertion?: boolean): void {
-  // isInsertion defaults to true (initial render, fire_callback).
-  // It's false only when DBSP calls the body for a retraction (-1 weight).
-  const shouldRegisterCallbacks = isInsertion !== false;
   if (element == null) return;
 
   // String/number children are text content — handled by parent
   if (typeof element === "string" || typeof element === "number") return;
+
+  // when() marker — register the rule with the current render parent.
+  // Only during initial render (__collector === null). During DBSP body
+  // execution the rules are already compiled; skip stale markers.
+  if (element.__whenMarker) {
+    if (__collector === null) {
+      __consumedWhens.add(element as WhenMarker);
+      __registerWhen(element as WhenMarker, parentId ?? $this);
+    }
+    return;
+  }
 
   // Array of elements (from Fragment or map)
   if (Array.isArray(element)) {
@@ -265,38 +260,6 @@ function render(element: any, parentId?: string, isInsertion?: boolean): void {
     for (const child of el.children) {
       render(child, parentId, isInsertion);
     }
-    return;
-  }
-
-  // when() element — register a reactive rule at this point in the tree
-  if (el.type === when) {
-    const capturedParent = parentId ?? $this;
-    const jsxBody = el.props.body as Function;
-    const patterns = el.props.patterns as any[][];
-
-    // wrappedBody receives (bindings, isInsertion) from DBSP via create_body_fn.
-    // isInsertion is threaded through render() so callbacks are only registered
-    // for insertions, not retractions (where DBSP's sort-order would give stale closures).
-    const wrappedBody = (bindings: any, isInsertion?: boolean) => {
-      __thisStack.push(capturedParent);
-      try {
-        const result = jsxBody(bindings);
-        if (result && result.__jamElement) {
-          render(result, capturedParent, isInsertion);
-        }
-      } finally {
-        __thisStack.pop();
-      }
-    };
-
-    const rule: RegisteredRule = { patterns, body: wrappedBody, whens: [] };
-
-    if (__registrationDepth === 0) {
-      __rules.push(rule);
-    } else {
-      __ruleStack[__ruleStack.length - 1].whens.push(rule);
-    }
-
     return;
   }
 
@@ -333,19 +296,23 @@ function render(element: any, parentId?: string, isInsertion?: boolean): void {
   // Set properties from props
   for (const [k, v] of Object.entries(el.props)) {
     if (k === "key" || k === "children") continue;
-    // Any function prop is a callback — store it in the registry.
-    // Only register during insertions — retractions have stale closures.
+    // Function props are callbacks — use a deterministic ID based on
+    // entityId:propName so DBSP retraction/insertion claims cancel properly.
+    // Only store the function on insertion (not retraction) to avoid
+    // stale closures overwriting fresh ones.
     if (typeof v === "function") {
-      if (shouldRegisterCallbacks) {
-        __callbackRegistry.set(`${entityId}:${k}`, v);
+      const callbackId = `${entityId}:${k}`;
+      if (isInsertion !== false) {
+        __callbackTable.set(callbackId, v);
       }
-      claim(entityId, k, true);
+      claim(entityId, k, callbackId);
       continue;
     }
     claim(entityId, k, v);
   }
 
-  // Process children — push entityId to $this stack so when() captures the right scope
+  // Process children — push entityId to $this stack so nested elements
+  // and when() markers get the right parent context
   __thisStack.push(entityId);
   __childCounters.set(entityId, 0);
   try {
@@ -379,41 +346,25 @@ function render(element: any, parentId?: string, isInsertion?: boolean): void {
   getHoldOps(): HoldOp[] {
     return __holdOps.splice(0);
   },
-  // Fire a callback by entity ID and event name
-  fireCallback(entityId: string, eventName: string): boolean {
-    const key = `${entityId}:${eventName}`;
-    const cb = __callbackRegistry.get(key);
+  // Fire a callback by its callback ID
+  fireCallback(callbackId: string): boolean {
+    const cb = __callbackTable.get(callbackId);
     if (cb) {
       cb();
       return true;
     }
     return false;
   },
-  // Re-derive callbacks for rules matching the given facts.
-  // Called after fire_event steps to fix stale closures from DBSP retraction ordering.
-  // This is a targeted refresh — one body call per matching rule, not a full re-render.
-  refreshCallbacks(factsJson: string) {
-    const facts: any[][] = JSON.parse(factsJson);
-    __registrationDepth++;
-    try {
-      for (const rule of __rules) {
-        for (const pattern of rule.patterns) {
-          for (const fact of facts) {
-            const bindings = __matchPattern(pattern, fact);
-            if (bindings) {
-              try {
-                rule.body(bindings, true);
-              } catch (e) {
-                // Errors during refresh are non-fatal — some rules may not
-                // support refresh (e.g., imperative when bodies).
-              }
-            }
-          }
-        }
+  // Finalize: register any when() markers not consumed by render().
+  // These are imperative when() calls (not inside JSX).
+  finalize() {
+    for (const marker of __pendingWhens) {
+      if (!__consumedWhens.has(marker)) {
+        __registerWhen(marker, marker.capturedThis);
       }
-    } finally {
-      __registrationDepth--;
     }
+    __pendingWhens.length = 0;
+    __consumedWhens.clear();
   },
 };
 

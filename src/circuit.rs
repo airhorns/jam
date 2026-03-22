@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use dbsp::{DBSPHandle, OrdIndexedZSet, OrdZSet, OutputHandle, Runtime, ZSetHandle};
+use dbsp::typed_batch::IndexedZSetReader;
+use dbsp::utils::Tup2;
+use dbsp::{DBSPHandle, OrdZSet, OutputHandle, Runtime, ZSetHandle};
 
 use crate::pattern::{Bindings, Pattern, PatternTerm};
 use crate::rule::BodyFn;
@@ -19,31 +21,15 @@ pub struct CircuitHandles {
     pub all_facts_output: OutputHandle<OrdZSet<Statement>>,
 }
 
-/// Extract a prefix key from a pattern: the tuple of (length, leading exact terms).
-/// This is used to index facts so that each rule only processes matching candidates.
-/// For example, pattern [Exact("counter"), Exact("count"), Bind("v")] → key (3, ["counter", "count"]).
-fn pattern_prefix_key(pattern: &Pattern) -> (usize, Vec<Term>) {
-    let len = pattern.terms.len();
-    let prefix: Vec<Term> = pattern
-        .terms
-        .iter()
-        .take_while(|t| matches!(t, PatternTerm::Exact(_)))
-        .map(|t| match t {
-            PatternTerm::Exact(term) => term.clone(),
-            _ => unreachable!(),
-        })
-        .collect();
-    (len, prefix)
+/// Check whether a statement matches a pattern's prefix (length + leading exact terms).
+fn matches_prefix(stmt: &Statement, key_len: usize, key_prefix: &[Term]) -> bool {
+    stmt.terms.len() == key_len
+        && stmt
+            .terms
+            .iter()
+            .zip(key_prefix.iter())
+            .all(|(a, b)| a == b)
 }
-
-/// Extract the same prefix key from a statement, given a prefix length.
-fn statement_prefix_key(stmt: &Statement, prefix_len: usize) -> Vec<Term> {
-    stmt.terms.iter().take(prefix_len).cloned().collect()
-}
-
-/// The key type for the prefix index: (statement_length, prefix_terms).
-/// Using a Vec<Term> is fine since Term derives all the DBSP traits.
-type PrefixKey = (usize, Vec<Term>);
 
 /// Build a DBSP circuit from a set of compiled rules.
 pub fn compile_circuit(rules: Vec<CompiledRule>) -> (DBSPHandle, CircuitHandles) {
@@ -110,35 +96,34 @@ pub fn compile_circuit(rules: Vec<CompiledRule>) -> (DBSPHandle, CircuitHandles)
 
                     let mut combined: Option<dbsp::Stream<_, OrdZSet<Statement>>> = None;
 
-                    // Single-pattern rules: index facts by prefix, then flat_map only matching ones.
-                    // This avoids O(R×F) — each rule only processes facts matching its prefix.
+                    // Single-pattern rules: filter to matching facts, then apply_mut
+                    // with weight access so the body knows insertion vs retraction.
                     for (pattern, body) in single_rules.iter() {
                         let pattern = pattern.clone();
                         let body = body.clone();
                         let (key_len, key_prefix) = pattern_prefix_key(&pattern);
-                        let prefix_len = key_prefix.len();
 
-                        // Index facts by (length, exact_prefix) → only matching values reach flat_map
-                        let indexed: dbsp::Stream<_, OrdIndexedZSet<PrefixKey, Statement>> =
-                            all_facts.map_index(move |stmt| {
-                                let prefix = statement_prefix_key(stmt, prefix_len);
-                                ((stmt.terms.len(), prefix), stmt.clone())
-                            });
+                        // Filter: DBSP only propagates matching deltas to this branch.
+                        let matching = all_facts.filter(move |stmt| {
+                            matches_prefix(stmt, key_len, &key_prefix)
+                        });
 
-                        // flat_map on the indexed stream, filtering by prefix key.
-                        // Note: flat_map doesn't expose weights, so is_insertion is always true.
-                        // For callback correctness during decrements, fire_event does a targeted
-                        // re-derive after stepping.
-                        let key_for_filter = (key_len, key_prefix);
-                        let derived = indexed.flat_map(move |(key, stmt)| {
-                            if *key != key_for_filter {
-                                return vec![];
+                        // apply: process only matching facts with weight visibility.
+                        // Weight > 0 means insertion, < 0 means retraction.
+                        // The body uses is_insertion to guard callback storage
+                        // (only store fresh closures on insertion).
+                        // Uses apply (not apply_mut) to support fixedpoint inside recursive.
+                        let derived = matching.apply(move |batch| {
+                            let mut results: Vec<Tup2<Statement, i64>> = Vec::new();
+                            for (stmt, (), weight) in batch.iter() {
+                                if let Some(bindings) = pattern.match_statement(&stmt) {
+                                    let is_insertion = weight > 0;
+                                    for claim in body(&bindings, is_insertion) {
+                                        results.push(Tup2(claim, weight));
+                                    }
+                                }
                             }
-                            if let Some(bindings) = pattern.match_statement(stmt) {
-                                body(&bindings, true)
-                            } else {
-                                vec![]
-                            }
+                            OrdZSet::from_keys((), results)
                         });
 
                         combined = Some(match combined {
@@ -147,7 +132,7 @@ pub fn compile_circuit(rules: Vec<CompiledRule>) -> (DBSPHandle, CircuitHandles)
                         });
                     }
 
-                    // Two-pattern join rules (unchanged — join doesn't have the callback issue)
+                    // Two-pattern join rules
                     for (p1, p2, shared, body) in join_rules.iter() {
                         let p1 = p1.clone();
                         let p2 = p2.clone();
@@ -184,7 +169,6 @@ pub fn compile_circuit(rules: Vec<CompiledRule>) -> (DBSPHandle, CircuitHandles)
                             .join(&matches2, move |_key, b1, b2| {
                                 let mut merged = b1.clone();
                                 merged.extend(b2.iter().map(|(k, v)| (k.clone(), v.clone())));
-                                // join doesn't expose weights, treat as insertion
                                 body(&merged, true)
                             })
                             .flat_map(|stmts| stmts.clone());
@@ -212,6 +196,21 @@ pub fn compile_circuit(rules: Vec<CompiledRule>) -> (DBSPHandle, CircuitHandles)
     .unwrap();
 
     (dbsp, handles)
+}
+
+/// Extract a prefix key from a pattern: (length, leading exact terms).
+fn pattern_prefix_key(pattern: &Pattern) -> (usize, Vec<Term>) {
+    let len = pattern.terms.len();
+    let prefix: Vec<Term> = pattern
+        .terms
+        .iter()
+        .take_while(|t| matches!(t, PatternTerm::Exact(_)))
+        .map(|t| match t {
+            PatternTerm::Exact(term) => term.clone(),
+            _ => unreachable!(),
+        })
+        .collect();
+    (len, prefix)
 }
 
 fn make_join_key(shared_vars: &[String], bindings: &Bindings) -> Vec<Term> {

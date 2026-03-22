@@ -30,18 +30,13 @@ fn get_runtime_js() -> &'static str {
 
 /// A JavaScript runtime for loading Jam programs written in TypeScript.
 pub struct JsRuntime {
-    runtime: Runtime,
-    /// Stored body context for callback invocation after program load.
+    /// Shared JS context — used for both rule extraction and body/callback execution.
     body_ctx: Option<Arc<Mutex<BodyContext>>>,
 }
 
 impl JsRuntime {
     pub fn new() -> Self {
-        let runtime = Runtime::new().expect("Failed to create QuickJS runtime");
-        JsRuntime {
-            runtime,
-            body_ctx: None,
-        }
+        JsRuntime { body_ctx: None }
     }
 
     /// Load a TypeScript program and extract its rules and claims.
@@ -57,10 +52,11 @@ impl JsRuntime {
         let js = transpile::strip_imports(&js);
         let runtime_js = get_runtime_js();
 
-        // Create a context for extraction
-        let extract_ctx = Context::full(&self.runtime).expect("Failed to create context");
+        // Single runtime+context: eval once, extract patterns, keep alive for body execution
+        let js_runtime = Runtime::new().expect("Failed to create QuickJS runtime");
+        let js_ctx = Context::full(&js_runtime).expect("Failed to create context");
 
-        let (claims, rule_data) = extract_ctx.with(|ctx| {
+        let (claims, rule_data) = js_ctx.with(|ctx| {
             ctx.eval::<(), _>(runtime_js)
                 .map_err(|e| format!("Runtime eval error: {e}"))?;
             ctx.eval::<(), _>(js.as_str())
@@ -69,33 +65,28 @@ impl JsRuntime {
             let globals = ctx.globals();
             let jam: Object = globals.get("__jam").map_err(|e| format!("{e}"))?;
 
+            // Finalize: register any imperative when() markers not consumed by render()
+            let finalize: Function = jam.get("finalize").map_err(|e| format!("{e}"))?;
+            finalize.call::<_, ()>(()).map_err(|e| format!("Finalize error: {e}"))?;
+
             // Extract claims
             let claims_val: Value = jam.get("topLevelClaims").map_err(|e| format!("{e}"))?;
             let claims = js_array_to_statements(&claims_val)?;
 
-            // Extract rule metadata (patterns only — bodies will be called in a separate context)
+            // Extract rule metadata (patterns only — bodies are called via index into __rules)
             let rules_val: Value = jam.get("rules").map_err(|e| format!("{e}"))?;
             let rule_data = extract_rule_patterns(&ctx, &rules_val)?;
 
             Ok::<_, String>((claims, rule_data))
         })?;
 
-        // Create a separate runtime+context for body execution (owned by BodyFn closures)
-        let body_runtime = Runtime::new().expect("Failed to create body runtime");
-        let body_ctx = Context::full(&body_runtime).expect("Failed to create body context");
-
-        body_ctx.with(|ctx| {
-            ctx.eval::<(), _>(runtime_js).expect("Failed to eval runtime");
-            ctx.eval::<(), _>(js.as_str()).expect("Failed to eval script");
-        });
-
-        // Wrap in Arc<Mutex> for Send+Sync (BodyFn requirement)
+        // Wrap in Arc<Mutex> for Send+Sync (DBSP calls body fns from a worker thread)
         let shared = Arc::new(Mutex::new(BodyContext {
-            _runtime: body_runtime,
-            context: body_ctx,
+            _runtime: js_runtime,
+            context: js_ctx,
         }));
 
-        // Store body context for later callback invocation
+        // Store for later callback invocation
         self.body_ctx = Some(shared.clone());
 
         // Extract any hold operations from top-level evaluation
@@ -112,12 +103,11 @@ impl JsRuntime {
         })
     }
 
-    /// Fire a callback registered by render() (e.g., onPress).
+    /// Fire a callback by its unique callback ID.
     /// Returns any hold operations produced by the callback.
     pub fn fire_callback(
         &self,
-        entity_id: &str,
-        event_name: &str,
+        callback_id: &str,
     ) -> Result<Vec<HoldOp>, String> {
         let body_ctx = self
             .body_ctx
@@ -129,33 +119,17 @@ impl JsRuntime {
             let fire: Function = jam.get("fireCallback").map_err(|e| format!("{e}"))?;
 
             let result: bool = fire
-                .call((entity_id, event_name))
+                .call((callback_id,))
                 .map_err(|e| format!("Callback error: {e}"))?;
 
             if !result {
                 return Err(format!(
-                    "No callback registered for {entity_id}:{event_name}"
+                    "No callback registered for {callback_id}"
                 ));
             }
 
             // Read hold operations produced by the callback
             Self::read_hold_ops(&ctx)
-        })
-    }
-
-    /// Refresh callbacks by re-deriving them from current facts.
-    /// Called after fire_event steps to fix stale closures from DBSP retraction ordering.
-    pub fn refresh_callbacks(&self, facts_json: &str) -> Result<(), String> {
-        let body_ctx = self.body_ctx.as_ref().ok_or("No body context")?;
-        let guard = body_ctx.lock().unwrap();
-        guard.context.with(|ctx| {
-            let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
-            let refresh: Function =
-                jam.get("refreshCallbacks").map_err(|e| format!("{e}"))?;
-            refresh
-                .call::<_, ()>((facts_json,))
-                .map_err(|e| format!("Callback refresh error: {e}"))?;
-            Ok(())
         })
     }
 

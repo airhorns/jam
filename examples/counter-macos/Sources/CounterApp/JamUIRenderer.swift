@@ -7,7 +7,6 @@ struct UIEntity {
     var type: String = ""
     var properties: [String: JamTerm] = [:]
     var children: [(sortKey: String, childId: String)] = []
-    var hasOnPress: Bool = false
 }
 
 // MARK: - Build entity map from facts
@@ -37,9 +36,6 @@ func buildEntityMap(from facts: [JamStatement]) -> [String: UIEntity] {
                let childId = terms[3].stringValue {
                 entities[entityId]?.children.append((sortKey: sortKey, childId: childId))
             }
-        case "onPress":
-            // Boolean marker indicating this entity has a press callback
-            entities[entityId]?.hasOnPress = true
         default:
             entities[entityId]?.properties[predicate] = terms[2]
         }
@@ -125,13 +121,11 @@ struct JamView: View {
     private func renderButton(_ entity: UIEntity) -> AnyView {
         let label = entity.properties["label"]?.stringValue ?? ""
         let entityId = entity.id
-        let hasCallback = entity.hasOnPress
         return AnyView(
             Button(label) {
-                if hasCallback {
-                    // Generic event dispatch — no hardcoded action strings
-                    engine.fireEvent(entityId: entityId, eventName: "onPress")
-                }
+                // The onPress property contains a callback ID (string).
+                // fireEvent looks up the callback ID from claims on the Rust side.
+                engine.fireEvent(entityId: entityId, eventName: "onPress")
             }
             .font(swiftUIFont(entity.properties["font"]?.stringValue))
         )
