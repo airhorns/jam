@@ -64,8 +64,10 @@ impl JsRuntime {
         let body_ctx = Context::full(&body_runtime).expect("Failed to create body context");
 
         body_ctx.with(|ctx| {
-            ctx.eval::<(), _>(runtime_js).expect("Failed to eval runtime");
-            ctx.eval::<(), _>(js.as_str()).expect("Failed to eval script");
+            ctx.eval::<(), _>(runtime_js)
+                .expect("Failed to eval runtime");
+            ctx.eval::<(), _>(js.as_str())
+                .expect("Failed to eval script");
         });
 
         // Wrap in Arc<Mutex> for Send+Sync (BodyFn requirement)
@@ -135,9 +137,7 @@ fn js_term_array_to_statement(val: &Value) -> Result<Statement, String> {
 /// Convert a JS value to a Rust Term.
 fn js_value_to_term(val: &Value) -> Result<Term, String> {
     if let Some(s) = val.as_string() {
-        Ok(Term::Symbol(
-            s.to_string().map_err(|e| format!("{e}"))?,
-        ))
+        Ok(Term::Symbol(s.to_string().map_err(|e| format!("{e}"))?))
     } else if let Some(n) = val.as_int() {
         Ok(Term::Int(n as i64))
     } else if let Some(n) = val.as_float() {
@@ -186,7 +186,10 @@ fn js_value_to_pattern_term(val: &Value) -> Result<PatternTermOrOr, String> {
 
 /// Convert a JS pattern array to a PatternExpr.
 fn js_pattern_to_expr(val: &Value) -> Result<PatternExpr, String> {
-    let arr = val.clone().into_array().ok_or("Expected array for pattern")?;
+    let arr = val
+        .clone()
+        .into_array()
+        .ok_or("Expected array for pattern")?;
     let mut terms: Vec<PatternTermOrOr> = Vec::new();
     for i in 0..arr.len() {
         let v: Value = arr.get(i).map_err(|e| format!("{e}"))?;
@@ -252,7 +255,10 @@ fn extract_rule_patterns(
 
         // Extract patterns
         let patterns_val: Value = rule_obj.get("patterns").map_err(|e| format!("{e}"))?;
-        let patterns_arr = patterns_val.clone().into_array().ok_or("Expected patterns array")?;
+        let patterns_arr = patterns_val
+            .clone()
+            .into_array()
+            .ok_or("Expected patterns array")?;
 
         let mut exprs = Vec::new();
         for j in 0..patterns_arr.len() {
@@ -280,10 +286,7 @@ fn extract_rule_patterns(
 }
 
 /// Build RuleSpecs from extracted rule data + shared body context.
-fn build_rule_specs(
-    rule_data: &[RuleData],
-    shared: &Arc<Mutex<BodyContext>>,
-) -> Vec<RuleSpec> {
+fn build_rule_specs(rule_data: &[RuleData], shared: &Arc<Mutex<BodyContext>>) -> Vec<RuleSpec> {
     rule_data
         .iter()
         .map(|rd| {
@@ -376,11 +379,7 @@ mod tests {
         assert_eq!(program.claims.len(), 1);
         assert_eq!(
             program.claims[0],
-            Statement::new(vec![
-                Term::sym("omar"),
-                Term::sym("is"),
-                Term::sym("cool")
-            ])
+            Statement::new(vec![Term::sym("omar"), Term::sym("is"), Term::sym("cool")])
         );
         assert!(program.rules.is_empty());
     }

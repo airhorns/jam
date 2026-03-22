@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
       - name: Check Rust formatting
-        run: nix develop -c rustfmt --check --edition=2024 src/*.rs
+        run: nix develop -c cargo fmt --check
 
   clippy:
     name: Clippy

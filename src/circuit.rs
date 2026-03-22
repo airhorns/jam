@@ -53,7 +53,10 @@ pub fn compile_circuit(rules: Vec<CompiledRule>) -> (DBSPHandle, CircuitHandles)
             "Rules with {} patterns not yet supported (max 2)",
             r.patterns.len()
         );
-        assert!(!r.patterns.is_empty(), "Rule must have at least one pattern");
+        assert!(
+            !r.patterns.is_empty(),
+            "Rule must have at least one pattern"
+        );
     }
 
     let has_rules = !single_rules.is_empty() || !join_rules.is_empty();
@@ -198,10 +201,7 @@ fn find_shared_vars(p1: &Pattern, p2: &Pattern) -> Vec<String> {
         })
         .collect();
 
-    let mut shared: Vec<String> = vars1
-        .intersection(&vars2)
-        .map(|s| s.to_string())
-        .collect();
+    let mut shared: Vec<String> = vars1.intersection(&vars2).map(|s| s.to_string()).collect();
     shared.sort();
     shared
 }
@@ -274,10 +274,7 @@ mod tests {
         );
         circuit.transaction().unwrap();
 
-        assert_eq!(
-            handles.all_facts_output.consolidate().weighted_count(),
-            3
-        );
+        assert_eq!(handles.all_facts_output.consolidate().weighted_count(), 3);
 
         handles.facts_input.push(
             stmt![Term::sym("omar"), Term::sym("is"), Term::sym("cool")],
@@ -285,10 +282,7 @@ mod tests {
         );
         circuit.transaction().unwrap();
 
-        assert_eq!(
-            handles.all_facts_output.consolidate().weighted_count(),
-            -3
-        );
+        assert_eq!(handles.all_facts_output.consolidate().weighted_count(), -3);
 
         circuit.kill().unwrap();
     }
