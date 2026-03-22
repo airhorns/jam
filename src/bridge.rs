@@ -1,5 +1,6 @@
-use crate::engine::Engine;
+use crate::engine::{Engine, HoldKey};
 use crate::js_runtime::JsRuntime;
+use crate::rule::HoldOp;
 use crate::term::{Statement, Term};
 
 /// Combined engine wrapper exposed to Swift via swift-bridge.
@@ -7,6 +8,10 @@ use crate::term::{Statement, Term};
 pub struct JamEngine {
     engine: Engine,
     js_runtime: JsRuntime,
+    /// Maps body contexts to their program IDs for routing hold ops from callbacks.
+    /// Currently only one program's callbacks are active at a time (the most recently loaded).
+    /// TODO: support multiple concurrent programs with callbacks.
+    active_program_id: Option<u64>,
 }
 
 impl JamEngine {
@@ -14,6 +19,7 @@ impl JamEngine {
         JamEngine {
             engine: Engine::new(),
             js_runtime: JsRuntime::new(),
+            active_program_id: None,
         }
     }
 
@@ -22,11 +28,47 @@ impl JamEngine {
     pub fn load_program(&mut self, name: &str, ts_source: &str) -> String {
         match self.js_runtime.load_program(name, ts_source) {
             Ok(program) => {
+                // Extract hold ops before moving program
+                let hold_ops: Vec<HoldOp> = program.hold_ops.clone();
                 let id = self.engine.add_program(program);
+                self.active_program_id = Some(id);
+
+                // Apply any top-level hold operations
+                for op in &hold_ops {
+                    self.apply_hold_op(id, op);
+                }
+
                 id.to_string()
             }
             Err(e) => format!("ERROR: {e}"),
         }
+    }
+
+    /// Fire an event callback on an entity (e.g., button press).
+    /// Invokes the JS callback, applies any hold operations, steps the engine,
+    /// and returns the step result as JSON.
+    pub fn fire_event(&mut self, entity_id: &str, event_name: &str) -> String {
+        match self.js_runtime.fire_callback(entity_id, event_name) {
+            Ok(hold_ops) => {
+                // Apply hold operations produced by the callback
+                let pid = self.active_program_id.unwrap_or(0);
+                for op in &hold_ops {
+                    self.apply_hold_op(pid, op);
+                }
+
+                // Step the engine to propagate changes
+                self.step_json()
+            }
+            Err(e) => format!("ERROR: {e}"),
+        }
+    }
+
+    fn apply_hold_op(&mut self, program_id: u64, op: &HoldOp) {
+        let key = HoldKey {
+            program_id,
+            name: Some(op.key.clone()),
+        };
+        self.engine.hold(key, op.stmts.clone());
     }
 
     pub fn remove_program(&mut self, program_id: u64) {
@@ -141,6 +183,8 @@ mod ffi {
         fn step_json(&mut self) -> String;
 
         fn current_facts_json(&self) -> String;
+
+        fn fire_event(&mut self, entity_id: &str, event_name: &str) -> String;
     }
 }
 
@@ -688,5 +732,323 @@ mod tests {
             "missing Second. facts: {facts_arr:?}");
         assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/0/2", "text", "Third"])),
             "missing Third. facts: {facts_arr:?}");
+    }
+
+    // ========================================================================
+    // Hold + onPress + fire_event tests
+    // ========================================================================
+
+    #[test]
+    fn test_hold_initial_state() {
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("mystate", [["greeting", "is", "hello"]]);
+            render(<Text key="msg">hi</Text>);
+        "#;
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let facts = engine.current_facts_json();
+        let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["greeting", "is", "hello"])),
+            "hold state missing. facts: {facts_arr:?}");
+    }
+
+    #[test]
+    fn test_onpress_registers_callback() {
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            render(
+                <Button key="btn" label="Click" onPress={() => {}} />
+            );
+        "#;
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let facts = engine.current_facts_json();
+        let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
+
+        // onPress should be registered as a boolean claim (marking the entity as interactive)
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/btn", "onPress", true])),
+            "onPress marker missing. facts: {facts_arr:?}");
+    }
+
+    #[test]
+    fn test_fire_event_invokes_callback() {
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("state", [["clicked", false]]);
+            render(
+                <Button key="btn" label="Click" onPress={() => {
+                    hold("state", [["clicked", true]]);
+                }} />
+            );
+        "#;
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Before click
+        let facts = engine.current_facts_json();
+        let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["clicked", false])),
+            "initial state wrong. facts: {facts_arr:?}");
+
+        // Fire the button press
+        let result = engine.fire_event("root/btn", "onPress");
+        assert!(!result.starts_with("ERROR"), "fire_event failed: {result}");
+
+        // After click
+        let facts = engine.current_facts_json();
+        let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["clicked", true])),
+            "callback didn't fire. facts: {facts_arr:?}");
+        assert!(!facts_arr.iter().any(|f| f == &serde_json::json!(["clicked", false])),
+            "old state not retracted. facts: {facts_arr:?}");
+    }
+
+    #[test]
+    fn test_self_contained_counter() {
+        // The counter program owns ALL state and logic — no Swift-side counter management
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("counter", [["counter", "count", 0]]);
+
+            render(
+                <VStack key="app">
+                    {when(["counter", "count", $.value], ({ value }) =>
+                        <>
+                            <Text key="display" font="largeTitle">{"Count: " + value}</Text>
+                            <HStack key="buttons">
+                                <Button key="dec" label="-" onPress={() => {
+                                    hold("counter", [["counter", "count", value - 1]]);
+                                }} />
+                                <Button key="inc" label="+" onPress={() => {
+                                    hold("counter", [["counter", "count", value + 1]]);
+                                }} />
+                            </HStack>
+                        </>
+                    )}
+                </VStack>
+            );
+        "#;
+
+        let result = engine.load_program("counter.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Initial state: count = 0
+        let facts = engine.current_facts_json();
+        let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 0"])),
+            "initial count wrong. facts: {facts_arr:?}");
+
+        // Press increment
+        let result = engine.fire_event("root/app/buttons/inc", "onPress");
+        assert!(!result.starts_with("ERROR"), "fire_event failed: {result}");
+
+        let facts = engine.current_facts_json();
+        let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 1"])),
+            "count didn't increment. facts: {facts_arr:?}");
+        assert!(!facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 0"])),
+            "old count not retracted. facts: {facts_arr:?}");
+
+        // Press increment again
+        engine.fire_event("root/app/buttons/inc", "onPress");
+        let facts = engine.current_facts_json();
+        let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 2"])),
+            "second increment failed. facts: {facts_arr:?}");
+
+        // Press decrement
+        engine.fire_event("root/app/buttons/dec", "onPress");
+        let facts = engine.current_facts_json();
+        let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
+        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 1"])),
+            "decrement failed. facts: {facts_arr:?}");
+    }
+
+    #[test]
+    fn test_counter_increment_decrement_cycle() {
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("counter", [["counter", "count", 0]]);
+
+            render(
+                <VStack key="app">
+                    {when(["counter", "count", $.value], ({ value }) =>
+                        <>
+                            <Text key="display" font="largeTitle">{"Count: " + value}</Text>
+                            <HStack key="buttons">
+                                <Button key="dec" label="-" onPress={() => {
+                                    hold("counter", [["counter", "count", value - 1]]);
+                                }} />
+                                <Button key="inc" label="+" onPress={() => {
+                                    hold("counter", [["counter", "count", value + 1]]);
+                                }} />
+                            </HStack>
+                        </>
+                    )}
+                </VStack>
+            );
+        "#;
+
+        let result = engine.load_program("counter.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Increment 3 times
+        for expected in 1..=3 {
+            engine.fire_event("root/app/buttons/inc", "onPress");
+            let facts = engine.current_facts_json();
+            let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
+            assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", format!("Count: {expected}")])),
+                "after increment {expected}, expected Count: {expected}. facts: {facts_arr:?}");
+        }
+
+        // Decrement 3 times
+        for i in 0..3 {
+            let expected = 2 - i; // 2, 1, 0
+            engine.fire_event("root/app/buttons/dec", "onPress");
+            let facts = engine.current_facts_json();
+            let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
+            assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", format!("Count: {expected}")])),
+                "after decrement, expected Count: {expected}. facts: {facts_arr:?}");
+        }
+    }
+
+    #[test]
+    fn test_two_button_closures() {
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("v", [["v", 0]]);
+
+            render(
+                <VStack key="app">
+                    {when(["v", $.n], ({ n }) =>
+                        <>
+                            <Text key="d">{"n=" + n}</Text>
+                            <Button key="inc" label="+" onPress={() => {
+                                hold("v", [["v", n + 1]]);
+                            }} />
+                            <Button key="dec" label="-" onPress={() => {
+                                hold("v", [["v", n - 1]]);
+                            }} />
+                        </>
+                    )}
+                </VStack>
+            );
+        "#;
+
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // n=0, inc → n=1
+        eprintln!("--- pressing inc (expect 0→1)");
+        engine.fire_event("root/app/inc", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains("\"n=1\""), "expected n=1: {f}");
+
+        // n=1, dec → n=0
+        eprintln!("--- pressing dec (expect 1→0)");
+        engine.fire_event("root/app/dec", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains("\"n=0\""), "expected n=0: {f}");
+
+        // n=0, inc → n=1
+        eprintln!("--- pressing inc again (expect 0→1)");
+        engine.fire_event("root/app/inc", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains("\"n=1\""), "expected n=1 again: {f}");
+
+        // n=1, inc → n=2
+        engine.fire_event("root/app/inc", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains("\"n=2\""), "expected n=2: {f}");
+
+        // n=2, dec → n=1
+        engine.fire_event("root/app/dec", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains("\"n=1\""), "expected n=1 after dec from 2: {f}");
+
+        // n=1, dec → n=0
+        engine.fire_event("root/app/dec", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains("\"n=0\""), "expected n=0 after second dec: {f}");
+    }
+
+    #[test]
+    fn test_callback_closure_updates() {
+        // Minimal test: verify callbacks get fresh closures after each step
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            hold("val", [["val", 0]]);
+
+            render(
+                <VStack key="app">
+                    {when(["val", $.v], ({ v }) =>
+                        <>
+                            <Text key="display">{"v=" + v}</Text>
+                            <Button key="inc" label="+" onPress={() => {
+                                hold("val", [["val", v + 1]]);
+                            }} />
+                        </>
+                    )}
+                </VStack>
+            );
+        "#;
+
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // v=0
+        let facts_json = engine.current_facts_json();
+        assert!(facts_json.contains("\"v=0\""), "expected v=0, got: {facts_json}");
+
+        // Press: 0→1
+        engine.fire_event("root/app/inc", "onPress");
+        let facts_json = engine.current_facts_json();
+        assert!(facts_json.contains("\"v=1\""), "expected v=1 after first press, got: {facts_json}");
+
+        // Press: 1→2
+        engine.fire_event("root/app/inc", "onPress");
+        let facts_json = engine.current_facts_json();
+        assert!(facts_json.contains("\"v=2\""), "expected v=2 after second press, got: {facts_json}");
+
+        // Press: 2→3
+        engine.fire_event("root/app/inc", "onPress");
+        let facts_json = engine.current_facts_json();
+        assert!(facts_json.contains("\"v=3\""), "expected v=3 after third press, got: {facts_json}");
+
+        // Press: 3→4
+        engine.fire_event("root/app/inc", "onPress");
+        let facts_json = engine.current_facts_json();
+        assert!(facts_json.contains("\"v=4\""), "expected v=4 after fourth press, got: {facts_json}");
+    }
+
+    #[test]
+    fn test_fire_event_nonexistent_callback() {
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            render(<Text key="msg">No buttons here</Text>);
+        "#;
+        engine.load_program("test.tsx", tsx);
+        let _ = engine.step_json();
+
+        let result = engine.fire_event("root/nonexistent", "onPress");
+        assert!(result.starts_with("ERROR"), "expected error for missing callback, got: {result}");
     }
 }

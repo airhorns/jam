@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use rquickjs::{Context, Function, Object, Runtime, Value};
 
 use crate::pattern::{Pattern, PatternTerm};
-use crate::rule::{BodyFn, PatternExpr, Program, RuleSpec};
+use crate::rule::{BodyFn, HoldOp, PatternExpr, Program, RuleSpec};
 use crate::term::{Statement, Term};
 use crate::transpile;
 
@@ -31,17 +31,22 @@ fn get_runtime_js() -> &'static str {
 /// A JavaScript runtime for loading Jam programs written in TypeScript.
 pub struct JsRuntime {
     runtime: Runtime,
+    /// Stored body context for callback invocation after program load.
+    body_ctx: Option<Arc<Mutex<BodyContext>>>,
 }
 
 impl JsRuntime {
     pub fn new() -> Self {
         let runtime = Runtime::new().expect("Failed to create QuickJS runtime");
-        JsRuntime { runtime }
+        JsRuntime {
+            runtime,
+            body_ctx: None,
+        }
     }
 
     /// Load a TypeScript program and extract its rules and claims.
     /// If the name ends with .tsx, JSX syntax is enabled.
-    pub fn load_program(&self, name: &str, ts_source: &str) -> Result<Program, String> {
+    pub fn load_program(&mut self, name: &str, ts_source: &str) -> Result<Program, String> {
         // Use the provided name as filename if it has an extension, otherwise default to .ts
         let filename = if name.contains('.') {
             name.to_string()
@@ -90,6 +95,12 @@ impl JsRuntime {
             context: body_ctx,
         }));
 
+        // Store body context for later callback invocation
+        self.body_ctx = Some(shared.clone());
+
+        // Extract any hold operations from top-level evaluation
+        let hold_ops = self.extract_hold_ops()?;
+
         // Build RuleSpecs with body functions that call into the shared context
         let rules = build_rule_specs(&rule_data, &shared);
 
@@ -97,7 +108,68 @@ impl JsRuntime {
             name: name.to_string(),
             claims,
             rules,
+            hold_ops,
         })
+    }
+
+    /// Fire a callback registered by render() (e.g., onPress).
+    /// Returns any hold operations produced by the callback.
+    pub fn fire_callback(
+        &self,
+        entity_id: &str,
+        event_name: &str,
+    ) -> Result<Vec<HoldOp>, String> {
+        let body_ctx = self
+            .body_ctx
+            .as_ref()
+            .ok_or("No program loaded")?;
+        let guard = body_ctx.lock().unwrap();
+        guard.context.with(|ctx| {
+            let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
+            let fire: Function = jam.get("fireCallback").map_err(|e| format!("{e}"))?;
+
+            let result: bool = fire
+                .call((entity_id, event_name))
+                .map_err(|e| format!("Callback error: {e}"))?;
+
+            if !result {
+                return Err(format!(
+                    "No callback registered for {entity_id}:{event_name}"
+                ));
+            }
+
+            // Read hold operations produced by the callback
+            Self::read_hold_ops(&ctx)
+        })
+    }
+
+    /// Extract pending hold operations from the JS context.
+    fn extract_hold_ops(&self) -> Result<Vec<HoldOp>, String> {
+        let body_ctx = self.body_ctx.as_ref().ok_or("No body context")?;
+        let guard = body_ctx.lock().unwrap();
+        guard.context.with(|ctx| Self::read_hold_ops(&ctx))
+    }
+
+    /// Read and clear hold operations from the JS __jam object.
+    fn read_hold_ops(ctx: &rquickjs::Ctx<'_>) -> Result<Vec<HoldOp>, String> {
+        let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
+        let get_hold_ops: Function = jam.get("getHoldOps").map_err(|e| format!("{e}"))?;
+        let hold_ops_val: Value = get_hold_ops.call(()).map_err(|e| format!("{e}"))?;
+
+        let arr = match hold_ops_val.into_array() {
+            Some(a) => a,
+            None => return Ok(vec![]),
+        };
+
+        let mut ops = Vec::new();
+        for i in 0..arr.len() {
+            let item: Object = arr.get(i).map_err(|e| format!("{e}"))?;
+            let key: String = item.get("key").map_err(|e| format!("{e}"))?;
+            let stmts_val: Value = item.get("stmts").map_err(|e| format!("{e}"))?;
+            let stmts = js_array_to_statements(&stmts_val)?;
+            ops.push(HoldOp { key, stmts });
+        }
+        Ok(ops)
     }
 }
 
@@ -378,7 +450,7 @@ mod tests {
 
     #[test]
     fn test_load_simple_program() {
-        let rt = JsRuntime::new();
+        let mut rt = JsRuntime::new();
         let program = rt
             .load_program(
                 "test",
@@ -403,7 +475,7 @@ mod tests {
 
     #[test]
     fn test_load_program_with_rule() {
-        let rt = JsRuntime::new();
+        let mut rt = JsRuntime::new();
         let program = rt
             .load_program(
                 "test",
@@ -422,7 +494,7 @@ mod tests {
 
     #[test]
     fn test_load_typescript_program() {
-        let rt = JsRuntime::new();
+        let mut rt = JsRuntime::new();
         let program = rt
             .load_program(
                 "test",
@@ -445,7 +517,7 @@ mod tests {
 
     #[test]
     fn test_body_function_produces_claims() {
-        let rt = JsRuntime::new();
+        let mut rt = JsRuntime::new();
         let program = rt
             .load_program(
                 "test",
@@ -475,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_conditional_body() {
-        let rt = JsRuntime::new();
+        let mut rt = JsRuntime::new();
         let program = rt
             .load_program(
                 "test",
@@ -506,7 +578,7 @@ mod tests {
     fn test_full_pipeline_with_engine() {
         use crate::engine::Engine;
 
-        let rt = JsRuntime::new();
+        let mut rt = JsRuntime::new();
         let program = rt
             .load_program(
                 "test",

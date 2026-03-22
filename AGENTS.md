@@ -76,6 +76,12 @@ Each rule gets dedicated DBSP operators (like Feldera compiles SQL into speciali
 
 **Step**: One call to `engine.step()` processes all pending deltas, runs the circuit to fixed point, and returns what changed as `Vec<(Statement, +1/-1)>`.
 
+## Design principles
+
+**Programs should be self-contained in JS/TS.** A Jam program should be able to define its UI, state, and event handling entirely in TypeScript. The Swift (or native) layer should be a generic bridge that renders claims and dispatches events — a developer using Jam as a library should never need to modify Swift code or bootstrap anything on the native side.
+
+**Antipattern: hardcoded native event handling.** An earlier version had the Swift `ContentView` owning counter state and handling button actions via a hardcoded `switch` on action name strings. This breaks the self-contained principle — the Jam program was just a view layer, and the "business logic" (incrementing a counter) lived in Swift. The correct pattern is: the Jam program owns state via `hold()`, registers callbacks (e.g., `onPress`) during `render()`, and the native side generically dispatches events by entity ID without knowing what the callbacks do.
+
 ## What's not built yet
 
 - Negation (`/nobody/` — fire when no match exists) via DBSP antijoin

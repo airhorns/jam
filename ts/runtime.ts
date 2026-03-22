@@ -89,6 +89,23 @@ function or(...values: any[]): OrMarker {
   return { __or: true, values };
 }
 
+// --- hold(): persistent mutable state ---
+
+interface HoldOp {
+  key: string;
+  stmts: any[][];
+}
+
+const __holdOps: HoldOp[] = [];
+
+function hold(key: string, stmts: any[][]): void {
+  __holdOps.push({ key, stmts });
+}
+
+// --- Callback registry for event handling (onPress, etc.) ---
+
+const __callbackRegistry = new Map<string, Function>();
+
 // --- claim() and wish() ---
 
 function claim(...terms: any[]): void {
@@ -309,6 +326,15 @@ function render(element: any, parentId?: string): void {
   // Set properties from props
   for (const [k, v] of Object.entries(el.props)) {
     if (k === "key" || k === "children") continue;
+    // Capture event handler callbacks (onPress, onChange, etc.)
+    if (typeof v === "function" && k.startsWith("on")) {
+      const cbKey = `${entityId}:${k}`;
+      // Wrap to add tracing
+      const origFn = v;
+      __callbackRegistry.set(cbKey, origFn);
+      claim(entityId, k, true); // mark entity as having this handler
+      continue;
+    }
     claim(entityId, k, v);
   }
 
@@ -342,10 +368,29 @@ function render(element: any, parentId?: string): void {
     __collector = null;
     return result;
   },
+  // Hold operations: read and clear pending hold ops
+  getHoldOps(): HoldOp[] {
+    const result = __holdOps.splice(0);
+    return result;
+  },
+  // Fire a callback by entity ID and event name (e.g., "root/app/inc", "onPress")
+  fireCallback(entityId: string, eventName: string): boolean {
+    const key = `${entityId}:${eventName}`;
+    const cb = __callbackRegistry.get(key);
+    if (cb) {
+      cb();
+      return true;
+    }
+    return false;
+  },
+  // Debug: dump callback registry keys
+  dumpCallbacks(): string {
+    return Array.from(__callbackRegistry.keys()).join(", ");
+  },
 };
 
 // Re-export to globalThis so user scripts can use them without imports
 // ($this is already set via Object.defineProperty above)
 Object.assign(globalThis, {
-  $, _, or, when, claim, wish, child, h, render, Fragment,
+  $, _, or, when, claim, wish, child, hold, h, render, Fragment,
 });

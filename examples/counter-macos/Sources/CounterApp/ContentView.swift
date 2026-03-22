@@ -1,26 +1,10 @@
 import SwiftUI
+import Foundation
 
 struct ContentView: View {
     @State private var engine = JamEngineWrapper()
     @State private var isLoaded = false
     @State private var errorMessage: String?
-    @State private var counter = 0
-
-    // The counter program source using JSX syntax
-    private let counterSource = """
-    render(
-        <VStack key="app">
-            <Text key="title" font="title">Jam Counter</Text>
-            {when(["counter", "count", $.value], ({ value }) =>
-                <Text key="display" font="largeTitle">{"Count: " + value}</Text>
-            )}
-            <HStack key="buttons">
-                <Button key="dec" label="-" />
-                <Button key="inc" label="+" />
-            </HStack>
-        </VStack>
-    );
-    """
 
     var body: some View {
         Group {
@@ -30,45 +14,32 @@ struct ContentView: View {
                     Text(error).font(.body).padding()
                 }
             } else if isLoaded {
-                JamView(engine: engine, rootId: "root") { action in
-                    handleAction(action)
-                }
-                .padding(40)
+                JamView(engine: engine, rootId: "root")
+                    .padding(40)
             } else {
                 ProgressView("Loading Jam...")
             }
         }
         .frame(minWidth: 300, minHeight: 200)
         .task {
-            loadCounter()
+            loadProgram()
         }
     }
 
-    private func loadCounter() {
+    private func loadProgram() {
+        // Read the counter program from disk
+        let tsDir = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("ts")
+        let counterFile = tsDir.appendingPathComponent("counter.tsx")
+
         do {
-            // Use .tsx extension to enable JSX transpilation
-            try engine.loadProgram(name: "counter.tsx", source: counterSource)
-            // Assert initial counter value
-            try engine.assertFact([.symbol("counter"), .symbol("count"), .int(counter)])
+            let source = try String(contentsOf: counterFile, encoding: .utf8)
+            try engine.loadProgram(name: "counter.tsx", source: source)
             engine.step()
             isLoaded = true
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func handleAction(_ action: String) {
-        let oldValue = counter
-        switch action {
-        case "increment": counter += 1
-        case "decrement": counter -= 1
-        default: return
-        }
-
-        do {
-            try engine.retractFact([.symbol("counter"), .symbol("count"), .int(oldValue)])
-            try engine.assertFact([.symbol("counter"), .symbol("count"), .int(counter)])
-            engine.step()
         } catch {
             errorMessage = error.localizedDescription
         }

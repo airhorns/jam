@@ -7,6 +7,7 @@ struct UIEntity {
     var type: String = ""
     var properties: [String: JamTerm] = [:]
     var children: [(sortKey: String, childId: String)] = []
+    var hasOnPress: Bool = false
 }
 
 // MARK: - Build entity map from facts
@@ -36,6 +37,9 @@ func buildEntityMap(from facts: [JamStatement]) -> [String: UIEntity] {
                let childId = terms[3].stringValue {
                 entities[entityId]?.children.append((sortKey: sortKey, childId: childId))
             }
+        case "onPress":
+            // Boolean marker indicating this entity has a press callback
+            entities[entityId]?.hasOnPress = true
         default:
             entities[entityId]?.properties[predicate] = terms[2]
         }
@@ -48,12 +52,11 @@ func buildEntityMap(from facts: [JamStatement]) -> [String: UIEntity] {
     return entities
 }
 
-// MARK: - SwiftUI renderer (uses AnyView to avoid type-checker explosion)
+// MARK: - SwiftUI renderer
 
 struct JamView: View {
     let engine: JamEngineWrapper
     let rootId: String
-    var onAction: ((String) -> Void)?
 
     var body: some View {
         let entities = buildEntityMap(from: engine.currentFacts)
@@ -77,6 +80,11 @@ struct JamView: View {
         case "Spacer":
             return AnyView(Spacer())
         default:
+            // Typeless entity with children — render children directly (implicit container).
+            // This handles the "root" entity which has no isa but parents the tree.
+            if !entity.children.isEmpty {
+                return renderVStack(entity, entities: entities)
+            }
             return AnyView(EmptyView())
         }
     }
@@ -116,11 +124,13 @@ struct JamView: View {
 
     private func renderButton(_ entity: UIEntity) -> AnyView {
         let label = entity.properties["label"]?.stringValue ?? ""
-        let action = entity.properties["action"]?.stringValue
+        let entityId = entity.id
+        let hasCallback = entity.hasOnPress
         return AnyView(
             Button(label) {
-                if let action = action {
-                    onAction?(action)
+                if hasCallback {
+                    // Generic event dispatch — no hardcoded action strings
+                    engine.fireEvent(entityId: entityId, eventName: "onPress")
                 }
             }
             .font(swiftUIFont(entity.properties["font"]?.stringValue))

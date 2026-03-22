@@ -3,6 +3,13 @@ use std::sync::Arc;
 use crate::pattern::{Bindings, Pattern};
 use crate::term::Statement;
 
+/// A hold operation: key-based persistent state update.
+#[derive(Clone, Debug)]
+pub struct HoldOp {
+    pub key: String,
+    pub stmts: Vec<Statement>,
+}
+
 /// Unique identifier for a rule.
 pub type RuleId = u64;
 
@@ -133,6 +140,8 @@ pub struct Program {
     pub claims: Vec<Statement>,
     /// Rules this program defines.
     pub rules: Vec<RuleSpec>,
+    /// Hold operations from top-level evaluation (initial state).
+    pub hold_ops: Vec<HoldOp>,
 }
 
 impl Program {
@@ -142,6 +151,7 @@ impl Program {
             name: name.to_string(),
             claims: vec![],
             rules: vec![],
+            hold_ops: vec![],
         }
     }
 

@@ -205,6 +205,11 @@ export declare function when<
 export declare function claim(...terms: Term[]): void;
 export declare function wish(...terms: Term[]): void;
 
+// hold() — persistent mutable state (like Folk's Hold!)
+// Each call with the same key replaces the previous state.
+// Used inside event callbacks (onPress, etc.) to update state.
+export declare function hold(key: string, stmts: Term[][]): void;
+
 // $this — current entity identity (like Folk's $this)
 // Scoped by child() calls. Defaults to "root".
 export declare const $this: string;
