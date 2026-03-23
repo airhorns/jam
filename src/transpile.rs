@@ -32,9 +32,7 @@ pub fn transpile_ts_to_js(source: &str, filename: &str) -> Result<String, String
     let mut program = parsed.program;
 
     // Build semantic analysis (required by transformer for scoping)
-    let semantic = SemanticBuilder::new()
-        .build(&program)
-        .semantic;
+    let semantic = SemanticBuilder::new().build(&program).semantic;
     let scoping = semantic.into_scoping();
 
     let path = Path::new(filename);
@@ -173,10 +171,7 @@ mod tests {
             </>;
         "#;
         let js = transpile_ts_to_js(tsx, "test.tsx").unwrap();
-        assert!(
-            js.contains("Fragment"),
-            "should use Fragment for <>: {js}"
-        );
+        assert!(js.contains("Fragment"), "should use Fragment for <>: {js}");
     }
 
     #[test]

@@ -47,9 +47,7 @@ fn count_todo_claims(facts: &str) -> usize {
         .iter()
         .filter(|fact| {
             let arr = fact.as_array().unwrap();
-            arr.len() >= 3
-                && arr[0].as_str() == Some("todo")
-                && arr[1].is_number()
+            arr.len() >= 3 && arr[0].as_str() == Some("todo") && arr[1].is_number()
         })
         .count()
 }
@@ -78,7 +76,11 @@ fn test_todo_app_starts_empty() {
     let f = engine.current_facts_json();
 
     // No todo claims should exist
-    assert_eq!(count_todo_claims(&f), 0, "should have no todo claims initially");
+    assert_eq!(
+        count_todo_claims(&f),
+        0,
+        "should have no todo claims initially"
+    );
 }
 
 // ============================================================================
@@ -112,14 +114,32 @@ fn test_add_multiple_todos() {
     "#,
     );
 
-    assert!(f.contains(r#""todo",1,"has","title","First""#), "first: {f}");
-    assert!(f.contains(r#""todo",2,"has","title","Second""#), "second: {f}");
-    assert!(f.contains(r#""todo",3,"has","title","Third""#), "third: {f}");
+    assert!(
+        f.contains(r#""todo",1,"has","title","First""#),
+        "first: {f}"
+    );
+    assert!(
+        f.contains(r#""todo",2,"has","title","Second""#),
+        "second: {f}"
+    );
+    assert!(
+        f.contains(r#""todo",3,"has","title","Third""#),
+        "third: {f}"
+    );
 
     // All should be not done
-    assert!(f.contains(r#""todo",1,"is","done",false"#), "first not done: {f}");
-    assert!(f.contains(r#""todo",2,"is","done",false"#), "second not done: {f}");
-    assert!(f.contains(r#""todo",3,"is","done",false"#), "third not done: {f}");
+    assert!(
+        f.contains(r#""todo",1,"is","done",false"#),
+        "first not done: {f}"
+    );
+    assert!(
+        f.contains(r#""todo",2,"is","done",false"#),
+        "second not done: {f}"
+    );
+    assert!(
+        f.contains(r#""todo",3,"is","done",false"#),
+        "third not done: {f}"
+    );
 }
 
 #[test]
@@ -163,7 +183,10 @@ fn test_mark_todo_done() {
     "#,
     );
 
-    assert!(f.contains(r#""todo",1,"is","done",true"#), "should be done: {f}");
+    assert!(
+        f.contains(r#""todo",1,"is","done",true"#),
+        "should be done: {f}"
+    );
     assert!(
         f.contains(r#""todo",1,"has","title","Buy milk""#),
         "title preserved: {f}"
@@ -182,7 +205,10 @@ fn test_unmark_todo_done() {
     "#,
     );
 
-    assert!(f.contains(r#""todo",1,"is","done",false"#), "should be undone: {f}");
+    assert!(
+        f.contains(r#""todo",1,"is","done",false"#),
+        "should be undone: {f}"
+    );
 }
 
 #[test]
@@ -198,9 +224,18 @@ fn test_toggle_specific_todo_in_list() {
     "#,
     );
 
-    assert!(f.contains(r#""todo",1,"is","done",false"#), "first untouched: {f}");
-    assert!(f.contains(r#""todo",2,"is","done",true"#), "second toggled: {f}");
-    assert!(f.contains(r#""todo",3,"is","done",false"#), "third untouched: {f}");
+    assert!(
+        f.contains(r#""todo",1,"is","done",false"#),
+        "first untouched: {f}"
+    );
+    assert!(
+        f.contains(r#""todo",2,"is","done",true"#),
+        "second toggled: {f}"
+    );
+    assert!(
+        f.contains(r#""todo",3,"is","done",false"#),
+        "third untouched: {f}"
+    );
 }
 
 // ============================================================================
@@ -237,7 +272,10 @@ fn test_edit_preserves_done_state() {
     "#,
     );
 
-    assert!(f.contains(r#""todo",1,"is","done",true"#), "still done: {f}");
+    assert!(
+        f.contains(r#""todo",1,"is","done",true"#),
+        "still done: {f}"
+    );
     assert!(
         f.contains(r#""todo",1,"has","title","Buy organic groceries""#),
         "title edited: {f}"
@@ -256,7 +294,10 @@ fn test_edit_only_affects_target() {
     "#,
     );
 
-    assert!(f.contains(r#""todo",1,"has","title","Modified""#), "first edited: {f}");
+    assert!(
+        f.contains(r#""todo",1,"has","title","Modified""#),
+        "first edited: {f}"
+    );
     assert!(
         f.contains(r#""todo",2,"has","title","Second""#),
         "second unchanged: {f}"
@@ -278,8 +319,14 @@ fn test_delete_todo() {
     "#,
     );
 
-    assert!(!f.contains(r#""todo",1,"has","title""#), "todo removed: {f}");
-    assert!(!f.contains(r#""todo",1,"is","done""#), "done claim removed: {f}");
+    assert!(
+        !f.contains(r#""todo",1,"has","title""#),
+        "todo removed: {f}"
+    );
+    assert!(
+        !f.contains(r#""todo",1,"is","done""#),
+        "done claim removed: {f}"
+    );
 }
 
 #[test]
@@ -295,9 +342,15 @@ fn test_delete_middle_todo() {
     "#,
     );
 
-    assert!(f.contains(r#""todo",1,"has","title","First""#), "first survives: {f}");
+    assert!(
+        f.contains(r#""todo",1,"has","title","First""#),
+        "first survives: {f}"
+    );
     assert!(!f.contains(r#""todo",2,"has","title""#), "second gone: {f}");
-    assert!(f.contains(r#""todo",3,"has","title","Third""#), "third survives: {f}");
+    assert!(
+        f.contains(r#""todo",3,"has","title","Third""#),
+        "third survives: {f}"
+    );
 }
 
 #[test]
@@ -338,7 +391,10 @@ fn test_add_complete_delete_sequence() {
 
     // Task A: done
     assert!(f.contains(r#""todo",1,"is","done",true"#), "A done: {f}");
-    assert!(f.contains(r#""todo",1,"has","title","Task A""#), "A title: {f}");
+    assert!(
+        f.contains(r#""todo",1,"has","title","Task A""#),
+        "A title: {f}"
+    );
 
     // Task B: deleted
     assert!(!f.contains(r#""todo",2,"has","title""#), "B gone: {f}");
@@ -365,7 +421,10 @@ fn test_delete_and_add_new_gets_fresh_id() {
 
     // The new todo should get id=2, not reuse id=1
     assert!(!f.contains(r#""todo",1,"has","title""#), "old deleted: {f}");
-    assert!(f.contains(r#""todo",2,"has","title","New""#), "new has id 2: {f}");
+    assert!(
+        f.contains(r#""todo",2,"has","title","New""#),
+        "new has id 2: {f}"
+    );
 }
 
 // ============================================================================
@@ -428,11 +487,17 @@ fn test_ui_updates_after_toggle() {
 
     // Toggle it — should show checkmark
     let f = eval_and_get_facts(&mut engine, r#"toggleTodo(1, false);"#);
-    assert!(f.contains(r#""label","✓""#), "after toggle shows check: {f}");
+    assert!(
+        f.contains(r#""label","✓""#),
+        "after toggle shows check: {f}"
+    );
 
     // Toggle again — back to circle
     let f = eval_and_get_facts(&mut engine, r#"toggleTodo(1, true);"#);
-    assert!(f.contains(r#""label","○""#), "after re-toggle shows circle: {f}");
+    assert!(
+        f.contains(r#""label","○""#),
+        "after re-toggle shows circle: {f}"
+    );
 }
 
 #[test]
@@ -492,7 +557,10 @@ fn test_delete_via_button_callback() {
     assert!(!result.starts_with("ERROR"), "fire_event failed: {result}");
 
     let f = engine.current_facts_json();
-    assert!(!f.contains("Delete via button"), "deleted via callback: {f}");
+    assert!(
+        !f.contains("Delete via button"),
+        "deleted via callback: {f}"
+    );
 }
 
 #[test]
@@ -535,9 +603,18 @@ fn test_text_field_submit_multiple_times() {
     assert!(!result.starts_with("ERROR"), "fire failed: {result}");
 
     let f = engine.current_facts_json();
-    assert!(f.contains(r#""todo",1,"has","title","First todo""#), "first: {f}");
-    assert!(f.contains(r#""todo",2,"has","title","Second todo""#), "second: {f}");
-    assert!(f.contains(r#""todo",3,"has","title","Third todo""#), "third: {f}");
+    assert!(
+        f.contains(r#""todo",1,"has","title","First todo""#),
+        "first: {f}"
+    );
+    assert!(
+        f.contains(r#""todo",2,"has","title","Second todo""#),
+        "second: {f}"
+    );
+    assert!(
+        f.contains(r#""todo",3,"has","title","Third todo""#),
+        "third: {f}"
+    );
 }
 
 #[test]
@@ -578,7 +655,10 @@ fn test_full_ui_flow_add_toggle_delete_via_callbacks() {
     assert!(!result.starts_with("ERROR"), "toggle failed: {result}");
 
     let f = engine.current_facts_json();
-    assert!(f.contains(r#""todo",1,"is","done",true"#), "toggled done: {f}");
+    assert!(
+        f.contains(r#""todo",1,"is","done",true"#),
+        "toggled done: {f}"
+    );
 
     // Delete via button callback
     let delete_cb = find_callback(&f, "delete").expect("delete callback");

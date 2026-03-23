@@ -174,8 +174,8 @@ impl Program {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pattern::{bind, exact_sym};
     use crate::pat;
+    use crate::pattern::{bind, exact_sym};
 
     #[test]
     fn test_single_pattern_dnf() {

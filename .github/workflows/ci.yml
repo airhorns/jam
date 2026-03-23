@@ -24,7 +24,8 @@ jobs:
       - uses: ./.github/actions/setup-test-env
       - uses: Swatinem/rust-cache@v2
       - name: Run clippy
-        run: cargo clippy -- -D warnings
+        # CFLAGS: suppress mimalloc ATOMIC_VAR_INIT error on GCC 15
+        run: CFLAGS="-Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error" cargo clippy -- -D warnings
 
   test:
     name: Tests
@@ -34,4 +35,4 @@ jobs:
       - uses: ./.github/actions/setup-test-env
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo test
+        run: CFLAGS="-Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error" cargo test
