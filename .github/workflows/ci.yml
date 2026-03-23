@@ -24,7 +24,11 @@ jobs:
       - uses: ./.github/actions/setup-test-env
       - uses: Swatinem/rust-cache@v2
       - name: Run clippy
-        run: cargo clippy -- -D warnings
+        # Set CC to the gcc-13 wrapper path from buildInputs to avoid mimalloc GCC 15 breakage.
+        # The cc crate uses CC to find the C compiler.
+        run: |
+          GCC13=$(echo $buildInputs | tr ' ' '\n' | grep gcc | head -1)
+          CC="$GCC13/bin/gcc" cargo clippy -- -D warnings
 
   test:
     name: Tests
@@ -34,4 +38,6 @@ jobs:
       - uses: ./.github/actions/setup-test-env
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo test
+        run: |
+          GCC13=$(echo $buildInputs | tr ' ' '\n' | grep gcc | head -1)
+          CC="$GCC13/bin/gcc" cargo test
