@@ -24,8 +24,12 @@ jobs:
       - uses: ./.github/actions/setup-test-env
       - uses: Swatinem/rust-cache@v2
       - name: Run clippy
-        # hardeningDisable: nix GCC wrapper adds -Werror which breaks mimalloc on GCC 15
-        run: hardeningDisable=all cargo clippy -- -D warnings
+        run: cargo clippy -- -D warnings
+        env:
+          # mimalloc-rust-sys fails on GCC 15 due to removed ATOMIC_VAR_INIT.
+          # cc crate reads CFLAGS but nix wrapper may override; set both.
+          CFLAGS: "-Wno-implicit-function-declaration -Wno-int-conversion -Wno-error"
+          CXXFLAGS: "-Wno-implicit-function-declaration -Wno-int-conversion -Wno-error"
 
   test:
     name: Tests
@@ -35,4 +39,7 @@ jobs:
       - uses: ./.github/actions/setup-test-env
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: hardeningDisable=all cargo test
+        run: cargo test
+        env:
+          CFLAGS: "-Wno-implicit-function-declaration -Wno-int-conversion -Wno-error"
+          CXXFLAGS: "-Wno-implicit-function-declaration -Wno-int-conversion -Wno-error"
