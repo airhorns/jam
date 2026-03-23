@@ -21,5 +21,7 @@ void* __swift_bridge__$JamEngine$step_json(void* self);
 void* __swift_bridge__$JamEngine$current_facts_json(void* self);
 void* __swift_bridge__$JamEngine$fire_event(void* self, struct RustStr entity_id, struct RustStr event_name);
 void* __swift_bridge__$JamEngine$fire_event_with_data(void* self, struct RustStr entity_id, struct RustStr event_name, struct RustStr data);
+void* __swift_bridge__$JamEngine$eval_js_ffi(void* self, struct RustStr code);
+void* __swift_bridge__$JamEngine$drain_async(void* self);
 
 

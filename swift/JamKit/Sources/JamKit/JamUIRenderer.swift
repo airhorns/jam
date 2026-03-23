@@ -79,7 +79,7 @@ public struct JamView: View {
         case "Text":
             return renderText(entity)
         case "Button":
-            return renderButton(entity)
+            return renderButton(entity, entities: entities)
         case "Spacer":
             return AnyView(Spacer())
         case "ScrollView":
@@ -197,7 +197,7 @@ public struct JamView: View {
         return AnyView(text)
     }
 
-    private func renderButton(_ entity: UIEntity) -> AnyView {
+    private func renderButton(_ entity: UIEntity, entities: [String: UIEntity]) -> AnyView {
         let label = entity.properties["label"]?.stringValue ?? ""
         let entityId = entity.id
         // Check for any callback property (onPress is the most common)
@@ -205,18 +205,38 @@ public struct JamView: View {
             if case .symbol(let s) = term, s.contains(":") { return true }
             return false
         }
-        var view = AnyView(
-            Button(label) {
-                if hasCallback {
-                    engine.fireEvent(entityId: entityId, eventName: "onPress")
+        let childViews = resolveChildren(entity, entities: entities)
+        var view: AnyView
+        if !childViews.isEmpty {
+            // Use children as the button label
+            view = AnyView(
+                Button(action: {
+                    if hasCallback {
+                        engine.fireEvent(entityId: entityId, eventName: "onPress")
+                    }
+                }) {
+                    ForEach(childViews, id: \.id) { child in
+                        child.view
+                    }
                 }
-            }
-        )
+            )
+        } else {
+            view = AnyView(
+                Button(label) {
+                    if hasCallback {
+                        engine.fireEvent(entityId: entityId, eventName: "onPress")
+                    }
+                }
+            )
+        }
         if let fontName = entity.properties["font"]?.stringValue {
             view = AnyView(view.font(swiftUIFont(fontName)))
         }
         if let colorName = entity.properties["foregroundColor"]?.stringValue {
             view = AnyView(view.foregroundStyle(swiftUIColor(colorName)))
+        }
+        if let disabledStr = entity.properties["disabled"]?.stringValue, disabledStr == "true" {
+            view = AnyView(view.disabled(true))
         }
         return view
     }

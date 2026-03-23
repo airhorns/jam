@@ -1,6 +1,5 @@
 // SandboxAgentClient — HTTP client for the sandbox-agent ACP API.
-// Uses fetch() (provided by LLRT) for HTTP requests.
-// SSE streaming uses fetch() with response.text() and manual SSE frame parsing.
+// Uses fetch() for all HTTP requests including SSE streaming.
 
 import { parseACPMessage, type AgentEvent } from "../models/events";
 
@@ -100,7 +99,18 @@ export class SandboxAgentClient {
     }
   }
 
-  async sendPrompt(sessionId: string, prompt: string): Promise<void> {
+  // --- Prompt with SSE ---
+  // ACP flow: open SSE GET first → POST prompt → SSE delivers events during processing.
+  // Both requests run concurrently as standard fetch() promises.
+  // When the POST completes (agent is done), we abort the SSE connection
+  // and read whatever text was received.
+
+  sendPromptWithEvents(
+    sessionId: string,
+    prompt: string,
+    onComplete: (events: AgentEvent[]) => void,
+    onError: (err: Error) => void,
+  ): void {
     const acpSessionId = this.acpSessionIds.get(sessionId);
     const params: Record<string, any> = {
       prompt: [{ type: "text", text: prompt }],
@@ -109,72 +119,73 @@ export class SandboxAgentClient {
       params.sessionId = acpSessionId;
     }
 
-    const response = await fetch(`${this.baseURL}/v1/acp/${sessionId}`, {
+    const sseUrl = `${this.baseURL}/v1/acp/${sessionId}`;
+    const postBody = JSON.stringify(this.makeJsonRpc("session/prompt", params));
+
+    // ACP flow: open SSE GET first, then POST prompt.
+    // Both run concurrently as standard fetch() promises.
+    // SSE body is read via ReadableStream (response.body.getReader()).
+
+    // Use a shared accumulator so we can read SSE text even if the promise hasn't resolved
+    const sseAccumulator = { text: "" };
+    const sseAbort = new AbortController();
+
+    // 1. Start SSE reader (reads body incrementally via ReadableStream)
+    this.readSSEStream(sseUrl, sseAbort.signal, sseAccumulator);
+
+    // 2. POST the prompt (resolves when agent finishes)
+    fetch(sseUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...this.authHeaders() },
-      body: JSON.stringify(this.makeJsonRpc("session/prompt", params)),
-    });
+      body: postBody,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw SandboxAgentError.httpError(response.status, await response.text());
+        }
+        const data: any = await response.json();
+        this.checkJsonRpcError(data);
 
-    if (!response.ok) {
-      throw SandboxAgentError.httpError(response.status, await response.text());
-    }
-    const data: any = await response.json();
-    this.checkJsonRpcError(data);
+        // 3. POST done — abort SSE and use accumulated text
+        sseAbort.abort();
+        onComplete(this.parseSSEText(sseAccumulator.text));
+      })
+      .catch((err) => {
+        sseAbort.abort();
+        onError(err);
+      });
   }
 
-  // --- SSE Event Polling ---
-  // QuickJS doesn't support ReadableStream, so we fetch the full SSE response
-  // as text and parse it. This works for short-lived sessions; for long-running
-  // ones, the app would need to re-fetch periodically.
+  // Read an SSE stream incrementally using response.body.getReader().
+  // Accumulates text into the shared accumulator object.
+  private async readSSEStream(
+    url: string,
+    signal: AbortSignal,
+    accumulator: { text: string },
+  ): Promise<void> {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "Accept": "text/event-stream",
+          "Cache-Control": "no-cache",
+          ...this.authHeaders(),
+        },
+        signal,
+      });
 
-  async fetchEvents(sessionId: string): Promise<AgentEvent[]> {
-    const response = await fetch(`${this.baseURL}/v1/acp/${sessionId}`, {
-      headers: {
-        "Accept": "text/event-stream",
-        "Cache-Control": "no-cache",
-        ...this.authHeaders(),
-      },
-    });
+      if (!response.ok || !response.body) return;
 
-    if (!response.ok) {
-      throw SandboxAgentError.httpError(response.status, await response.text());
-    }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
 
-    const text = await response.text();
-    return this.parseSSEText(text);
-  }
-
-  private parseSSEText(text: string): AgentEvent[] {
-    const events: AgentEvent[] = [];
-    const eventIndex = { value: 0 };
-
-    for (const line of text.split("\n")) {
-      if (!line.startsWith("data: ")) continue;
-      const data = line.slice(6).trim();
-      if (!data) continue;
-
-      // Check for JSON-RPC error
-      try {
-        const json = JSON.parse(data);
-        if (json.error) continue; // skip errors in SSE
-      } catch {
-        continue;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulator.text += decoder.decode(value, { stream: true });
       }
-
-      const result = parseACPMessage(data, eventIndex);
-      if (result.type === "event") {
-        events.push(result.event);
-      } else if (result.type === "sessionEnd") {
-        eventIndex.value += 1;
-        events.push({
-          id: "evt-end",
-          eventIndex: eventIndex.value,
-          payload: { type: "sessionEnd", stopReason: result.stopReason },
-        });
-      }
+    } catch {
+      // AbortError or network error — accumulated text is already in the accumulator
     }
-
-    return events;
   }
 
   // --- Destruction ---
@@ -210,5 +221,37 @@ export class SandboxAgentClient {
         typeof data.error.data === "string" ? data.error.data : undefined
       );
     }
+  }
+
+  private parseSSEText(text: string): AgentEvent[] {
+    const events: AgentEvent[] = [];
+    const eventIndex = { value: 0 };
+
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6).trim();
+      if (!data) continue;
+
+      try {
+        const json = JSON.parse(data);
+        if (json.error) continue;
+      } catch {
+        continue;
+      }
+
+      const result = parseACPMessage(data, eventIndex);
+      if (result.type === "event") {
+        events.push(result.event);
+      } else if (result.type === "sessionEnd") {
+        eventIndex.value += 1;
+        events.push({
+          id: "evt-end",
+          eventIndex: eventIndex.value,
+          payload: { type: "sessionEnd", stopReason: result.stopReason },
+        });
+      }
+    }
+
+    return events;
   }
 }

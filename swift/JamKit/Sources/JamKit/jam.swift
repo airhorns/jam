@@ -69,6 +69,16 @@ extension JamEngineRefMut {
         })
         })
     }
+
+    public func eval_js_ffi<GenericToRustStr: ToRustStr>(_ code: GenericToRustStr) -> RustString {
+        return code.toRustStr({ codeAsRustStr in
+            RustString(ptr: __swift_bridge__$JamEngine$eval_js_ffi(ptr, codeAsRustStr))
+        })
+    }
+
+    public func drain_async() -> RustString {
+        RustString(ptr: __swift_bridge__$JamEngine$drain_async(ptr))
+    }
 }
 public class JamEngineRef {
     var ptr: UnsafeMutableRawPointer

@@ -667,6 +667,14 @@ fn load_puddy_app() -> JamEngine {
     engine
 }
 
+/// Set connection status to "connected" so the new session button is enabled.
+fn connect_puddy_app(engine: &mut JamEngine) {
+    engine
+        .eval_js("hold('connection', () => { claim('connection', 'status', 'connected'); claim('connection', 'hostname', 'localhost'); });")
+        .unwrap();
+    let _ = engine.step_json();
+}
+
 #[test]
 fn test_puddy_app_loads_with_ui_structure() {
     let engine = load_puddy_app();
@@ -690,6 +698,7 @@ fn test_puddy_app_loads_with_ui_structure() {
 #[test]
 fn test_puddy_create_session_via_button() {
     let mut engine = load_puddy_app();
+    connect_puddy_app(&mut engine);
 
     // Find the new session button's callback ID
     let f = engine.current_facts_json();
@@ -1355,6 +1364,7 @@ fn test_e2e_text_input_sends_message() {
 #[test]
 fn test_e2e_new_session_button() {
     let mut engine = load_puddy_app();
+    connect_puddy_app(&mut engine);
 
     // Find the new session button callback
     let f = engine.current_facts_json();

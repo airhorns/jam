@@ -65,14 +65,12 @@ export class SessionManager {
       this.agents = [];
       this.connectionError = err.message ?? String(err);
     }
-
-    // Update reactive state
     this.syncConnectionState();
   }
 
   // --- Session Lifecycle ---
 
-  async createNewSession(initialPrompt?: string): Promise<string> {
+  createNewSession(initialPrompt?: string): string {
     const agent = this.preferredAgent?.id;
     if (!agent) throw SandboxAgentError.noReadyAgent();
 
@@ -81,17 +79,25 @@ export class SessionManager {
     this.sessions.set(sessionId, session);
     this.syncSessionState(sessionId);
 
+    // Async: connect to backend (runs during drain_async)
+    this.connectSession(sessionId, agent, initialPrompt);
+
+    return sessionId;
+  }
+
+  private async connectSession(sessionId: string, agent: string, initialPrompt?: string): Promise<void> {
     try {
       await this.client.createSession(sessionId, agent);
 
-      if (initialPrompt) {
-        // Add user message
-        this.addUserMessage(sessionId, initialPrompt);
-        await this.client.sendPrompt(sessionId, initialPrompt);
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        session.status = { type: "active" };
+        this.syncSessionState(sessionId);
       }
 
-      // Start polling for events
-      this.pollEvents(sessionId);
+      if (initialPrompt) {
+        this.sendMessage(sessionId, initialPrompt);
+      }
     } catch (err: any) {
       const s = this.sessions.get(sessionId);
       if (s) {
@@ -99,25 +105,51 @@ export class SessionManager {
         this.syncSessionState(sessionId);
       }
     }
-
-    return sessionId;
   }
 
-  async sendMessage(sessionId: string, message: string): Promise<void> {
+  sendMessage(sessionId: string, message: string): void {
     this.addUserMessage(sessionId, message);
 
-    try {
-      await this.client.sendPrompt(sessionId, message);
-      // Poll for response events
-      this.pollEvents(sessionId);
-    } catch (err: any) {
-      console.error("sendMessage error:", err.message ?? err);
+    // Mark session as waiting for response
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.streamingText = "Thinking...";
+      this.syncSessionState(sessionId);
     }
+
+    // Send prompt with SSE event capture.
+    // The callback fires (during drain_async) when the agent responds.
+    this.client.sendPromptWithEvents(
+      sessionId,
+      message,
+      (events) => this.applyEvents(sessionId, events),
+      (err) => {
+        console.error("sendMessage error:", err.message ?? err);
+        const s = this.sessions.get(sessionId);
+        if (s) {
+          s.streamingText = undefined;
+          this.syncSessionState(sessionId);
+        }
+      },
+    );
+  }
+
+  private applyEvents(sessionId: string, events: AgentEvent[]): void {
+    let session = this.sessions.get(sessionId);
+    if (!session) return;
+
+    session.streamingText = undefined;
+
+    for (const event of events) {
+      if (event.eventIndex <= session.lastEventIndex) continue;
+      session = applyEvent(session, event);
+      this.sessions.set(sessionId, session);
+    }
+    this.syncSessionState(sessionId);
   }
 
   async destroySession(id: string): Promise<void> {
     this.sessions.delete(id);
-    // Clear session facts (empty hold = retract all)
     hold(`session-${id}`, () => {});
     hold(`session-${id}-msgs`, () => {});
 
@@ -128,33 +160,7 @@ export class SessionManager {
     }
   }
 
-  // --- Event Polling ---
-
-  private async pollEvents(sessionId: string): Promise<void> {
-    try {
-      const events = await this.client.fetchEvents(sessionId);
-      let session = this.sessions.get(sessionId);
-      if (!session) return;
-
-      for (const event of events) {
-        if (event.eventIndex <= session.lastEventIndex) continue;
-        session = applyEvent(session, event);
-        this.sessions.set(sessionId, session);
-      }
-
-      this.syncSessionState(sessionId);
-    } catch (err: any) {
-      const session = this.sessions.get(sessionId);
-      if (session && session.status.type !== "ended" && session.status.type !== "failed") {
-        session.status = { type: "failed", error: err.message ?? String(err) };
-        this.sessions.set(sessionId, session);
-        this.syncSessionState(sessionId);
-      }
-    }
-  }
-
   // --- Reactive State Sync ---
-  // Push manager state into hold() facts so when() rules can react.
 
   private syncConnectionState(): void {
     hold("connection", () => {
@@ -185,7 +191,6 @@ export class SessionManager {
       }
     });
 
-    // Sync messages
     hold(`session-${sessionId}-msgs`, () => {
       for (const msg of session.messages) {
         const content =
@@ -213,7 +218,5 @@ export class SessionManager {
     this.syncSessionState(sessionId);
   }
 
-  disconnectAll(): void {
-    // No active connections to close in polling mode
-  }
+  disconnectAll(): void {}
 }

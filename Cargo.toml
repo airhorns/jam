@@ -21,8 +21,9 @@ tokio = { version = "1", features = ["rt", "macros", "time"] }
 futures = "0.3"
 
 # LLRT modules for fetch(), timers, console in QuickJS
-llrt_modules = { git = "https://github.com/awslabs/llrt.git", tag = "v0.8.1-beta", default-features = false, features = ["fetch", "timers", "console", "path", "tls-ring"] }
-llrt_utils = { git = "https://github.com/awslabs/llrt.git", tag = "v0.8.1-beta" }
+# Using feat/fetch-body-streams branch for response.body ReadableStream support (PR #1382)
+llrt_modules = { git = "https://github.com/awslabs/llrt.git", branch = "feat/fetch-body-streams", default-features = false, features = ["fetch", "stream-web", "timers", "console", "path", "tls-ring", "abort", "util"] }
+llrt_utils = { git = "https://github.com/awslabs/llrt.git", branch = "feat/fetch-body-streams" }
 
 [build-dependencies]
 swift-bridge-build = "0.1"

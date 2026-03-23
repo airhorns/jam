@@ -14,6 +14,11 @@ fn init_llrt_globals(ctx: &rquickjs::Ctx<'_>) -> rquickjs::Result<()> {
     BasePrimordials::init(ctx)?;
     llrt_modules::console::init(ctx)?;
     llrt_modules::fetch::init(ctx)?;
+    llrt_modules::timers::init(ctx)?;
+    llrt_modules::abort::init(ctx)?;
+    llrt_modules::stream_web::init(ctx)?;
+    llrt_modules::util::init(ctx)?;
+
     Ok(())
 }
 
@@ -64,6 +69,12 @@ impl JsContext {
             .block_on(async { AsyncContext::full(&runtime).await })
             .expect("Failed to create async context");
 
+        // Spawn drive() as a background tokio task.
+        // This continuously drives spawned futures (fetch, timers, etc.)
+        // without blocking. When I/O completes, drive() wakes up, executes
+        // the JS continuation, then goes back to sleep.
+        tokio_rt.spawn(runtime.drive());
+
         // Initialize LLRT globals and Jam runtime
         let runtime_js = get_runtime_js();
         tokio_rt.block_on(context.with(|ctx| {
@@ -99,9 +110,27 @@ impl JsContext {
         }))
     }
 
-    /// Drive any pending async operations (fetch, timers) to completion.
-    pub(crate) fn idle(&self) {
-        self.tokio_rt.block_on(self.runtime.idle());
+    /// Execute all currently-ready JS jobs (microtasks, resolved promise callbacks).
+    /// Does NOT block waiting for pending I/O — drive() handles that in the background.
+    pub(crate) fn drain_jobs(&self) {
+        self.tokio_rt.block_on(async {
+            loop {
+                match self.runtime.execute_pending_job().await {
+                    Ok(true) => continue,
+                    Ok(false) => break,
+                    Err(_) => break,
+                }
+            }
+        })
+    }
+
+    /// Wait for pending async work to settle, with a timeout.
+    /// drive() handles I/O and job execution in the background.
+    /// We just yield the tokio runtime so drive() can make progress.
+    pub(crate) fn settle(&self, timeout: std::time::Duration) {
+        self.tokio_rt.block_on(async {
+            tokio::time::timeout(timeout, self.runtime.idle()).await.ok();
+        });
     }
 
     /// Run a sync closure on the context (for reading state).
@@ -162,8 +191,9 @@ impl JsRuntime {
         // Eval the user's program
         guard.eval(&js)?;
 
-        // Drive any async operations (top-level fetch, etc.)
-        guard.idle();
+        // Wait for top-level async work (fetch, etc.) to settle.
+        // drive() handles I/O in the background; settle() drains the results.
+        guard.settle(std::time::Duration::from_secs(10));
 
         // Finalize: register any imperative when() markers not consumed by render()
         guard.with(|ctx| {
@@ -247,8 +277,9 @@ impl JsRuntime {
         });
         result?;
 
-        // Drive any async operations (fetch in callback)
-        guard.idle();
+        // Don't call idle() here — callbacks should be non-blocking.
+        // Any async work (fetch, etc.) started by the callback will be
+        // driven to completion on the next idle() call (e.g., during step).
 
         // Read both hold ops and claims
         let hold_ops = guard.with(|ctx| read_hold_ops(&ctx))?;

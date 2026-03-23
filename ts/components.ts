@@ -75,6 +75,7 @@ export type ButtonProps = {
   font?: Font;
   foregroundColor?: Color;
   padding?: number;
+  disabled?: boolean;
   onPress?: () => void;
   [callbackName: string]: any; // allow arbitrary callback props
 };
@@ -117,7 +118,7 @@ export function Text(props: TextProps) {
 }
 
 export function Button(props: ButtonProps) {
-  return h("Button", props);
+  return h("Button", propsWithout(props, "children"), ...(asArray(props.children)));
 }
 
 export function Spacer(props: SpacerProps = {}) {

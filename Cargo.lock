@@ -590,24 +590,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "brotlic"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f552f56f302af0006c32b50bfa2bdb4696fd6ba33c3ab9f6225fefdb1efdc680"
-dependencies = [
- "brotlic-sys",
-]
-
-[[package]]
-name = "brotlic-sys"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afdec5c62bc97b56349053cf66ba503af5c2448591be61c3ad70a5f11b57e574"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -809,15 +791,6 @@ name = "clap_lex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
-
-[[package]]
-name = "cmake"
-version = "0.1.57"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75443c44cd6b379beb8c5b45d85d0773baf31cce901fe7bb252f4eff3008ef7d"
-dependencies = [
- "cc",
-]
 
 [[package]]
 name = "cobs"
@@ -1610,7 +1583,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
- "libz-ng-sys",
  "miniz_oxide",
  "zlib-rs",
 ]
@@ -2392,16 +2364,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
-name = "libz-ng-sys"
-version = "1.1.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89b6bd0c289b22f4973012fa91dfed9d5f4b633567bb26f9454fbf437817b499"
-dependencies = [
- "cmake",
- "libc",
-]
-
-[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2415,8 +2377,8 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 
 [[package]]
 name = "llrt_abort"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "llrt_async_hooks",
  "llrt_events",
@@ -2428,8 +2390,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_async_hooks"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "llrt_hooking",
  "llrt_utils",
@@ -2439,8 +2401,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_buffer"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "itoa",
  "llrt_encoding",
@@ -2451,26 +2413,21 @@ dependencies = [
 
 [[package]]
 name = "llrt_build"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "rustc_version",
 ]
 
 [[package]]
 name = "llrt_compression"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
-dependencies = [
- "brotlic",
- "flate2",
- "zstd",
-]
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 
 [[package]]
 name = "llrt_console"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "llrt_logging",
  "llrt_utils",
@@ -2479,8 +2436,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_context"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "llrt_build",
  "llrt_utils",
@@ -2491,8 +2448,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_dns_cache"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "hyper-util",
  "llrt_context",
@@ -2504,8 +2461,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_encoding"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "base64-simd",
  "hex-simd",
@@ -2516,8 +2473,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_events"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "llrt_utils",
  "rquickjs",
@@ -2526,8 +2483,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_exceptions"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "llrt_utils",
  "rquickjs",
@@ -2535,11 +2492,12 @@ dependencies = [
 
 [[package]]
 name = "llrt_fetch"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "bytes",
  "either",
+ "http-body",
  "http-body-util",
  "hyper",
  "itoa",
@@ -2550,6 +2508,7 @@ dependencies = [
  "llrt_encoding",
  "llrt_http",
  "llrt_json",
+ "llrt_stream_web",
  "llrt_url",
  "llrt_utils",
  "once_cell",
@@ -2563,8 +2522,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_hooking"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "llrt_utils",
  "once_cell",
@@ -2573,8 +2532,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_http"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "bytes",
  "http-body-util",
@@ -2591,8 +2550,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_json"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "itoa",
  "llrt_build",
@@ -2604,8 +2563,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_logging"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "itoa",
  "llrt_context",
@@ -2619,18 +2578,21 @@ dependencies = [
 
 [[package]]
 name = "llrt_modules"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "home",
+ "llrt_abort",
  "llrt_console",
  "llrt_fetch",
  "llrt_hooking",
  "llrt_http",
  "llrt_json",
  "llrt_path",
+ "llrt_stream_web",
  "llrt_timers",
  "llrt_tls",
+ "llrt_util",
  "llrt_utils",
  "once_cell",
  "rquickjs",
@@ -2641,8 +2603,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_numbers"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "itoa",
  "llrt_utils",
@@ -2652,8 +2614,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_path"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "llrt_utils",
  "memchr",
@@ -2661,9 +2623,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "llrt_stream_web"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
+dependencies = [
+ "llrt_abort",
+ "llrt_utils",
+ "rquickjs",
+]
+
+[[package]]
 name = "llrt_timers"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "llrt_context",
  "llrt_hooking",
@@ -2675,8 +2647,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_tls"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "once_cell",
  "rustls",
@@ -2686,8 +2658,8 @@ dependencies = [
 
 [[package]]
 name = "llrt_url"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "llrt_utils",
  "rquickjs",
@@ -2695,9 +2667,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "llrt_util"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
+dependencies = [
+ "llrt_context",
+ "llrt_encoding",
+ "llrt_logging",
+ "llrt_utils",
+ "rquickjs",
+]
+
+[[package]]
 name = "llrt_utils"
-version = "0.8.0-beta"
-source = "git+https://github.com/awslabs/llrt.git?tag=v0.8.1-beta#a3a1463732c7027645b2bc95b49b00b2027291bf"
+version = "0.8.1-beta"
+source = "git+https://github.com/awslabs/llrt.git?branch=feat%2Ffetch-body-streams#80aa7a3923861d3a6f874fc1ca9c7e9bf90eaa94"
 dependencies = [
  "libc",
  "llrt_build",

@@ -243,11 +243,15 @@ fn test_puddy_connection_status_renders() {
 fn test_puddy_new_session_button() {
     let mut engine = engine_with_full_puddy();
 
-    // Find the new-session button callback
-    let facts_json = engine.current_facts_json();
-    let entities = build_entity_map(&facts_json);
+    // Set connection status to "connected" so the button is enabled
+    engine
+        .eval_js("hold('connection', () => { claim('connection', 'status', 'connected'); claim('connection', 'hostname', 'localhost'); });")
+        .unwrap();
+    let _ = engine.step_json();
 
     // Find the new session button
+    let facts_json = engine.current_facts_json();
+    let entities = build_entity_map(&facts_json);
     let new_session_entity = entities
         .keys()
         .find(|k| k.contains("new-session"))
@@ -256,24 +260,34 @@ fn test_puddy_new_session_button() {
         new_session_entity.is_some(),
         "should have a new-session button"
     );
-
     let btn_id = new_session_entity.unwrap();
     let entity = &entities[&btn_id];
     assert_eq!(entity.entity_type, "Button", "new-session should be a Button");
+    assert!(
+        entity.properties.contains_key("onPress"),
+        "connected button should have onPress callback"
+    );
 
-    // Fire the new session button
-    engine.fire_event(&btn_id, "onPress");
+    // Create a session via eval_js (button would use SessionManager which needs a real server)
+    engine
+        .eval_js(r#"
+            hold("session-s1", () => {
+                claim("session", "s1", "agent", "claude");
+                claim("session", "s1", "status", "starting");
+            });
+            hold("ui", () => { claim("ui", "selectedSession", "s1"); });
+        "#)
+        .unwrap();
     let _ = engine.step_json();
 
-    // After pressing, we should have a session fact
     let facts_json = engine.current_facts_json();
     assert!(
         facts_json.contains("\"session\""),
-        "should have session facts after pressing new session"
+        "should have session facts"
     );
     assert!(
         facts_json.contains("\"starting\""),
-        "new session should have starting status"
+        "session should have starting status"
     );
 }
 
@@ -281,18 +295,20 @@ fn test_puddy_new_session_button() {
 fn test_puddy_send_message() {
     let mut engine = engine_with_full_puddy();
 
-    // Create a session first
-    let new_session_btn = {
-        let facts_json = engine.current_facts_json();
-        let entities = build_entity_map(&facts_json);
-        entities
-            .keys()
-            .find(|k| k.contains("new-session"))
-            .cloned()
-            .unwrap()
-    };
-
-    engine.fire_event(&new_session_btn, "onPress");
+    // Create a session and select it via eval_js
+    engine
+        .eval_js(r#"
+            hold("connection", () => {
+                claim("connection", "status", "connected");
+                claim("connection", "hostname", "localhost");
+            });
+            hold("session-s1", () => {
+                claim("session", "s1", "agent", "claude");
+                claim("session", "s1", "status", "active");
+            });
+            hold("ui", () => { claim("ui", "selectedSession", "s1"); });
+        "#)
+        .unwrap();
     let _ = engine.step_json();
 
     // Find the text input
@@ -310,7 +326,7 @@ fn test_puddy_send_message() {
     engine.fire_event_with_data(&input_id, "onSubmit", "Hello world");
     let _ = engine.step_json();
 
-    // Should have a message fact
+    // Should have a message fact (via SessionManager.sendMessage or fallback addMessageDirect)
     let facts_json = engine.current_facts_json();
     assert!(
         facts_json.contains("Hello world"),

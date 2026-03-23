@@ -45,6 +45,29 @@ public class JamEngineWrapper {
         self.engine = JamEngine()
     }
 
+    /// Start polling for async JS work (fetch completions, etc.).
+    /// Polls every 50ms on the main thread; stops when idle.
+    private func startAsyncPoll() {
+        guard !isPollingAsync else { return }
+        isPollingAsync = true
+        pollAsyncOnce()
+    }
+
+    private var isPollingAsync = false
+
+    private func pollAsyncOnce() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self, isPollingAsync else { return }
+            let result = engine.drain_async().toString()
+            refreshFacts()
+            if result == "IDLE" {
+                isPollingAsync = false
+            } else {
+                pollAsyncOnce()
+            }
+        }
+    }
+
     @discardableResult
     public func loadProgram(name: String, source: String) throws -> UInt64 {
         let result = engine.load_program(name, source).toString()
@@ -79,6 +102,8 @@ public class JamEngineWrapper {
 
     /// Fire an event callback on an entity (e.g., button press).
     /// The Rust side invokes the JS callback, applies hold ops, and steps the engine.
+    /// Any async work (fetch, etc.) started by the callback is drained by the async
+    /// poll timer — no blocking on the main thread.
     public func fireEvent(entityId: String, eventName: String, data: String? = nil) {
         let result: String
         if let data = data {
@@ -90,6 +115,16 @@ public class JamEngineWrapper {
             print("fireEvent error: \(result)")
         }
         refreshFacts()
+        print("[JamKit] fireEvent done, starting async poll")
+        startAsyncPoll()
+    }
+
+    /// Evaluate arbitrary JS/TS code in the engine context.
+    @discardableResult
+    public func evalJS(_ code: String) -> String {
+        let result = engine.eval_js_ffi(code).toString()
+        refreshFacts()
+        return result
     }
 
     @discardableResult

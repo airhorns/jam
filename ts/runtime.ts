@@ -491,6 +491,7 @@ function render(element: any, parentId?: string, isInsertion?: boolean): void {
 
   for (const [k, v] of Object.entries(el.props)) {
     if (k === "key" || k === "children") continue;
+    if (v === undefined || v === null) continue;
     if (typeof v === "function") {
       // Function props are callbacks — use a deterministic ID based on
       // entityId:propName so DBSP retraction/insertion claims cancel properly.

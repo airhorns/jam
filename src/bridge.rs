@@ -132,7 +132,7 @@ impl JamEngine {
             ctx.eval::<(), _>("__jam.topLevelClaims.length = 0;").ok();
         });
         guard.eval(&js)?;
-        guard.idle();
+        guard.settle(std::time::Duration::from_secs(10));
         drop(guard);
 
         // Extract any new claims and add them as base facts
@@ -174,6 +174,45 @@ impl JamEngine {
             })
             .collect();
         serde_json::to_string(&deltas).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Collect any hold ops produced by async JS work (resolved promises, timers).
+    /// drive() handles I/O in the background; this just reads accumulated results.
+    /// Uses try_lock to avoid blocking the main thread if drive() is busy.
+    /// Returns "CHANGED" if hold ops were applied, "EMPTY" otherwise.
+    pub fn drain_async(&mut self) -> String {
+        let guard = match self.js_runtime.shared.try_lock() {
+            Ok(g) => g,
+            Err(_) => return "BUSY".to_string(), // drive() is busy, try again later
+        };
+        guard.drain_jobs();
+
+        let hold_ops = guard.with(|ctx| {
+            crate::js_runtime::read_hold_ops(&ctx).unwrap_or_default()
+        });
+        drop(guard);
+
+        let pid = self.active_program_id.unwrap_or(0);
+        for op in &hold_ops {
+            self.apply_hold_op(pid, op);
+        }
+
+        if !hold_ops.is_empty() {
+            self.step_json();
+            "CHANGED".to_string()
+        } else {
+            "EMPTY".to_string()
+        }
+    }
+
+    pub fn eval_js_ffi(&mut self, code: &str) -> String {
+        match self.eval_js(code) {
+            Ok(()) => {
+                self.step_json();
+                "OK".to_string()
+            }
+            Err(e) => format!("ERROR: {e}"),
+        }
     }
 
     pub fn current_facts_json(&self) -> String {
@@ -256,6 +295,10 @@ mod ffi {
             event_name: &str,
             data: &str,
         ) -> String;
+
+        fn eval_js_ffi(&mut self, code: &str) -> String;
+
+        fn drain_async(&mut self) -> String;
     }
 }
 
@@ -618,6 +661,59 @@ mod tests {
         assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/root-stack/buttons/a", "isa", "Button"])));
         assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/root-stack/buttons/a", "label", "A"])));
         assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/root-stack/buttons/b", "label", "B"])));
+    }
+
+    #[test]
+    fn test_jsx_button_with_children() {
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            render(
+                <Button key="btn" label="">
+                    <HStack key="inner" spacing={8}>
+                        <Text key="t1" font="body">Hello</Text>
+                    </HStack>
+                </Button>
+            );
+        "#;
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let facts = engine.current_facts_json();
+        eprintln!("Button children facts: {facts}");
+        assert!(facts.contains("inner"), "should have inner HStack: {facts}");
+        assert!(facts.contains("Hello"), "should have text content: {facts}");
+    }
+
+    #[test]
+    fn test_jsx_button_children_in_when() {
+        let mut engine = JamEngine::new();
+
+        let tsx = r#"
+            claim("item", "x", "name", "hello");
+
+            render(
+                <VStack key="root">
+                    {when(["item", $.id, "name", $.name], ({ id, name }) => (
+                        <Button key={`btn-${id}`} label="">
+                            <HStack key={`inner-${id}`} spacing={8}>
+                                <Text key="label" font="body">{name}</Text>
+                            </HStack>
+                        </Button>
+                    ))}
+                </VStack>
+            );
+        "#;
+        let result = engine.load_program("test.tsx", tsx);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let facts = engine.current_facts_json();
+        eprintln!("When button children: {facts}");
+        assert!(facts.contains("btn-x"), "should have button: {facts}");
+        assert!(facts.contains("inner-x"), "should have inner HStack child: {facts}");
+        assert!(facts.contains("hello"), "should have text content: {facts}");
     }
 
     #[test]
@@ -1862,6 +1958,51 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_drain_async_completes_callback_fetch() {
+        // Test that drain_async can drive a fetch started in a callback
+        let mut engine = JamEngine::new();
+
+        let ts = r#"
+            render(
+                <Button key="btn" label="Go" onPress={() => {
+                    fetch("http://localhost:2468/v1/health")
+                        .then(r => r.text())
+                        .then(data => {
+                            hold("result", () => { claim("fetch", "done", data); });
+                        })
+                        .catch(e => {
+                            hold("result", () => { claim("fetch", "error", String(e)); });
+                        });
+                }} />
+            );
+        "#;
+        let result = engine.load_program("test.tsx", ts);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Fire the button callback (starts async fetch)
+        engine.fire_event("root/btn", "onPress");
+
+        // drain_async should drive the fetch to completion
+        for _ in 0..100 {
+            let status = engine.drain_async();
+            if status == "IDLE" {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        eprintln!("Drain async facts: {f}");
+        assert!(
+            f.contains("fetch"),
+            "drain_async should have completed the fetch: {f}"
+        );
+    }
+
+
     // ========================================================================
     // Child ordering tests — verify JSX source order is preserved
     // ========================================================================
@@ -2047,5 +2188,45 @@ mod tests {
         // alphabetical ordering of the name
         assert!(children[0].1.ends_with("/second"), "first child: {:?}", children);
         assert!(children[1].1.ends_with("/first"), "second child: {:?}", children);
+    }
+
+    #[test]
+    fn test_multi_pattern_when_join_in_jsx() {
+        // Multi-pattern when() should work as a join —
+        // no need for nested when() calls.
+        let mut engine = JamEngine::new();
+
+        let ts_source = r#"
+            claim("item", "i1", "name", "Alice");
+            claim("item", "i1", "status", "active");
+            claim("item", "i2", "name", "Bob");
+            claim("item", "i2", "status", "idle");
+
+            render(
+                h("VStack", { key: "app" },
+                    when(
+                        ["item", $.id, "name", $.name],
+                        ["item", $.id, "status", $.status],
+                        ({ id, name, status }) =>
+                            h("Text", { key: "row-" + id, text: name + ":" + status })
+                    )
+                )
+            );
+        "#;
+        let result = engine.load_program("test.tsx", ts_source);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let facts = engine.current_facts_json();
+
+        // Should have two Text children with joined data
+        assert!(
+            facts.contains("Alice:active"),
+            "should have Alice:active: {facts}"
+        );
+        assert!(
+            facts.contains("Bob:idle"),
+            "should have Bob:idle: {facts}"
+        );
     }
 }
