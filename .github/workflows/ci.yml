@@ -25,12 +25,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run clippy
         run: cargo clippy -- -D warnings
-        env:
-          # mimalloc-rust-sys fails on GCC 15 due to removed ATOMIC_VAR_INIT.
-          # Disable nix hardening flags and add -Wno-error to suppress.
-          NIX_HARDENING_ENABLE: ""
-          NIX_CFLAGS_COMPILE: "-Wno-implicit-function-declaration -Wno-int-conversion"
-          CFLAGS: "-Wno-implicit-function-declaration -Wno-int-conversion"
 
   test:
     name: Tests
@@ -41,7 +35,3 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
         run: cargo test
-        env:
-          NIX_HARDENING_ENABLE: ""
-          NIX_CFLAGS_COMPILE: "-Wno-implicit-function-declaration -Wno-int-conversion"
-          CFLAGS: "-Wno-implicit-function-declaration -Wno-int-conversion"

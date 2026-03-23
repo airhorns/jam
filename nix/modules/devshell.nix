@@ -24,6 +24,11 @@
           sccache
         ]);
 
+        # Use GCC 13 for C compilations via cc crate.
+        # GCC 15 (nix default) breaks mimalloc-rust-sys (removed ATOMIC_VAR_INIT).
+        CC = "gcc-13";
+        buildInputs = [ pkgs.gcc13 ];
+
         shellHook = ''
           # Only use sccache locally -- in CI it has no warm cache and adds overhead
           if [ -z "''${CI:-}" ]; then
