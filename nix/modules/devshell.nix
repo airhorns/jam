@@ -12,7 +12,8 @@
       rustToolchain = rustPkgs.rust-bin.fromRustupToolchainFile ../../rust-toolchain.toml;
     in
     {
-      devShells.default = pkgs.mkShell {
+      # Use GCC 13 stdenv — GCC 15 breaks mimalloc-rust-sys (removed ATOMIC_VAR_INIT)
+      devShells.default = (pkgs.mkShell.override { stdenv = pkgs.gcc13Stdenv; }) {
         name = "jam-shell";
         packages = [
           rustToolchain
@@ -23,11 +24,6 @@
           bacon
           sccache
         ]);
-
-        # Use GCC 13 for C compilations via cc crate.
-        # GCC 15 (nix default) breaks mimalloc-rust-sys (removed ATOMIC_VAR_INIT).
-        CC = "gcc-13";
-        buildInputs = [ pkgs.gcc13 ];
 
         shellHook = ''
           # Only use sccache locally -- in CI it has no warm cache and adds overhead
