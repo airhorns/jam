@@ -1,3 +1,6 @@
+// swift_bridge macro generates casts that clippy flags
+#![allow(clippy::unnecessary_cast)]
+
 use crate::engine::{Engine, HoldKey};
 use crate::js_runtime::JsRuntime;
 use crate::rule::HoldOp;
@@ -12,6 +15,12 @@ pub struct JamEngine {
     /// Program ID of the most recently loaded program. Used for routing hold ops
     /// from callbacks to the correct program's hold key scope.
     active_program_id: Option<u64>,
+}
+
+impl Default for JamEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl JamEngine {
@@ -143,9 +152,7 @@ impl JamEngine {
             crate::js_runtime::js_array_to_statements(&claims_val).unwrap_or_default()
         });
         // Extract hold ops
-        let hold_ops = guard.with(|ctx| {
-            crate::js_runtime::read_hold_ops(&ctx).unwrap_or_default()
-        });
+        let hold_ops = guard.with(|ctx| crate::js_runtime::read_hold_ops(&ctx).unwrap_or_default());
         drop(guard);
 
         for claim in claims {
@@ -187,9 +194,7 @@ impl JamEngine {
         };
         guard.drain_jobs();
 
-        let hold_ops = guard.with(|ctx| {
-            crate::js_runtime::read_hold_ops(&ctx).unwrap_or_default()
-        });
+        let hold_ops = guard.with(|ctx| crate::js_runtime::read_hold_ops(&ctx).unwrap_or_default());
         drop(guard);
 
         let pid = self.active_program_id.unwrap_or(0);
@@ -216,11 +221,8 @@ impl JamEngine {
     }
 
     pub fn current_facts_json(&self) -> String {
-        let facts: Vec<serde_json::Value> = self
-            .engine
-            .current_facts()
-            .map(|stmt| statement_to_json(stmt))
-            .collect();
+        let facts: Vec<serde_json::Value> =
+            self.engine.current_facts().map(statement_to_json).collect();
         serde_json::to_string(&facts).unwrap_or_else(|_| "[]".to_string())
     }
 }
@@ -267,6 +269,7 @@ fn statement_to_json(stmt: &Statement) -> serde_json::Value {
 
 // --- swift-bridge FFI declarations ---
 
+#[allow(clippy::unnecessary_cast)]
 #[swift_bridge::bridge]
 mod ffi {
     extern "Rust" {
@@ -289,12 +292,8 @@ mod ffi {
 
         fn fire_event(&mut self, entity_id: &str, event_name: &str) -> String;
 
-        fn fire_event_with_data(
-            &mut self,
-            entity_id: &str,
-            event_name: &str,
-            data: &str,
-        ) -> String;
+        fn fire_event_with_data(&mut self, entity_id: &str, event_name: &str, data: &str)
+        -> String;
 
         fn eval_js_ffi(&mut self, code: &str) -> String;
 
@@ -336,7 +335,11 @@ mod tests {
 
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["hello", "world"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["hello", "world"]))
+        );
     }
 
     #[test]
@@ -349,9 +352,11 @@ mod tests {
 
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-        assert!(facts_arr
-            .iter()
-            .any(|f| f == &serde_json::json!(["omar", "is", "cool"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["omar", "is", "cool"]))
+        );
 
         let result = engine.retract_fact_json(r#"["omar", "is", "cool"]"#);
         assert!(!result.starts_with("ERROR"));
@@ -359,9 +364,11 @@ mod tests {
 
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-        assert!(!facts_arr
-            .iter()
-            .any(|f| f == &serde_json::json!(["omar", "is", "cool"])));
+        assert!(
+            !facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["omar", "is", "cool"]))
+        );
     }
 
     #[test]
@@ -383,20 +390,28 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // Root claims
-        assert!(facts_arr
-            .iter()
-            .any(|f| f == &serde_json::json!(["root", "isa", "VStack"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root", "isa", "VStack"]))
+        );
         // Auto parent-child claim
-        assert!(facts_arr
-            .iter()
-            .any(|f| f == &serde_json::json!(["root", "child", "00000#title", "root/title"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root", "child", "00000#title", "root/title"]))
+        );
         // Child claims
-        assert!(facts_arr
-            .iter()
-            .any(|f| f == &serde_json::json!(["root/title", "isa", "Text"])));
-        assert!(facts_arr
-            .iter()
-            .any(|f| f == &serde_json::json!(["root/title", "text", "Hello"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/title", "isa", "Text"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/title", "text", "Hello"]))
+        );
     }
 
     #[test]
@@ -425,15 +440,41 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // Root → buttons
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root", "child", "00000#buttons", "root/buttons"])));
+        assert!(
+            facts_arr.iter().any(
+                |f| f == &serde_json::json!(["root", "child", "00000#buttons", "root/buttons"])
+            )
+        );
         // buttons → dec, inc
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons", "child", "00000#dec", "root/buttons/dec"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons", "child", "00001#inc", "root/buttons/inc"])));
+        assert!(
+            facts_arr.iter().any(|f| f
+                == &serde_json::json!(["root/buttons", "child", "00000#dec", "root/buttons/dec"]))
+        );
+        assert!(
+            facts_arr.iter().any(|f| f
+                == &serde_json::json!(["root/buttons", "child", "00001#inc", "root/buttons/inc"]))
+        );
         // Nested entity properties
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons", "isa", "HStack"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons/dec", "isa", "Button"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons/dec", "label", "-"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons/inc", "label", "+"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/buttons", "isa", "HStack"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/buttons/dec", "isa", "Button"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/buttons/dec", "label", "-"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/buttons/inc", "label", "+"]))
+        );
     }
 
     #[test]
@@ -460,12 +501,24 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // The when rule should have produced child claims
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root", "child", "00000#display", "root/display"])),
-            "missing child claim. facts: {facts_arr:?}");
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/display", "isa", "Text"])),
-            "missing isa claim. facts: {facts_arr:?}");
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/display", "text", "Count: 0"])),
-            "missing text claim. facts: {facts_arr:?}");
+        assert!(
+            facts_arr.iter().any(
+                |f| f == &serde_json::json!(["root", "child", "00000#display", "root/display"])
+            ),
+            "missing child claim. facts: {facts_arr:?}"
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/display", "isa", "Text"])),
+            "missing isa claim. facts: {facts_arr:?}"
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/display", "text", "Count: 0"])),
+            "missing text claim. facts: {facts_arr:?}"
+        );
 
         // Update counter: retract old, assert new
         engine.retract_fact_json(r#"["counter", "count", 0]"#);
@@ -476,10 +529,18 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // Old text should be gone, new text should appear
-        assert!(!facts_arr.iter().any(|f| f == &serde_json::json!(["root/display", "text", "Count: 0"])),
-            "old text still present. facts: {facts_arr:?}");
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/display", "text", "Count: 5"])),
-            "new text missing. facts: {facts_arr:?}");
+        assert!(
+            !facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/display", "text", "Count: 0"])),
+            "old text still present. facts: {facts_arr:?}"
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/display", "text", "Count: 5"])),
+            "new text missing. facts: {facts_arr:?}"
+        );
     }
 
     #[test]
@@ -505,11 +566,31 @@ mod tests {
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/save", "isa", "Button"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/save", "label", "Save"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/save", "action", "save"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/cancel", "label", "Cancel"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/cancel", "action", "cancel"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/save", "isa", "Button"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/save", "label", "Save"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/save", "action", "save"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/cancel", "label", "Cancel"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/cancel", "action", "cancel"]))
+        );
     }
 
     #[test]
@@ -558,15 +639,51 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // Verify the complete UI tree
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root", "isa", "VStack"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/title", "text", "Jam Counter"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/title", "font", "title"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/count-display", "text", "Count: 0"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/count-display", "font", "largeTitle"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons", "isa", "HStack"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons/dec", "label", "-"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons/inc", "label", "+"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons/inc", "action", "increment"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root", "isa", "VStack"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/title", "text", "Jam Counter"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/title", "font", "title"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/count-display", "text", "Count: 0"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/count-display", "font", "largeTitle"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/buttons", "isa", "HStack"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/buttons/dec", "label", "-"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/buttons/inc", "label", "+"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/buttons/inc", "action", "increment"]))
+        );
 
         // Simulate increment: retract old count, assert new
         engine.retract_fact_json(r#"["counter", "count", 0]"#);
@@ -577,14 +694,30 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // Counter display should update reactively
-        assert!(!facts_arr.iter().any(|f| f == &serde_json::json!(["root/count-display", "text", "Count: 0"])),
-            "old count still present");
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/count-display", "text", "Count: 1"])),
-            "new count missing");
+        assert!(
+            !facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/count-display", "text", "Count: 0"])),
+            "old count still present"
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/count-display", "text", "Count: 1"])),
+            "new count missing"
+        );
 
         // Static elements should still be there
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/title", "text", "Jam Counter"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/buttons/dec", "label", "-"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/title", "text", "Jam Counter"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/buttons/dec", "label", "-"]))
+        );
     }
 
     #[test]
@@ -624,15 +757,31 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // Root VStack
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/0", "isa", "VStack"])),
-            "missing VStack. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/0", "isa", "VStack"])),
+            "missing VStack. facts: {facts_arr:?}"
+        );
         // Child Text with key
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/0/title", "isa", "Text"])),
-            "missing Text. facts: {facts_arr:?}");
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/0/title", "font", "title"])),
-            "missing font. facts: {facts_arr:?}");
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/0/title", "text", "Hello World"])),
-            "missing text content. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/0/title", "isa", "Text"])),
+            "missing Text. facts: {facts_arr:?}"
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/0/title", "font", "title"])),
+            "missing font. facts: {facts_arr:?}"
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/0/title", "text", "Hello World"])),
+            "missing text content. facts: {facts_arr:?}"
+        );
     }
 
     #[test]
@@ -656,11 +805,31 @@ mod tests {
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/root-stack", "isa", "VStack"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/root-stack/buttons", "isa", "HStack"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/root-stack/buttons/a", "isa", "Button"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/root-stack/buttons/a", "label", "A"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/root-stack/buttons/b", "label", "B"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/root-stack", "isa", "VStack"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/root-stack/buttons", "isa", "HStack"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/root-stack/buttons/a", "isa", "Button"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/root-stack/buttons/a", "label", "A"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/root-stack/buttons/b", "label", "B"]))
+        );
     }
 
     #[test]
@@ -712,7 +881,10 @@ mod tests {
         let facts = engine.current_facts_json();
         eprintln!("When button children: {facts}");
         assert!(facts.contains("btn-x"), "should have button: {facts}");
-        assert!(facts.contains("inner-x"), "should have inner HStack child: {facts}");
+        assert!(
+            facts.contains("inner-x"),
+            "should have inner HStack child: {facts}"
+        );
         assert!(facts.contains("hello"), "should have text content: {facts}");
     }
 
@@ -740,12 +912,24 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // Custom components are transparent — the Button is what gets rendered
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/row/save", "isa", "Button"])),
-            "missing save button. facts: {facts_arr:?}");
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/row/save", "label", "Save"])),
-            "missing save label. facts: {facts_arr:?}");
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/row/cancel", "label", "Cancel"])),
-            "missing cancel label. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/row/save", "isa", "Button"])),
+            "missing save button. facts: {facts_arr:?}"
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/row/save", "label", "Save"])),
+            "missing save label. facts: {facts_arr:?}"
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/row/cancel", "label", "Cancel"])),
+            "missing cancel label. facts: {facts_arr:?}"
+        );
     }
 
     #[test]
@@ -772,13 +956,25 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // Static title
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/main/title", "text", "Static Title"])),
-            "missing static title. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/main/title", "text", "Static Title"])),
+            "missing static title. facts: {facts_arr:?}"
+        );
         // Reactive display from when
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/main/display", "text", "Count: 42"])),
-            "missing reactive display. facts: {facts_arr:?}");
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/main/display", "font", "largeTitle"])),
-            "missing font on reactive display. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/main/display", "text", "Count: 42"])),
+            "missing reactive display. facts: {facts_arr:?}"
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/main/display", "font", "largeTitle"])),
+            "missing font on reactive display. facts: {facts_arr:?}"
+        );
     }
 
     #[test]
@@ -803,7 +999,11 @@ mod tests {
 
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/main/val", "text", "Value: 10"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/main/val", "text", "Value: 10"]))
+        );
 
         // Update value — old should retract, new should appear
         engine.retract_fact_json(r#"["data", "value", 10]"#);
@@ -812,10 +1012,18 @@ mod tests {
 
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-        assert!(!facts_arr.iter().any(|f| f == &serde_json::json!(["root/main/val", "text", "Value: 10"])),
-            "old value still present");
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/main/val", "text", "Value: 99"])),
-            "new value missing");
+        assert!(
+            !facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/main/val", "text", "Value: 10"])),
+            "old value still present"
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/main/val", "text", "Value: 99"])),
+            "new value missing"
+        );
     }
 
     #[test]
@@ -851,13 +1059,41 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // Full tree verification
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app", "isa", "VStack"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/title", "font", "title"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/title", "text", "Jam Counter"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 0"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/buttons", "isa", "HStack"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/buttons/dec", "label", "-"])));
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/buttons/inc", "label", "+"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app", "isa", "VStack"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/title", "font", "title"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/title", "text", "Jam Counter"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 0"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/buttons", "isa", "HStack"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/buttons/dec", "label", "-"]))
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/buttons/inc", "label", "+"]))
+        );
 
         // Increment
         engine.retract_fact_json(r#"["counter", "count", 0]"#);
@@ -867,8 +1103,16 @@ mod tests {
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 1"])));
-        assert!(!facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 0"])));
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 1"]))
+        );
+        assert!(
+            !facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 0"]))
+        );
     }
 
     #[test]
@@ -893,12 +1137,24 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // Auto-indexed children
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/0/0", "text", "First"])),
-            "missing First. facts: {facts_arr:?}");
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/0/1", "text", "Second"])),
-            "missing Second. facts: {facts_arr:?}");
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/0/2", "text", "Third"])),
-            "missing Third. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/0/0", "text", "First"])),
+            "missing First. facts: {facts_arr:?}"
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/0/1", "text", "Second"])),
+            "missing Second. facts: {facts_arr:?}"
+        );
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/0/2", "text", "Third"])),
+            "missing Third. facts: {facts_arr:?}"
+        );
     }
 
     // ========================================================================
@@ -919,8 +1175,12 @@ mod tests {
 
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["greeting", "is", "hello"])),
-            "hold state missing. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["greeting", "is", "hello"])),
+            "hold state missing. facts: {facts_arr:?}"
+        );
     }
 
     #[test]
@@ -940,8 +1200,12 @@ mod tests {
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
 
         // onPress should have a deterministic callback ID: "entityId:eventName"
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/btn", "onPress", "root/btn:onPress"])),
-            "onPress callback ID missing. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/btn", "onPress", "root/btn:onPress"])),
+            "onPress callback ID missing. facts: {facts_arr:?}"
+        );
     }
 
     #[test]
@@ -963,8 +1227,12 @@ mod tests {
         // Before click
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["clicked", false])),
-            "initial state wrong. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["clicked", false])),
+            "initial state wrong. facts: {facts_arr:?}"
+        );
 
         // Fire the button press
         let result = engine.fire_event("root/btn", "onPress");
@@ -973,10 +1241,18 @@ mod tests {
         // After click
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["clicked", true])),
-            "callback didn't fire. facts: {facts_arr:?}");
-        assert!(!facts_arr.iter().any(|f| f == &serde_json::json!(["clicked", false])),
-            "old state not retracted. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["clicked", true])),
+            "callback didn't fire. facts: {facts_arr:?}"
+        );
+        assert!(
+            !facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["clicked", false])),
+            "old state not retracted. facts: {facts_arr:?}"
+        );
     }
 
     #[test]
@@ -1013,8 +1289,12 @@ mod tests {
         // Initial state: count = 0
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 0"])),
-            "initial count wrong. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 0"])),
+            "initial count wrong. facts: {facts_arr:?}"
+        );
 
         // Press increment
         let result = engine.fire_event("root/app/buttons/inc", "onPress");
@@ -1022,24 +1302,40 @@ mod tests {
 
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 1"])),
-            "count didn't increment. facts: {facts_arr:?}");
-        assert!(!facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 0"])),
-            "old count not retracted. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 1"])),
+            "count didn't increment. facts: {facts_arr:?}"
+        );
+        assert!(
+            !facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 0"])),
+            "old count not retracted. facts: {facts_arr:?}"
+        );
 
         // Press increment again
         engine.fire_event("root/app/buttons/inc", "onPress");
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 2"])),
-            "second increment failed. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 2"])),
+            "second increment failed. facts: {facts_arr:?}"
+        );
 
         // Press decrement
         engine.fire_event("root/app/buttons/dec", "onPress");
         let facts = engine.current_facts_json();
         let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-        assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 1"])),
-            "decrement failed. facts: {facts_arr:?}");
+        assert!(
+            facts_arr
+                .iter()
+                .any(|f| f == &serde_json::json!(["root/app/display", "text", "Count: 1"])),
+            "decrement failed. facts: {facts_arr:?}"
+        );
     }
 
     #[test]
@@ -1077,8 +1373,15 @@ mod tests {
             engine.fire_event("root/app/buttons/inc", "onPress");
             let facts = engine.current_facts_json();
             let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-            assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", format!("Count: {expected}")])),
-                "after increment {expected}, expected Count: {expected}. facts: {facts_arr:?}");
+            assert!(
+                facts_arr.iter().any(|f| f
+                    == &serde_json::json!([
+                        "root/app/display",
+                        "text",
+                        format!("Count: {expected}")
+                    ])),
+                "after increment {expected}, expected Count: {expected}. facts: {facts_arr:?}"
+            );
         }
 
         // Decrement 3 times
@@ -1087,8 +1390,15 @@ mod tests {
             engine.fire_event("root/app/buttons/dec", "onPress");
             let facts = engine.current_facts_json();
             let facts_arr: Vec<serde_json::Value> = serde_json::from_str(&facts).unwrap();
-            assert!(facts_arr.iter().any(|f| f == &serde_json::json!(["root/app/display", "text", format!("Count: {expected}")])),
-                "after decrement, expected Count: {expected}. facts: {facts_arr:?}");
+            assert!(
+                facts_arr.iter().any(|f| f
+                    == &serde_json::json!([
+                        "root/app/display",
+                        "text",
+                        format!("Count: {expected}")
+                    ])),
+                "after decrement, expected Count: {expected}. facts: {facts_arr:?}"
+            );
         }
     }
 
@@ -1119,8 +1429,10 @@ mod tests {
         let f = engine.current_facts_json();
         eprintln!("facts: {f}");
         // Check what type the captured v has
-        assert!(f.contains("\"captured_type\",\"number\""),
-            "v should be number type: {f}");
+        assert!(
+            f.contains("\"captured_type\",\"number\""),
+            "v should be number type: {f}"
+        );
     }
 
     #[test]
@@ -1152,12 +1464,18 @@ mod tests {
         // Press: v=0, v+1=1 → should be number 1
         engine.fire_event("root/x/btn", "onPress");
         let f = engine.current_facts_json();
-        assert!(f.contains("[\"val\",1]"), "after 1st press should be number 1: {f}");
+        assert!(
+            f.contains("[\"val\",1]"),
+            "after 1st press should be number 1: {f}"
+        );
 
         // Press again: v=1, v+1=2 → should be number 2
         engine.fire_event("root/x/btn", "onPress");
         let f = engine.current_facts_json();
-        assert!(f.contains("[\"val\",2]"), "after 2nd press should be number 2: {f}");
+        assert!(
+            f.contains("[\"val\",2]"),
+            "after 2nd press should be number 2: {f}"
+        );
     }
 
     #[test]
@@ -1287,27 +1605,42 @@ mod tests {
 
         // v=0
         let facts_json = engine.current_facts_json();
-        assert!(facts_json.contains("\"v=0\""), "expected v=0, got: {facts_json}");
+        assert!(
+            facts_json.contains("\"v=0\""),
+            "expected v=0, got: {facts_json}"
+        );
 
         // Press: 0→1
         engine.fire_event("root/app/inc", "onPress");
         let facts_json = engine.current_facts_json();
-        assert!(facts_json.contains("\"v=1\""), "expected v=1 after first press, got: {facts_json}");
+        assert!(
+            facts_json.contains("\"v=1\""),
+            "expected v=1 after first press, got: {facts_json}"
+        );
 
         // Press: 1→2
         engine.fire_event("root/app/inc", "onPress");
         let facts_json = engine.current_facts_json();
-        assert!(facts_json.contains("\"v=2\""), "expected v=2 after second press, got: {facts_json}");
+        assert!(
+            facts_json.contains("\"v=2\""),
+            "expected v=2 after second press, got: {facts_json}"
+        );
 
         // Press: 2→3
         engine.fire_event("root/app/inc", "onPress");
         let facts_json = engine.current_facts_json();
-        assert!(facts_json.contains("\"v=3\""), "expected v=3 after third press, got: {facts_json}");
+        assert!(
+            facts_json.contains("\"v=3\""),
+            "expected v=3 after third press, got: {facts_json}"
+        );
 
         // Press: 3→4
         engine.fire_event("root/app/inc", "onPress");
         let facts_json = engine.current_facts_json();
-        assert!(facts_json.contains("\"v=4\""), "expected v=4 after fourth press, got: {facts_json}");
+        assert!(
+            facts_json.contains("\"v=4\""),
+            "expected v=4 after fourth press, got: {facts_json}"
+        );
     }
 
     #[test]
@@ -1321,7 +1654,10 @@ mod tests {
         let _ = engine.step_json();
 
         let result = engine.fire_event("root/nonexistent", "onPress");
-        assert!(result.starts_with("ERROR"), "expected error for missing callback, got: {result}");
+        assert!(
+            result.starts_with("ERROR"),
+            "expected error for missing callback, got: {result}"
+        );
     }
 
     #[test]
@@ -1389,12 +1725,16 @@ mod tests {
         assert!(f.contains(r#""c",3"#), "initial c: {f}");
 
         // Replace with different claims
-        engine.eval_js(r#"
+        engine
+            .eval_js(
+                r#"
             hold("data", () => {
                 claim("x", 10);
                 claim("y", 20);
             });
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         let _ = engine.step_json();
 
         let f = engine.current_facts_json();
@@ -1427,7 +1767,9 @@ mod tests {
         assert!(!f.contains("email"), "no email initially: {f}");
 
         // Toggle showDetails and re-hold
-        engine.eval_js(r#"
+        engine
+            .eval_js(
+                r#"
             showDetails = true;
             hold("profile", () => {
                 claim("user", "name", "Bob");
@@ -1436,7 +1778,9 @@ mod tests {
                     claim("user", "phone", "555-1234");
                 }
             });
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         let _ = engine.step_json();
 
         let f = engine.current_facts_json();
@@ -1480,9 +1824,13 @@ mod tests {
         let f = engine.current_facts_json();
         assert!(f.contains(r#""exists",true"#), "exists initially: {f}");
 
-        engine.eval_js(r#"
+        engine
+            .eval_js(
+                r#"
             hold("data", () => {}); // empty = retract all
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         let _ = engine.step_json();
 
         let f = engine.current_facts_json();
@@ -1512,7 +1860,10 @@ mod tests {
         engine.fire_event("root/btn", "onPress");
         let f = engine.current_facts_json();
         assert!(f.contains(r#""value","after""#), "hold should work: {f}");
-        assert!(!f.contains(r#""value","before""#), "old value retracted: {f}");
+        assert!(
+            !f.contains(r#""value","before""#),
+            "old value retracted: {f}"
+        );
     }
 
     #[test]
@@ -1544,7 +1895,10 @@ mod tests {
         // Press add — hold creates a new fact, when() fires, Text renders
         engine.fire_event("root/app/add", "onPress");
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""text","first""#), "item should render after hold: {f}");
+        assert!(
+            f.contains(r#""text","first""#),
+            "item should render after hold: {f}"
+        );
     }
 
     #[test]
@@ -1636,7 +1990,10 @@ mod tests {
 
         // Fire onSubmit with data
         let result = engine.fire_event_with_data("root/app/input", "onSubmit", "Hello world");
-        assert!(!result.starts_with("ERROR"), "fire_event_with_data failed: {result}");
+        assert!(
+            !result.starts_with("ERROR"),
+            "fire_event_with_data failed: {result}"
+        );
 
         let f = engine.current_facts_json();
         assert!(
@@ -1665,7 +2022,10 @@ mod tests {
         // Fire without data (regular fire_event)
         engine.fire_event("root/btn", "onPress");
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""pressed",true"#), "no-data callback should work: {f}");
+        assert!(
+            f.contains(r#""pressed",true"#),
+            "no-data callback should work: {f}"
+        );
     }
 
     // ========================================================================
@@ -1696,9 +2056,18 @@ mod tests {
 
         // All three callbacks should have deterministic callback IDs
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""onPress","root/app/btn:onPress""#), "onPress callback missing: {f}");
-        assert!(f.contains(r#""onLongPress","root/app/btn:onLongPress""#), "onLongPress callback missing: {f}");
-        assert!(f.contains(r#""onDoubleTap","root/app/btn:onDoubleTap""#), "onDoubleTap callback missing: {f}");
+        assert!(
+            f.contains(r#""onPress","root/app/btn:onPress""#),
+            "onPress callback missing: {f}"
+        );
+        assert!(
+            f.contains(r#""onLongPress","root/app/btn:onLongPress""#),
+            "onLongPress callback missing: {f}"
+        );
+        assert!(
+            f.contains(r#""onDoubleTap","root/app/btn:onDoubleTap""#),
+            "onDoubleTap callback missing: {f}"
+        );
 
         // Fire onPress
         engine.fire_event("root/app/btn", "onPress");
@@ -1708,12 +2077,18 @@ mod tests {
         // Reset and fire onLongPress
         engine.fire_event("root/app/btn", "onLongPress");
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""toggled","long""#), "onLongPress didn't fire: {f}");
+        assert!(
+            f.contains(r#""toggled","long""#),
+            "onLongPress didn't fire: {f}"
+        );
 
         // Fire onDoubleTap
         engine.fire_event("root/app/btn", "onDoubleTap");
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""toggled","double""#), "onDoubleTap didn't fire: {f}");
+        assert!(
+            f.contains(r#""toggled","double""#),
+            "onDoubleTap didn't fire: {f}"
+        );
     }
 
     #[test]
@@ -1739,16 +2114,28 @@ mod tests {
 
         // Custom callback names work — IDs are entityId:propName
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""activate","root/app/btn:activate""#), "activate callback missing: {f}");
-        assert!(f.contains(r#""dismiss","root/app/btn:dismiss""#), "dismiss callback missing: {f}");
+        assert!(
+            f.contains(r#""activate","root/app/btn:activate""#),
+            "activate callback missing: {f}"
+        );
+        assert!(
+            f.contains(r#""dismiss","root/app/btn:dismiss""#),
+            "dismiss callback missing: {f}"
+        );
 
         engine.fire_event("root/app/btn", "activate");
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""state","active""#), "activate didn't fire: {f}");
+        assert!(
+            f.contains(r#""state","active""#),
+            "activate didn't fire: {f}"
+        );
 
         engine.fire_event("root/app/btn", "dismiss");
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""state","dismissed""#), "dismiss didn't fire: {f}");
+        assert!(
+            f.contains(r#""state","dismissed""#),
+            "dismiss didn't fire: {f}"
+        );
     }
 
     #[test]
@@ -1887,7 +2274,10 @@ mod tests {
         let _ = engine.step_json();
 
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""console","works""#), "program should run: {f}");
+        assert!(
+            f.contains(r#""console","works""#),
+            "program should run: {f}"
+        );
     }
 
     #[test]
@@ -1904,8 +2294,14 @@ mod tests {
         let _ = engine.step_json();
 
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""fetch_type","function""#), "fetch should be a function: {f}");
-        assert!(f.contains(r#""fetch_exists",true"#), "fetch should exist: {f}");
+        assert!(
+            f.contains(r#""fetch_type","function""#),
+            "fetch should be a function: {f}"
+        );
+        assert!(
+            f.contains(r#""fetch_exists",true"#),
+            "fetch should exist: {f}"
+        );
     }
 
     #[test]
@@ -1926,8 +2322,14 @@ mod tests {
         let _ = engine.step_json();
 
         let f = engine.current_facts_json();
-        assert!(f.contains(r#""promise_type","object""#), "fetch should return an object: {f}");
-        assert!(f.contains(r#""has_then",true"#), "fetch result should have .then(): {f}");
+        assert!(
+            f.contains(r#""promise_type","object""#),
+            "fetch should return an object: {f}"
+        );
+        assert!(
+            f.contains(r#""has_then",true"#),
+            "fetch result should have .then(): {f}"
+        );
     }
 
     #[test]
@@ -2002,7 +2404,6 @@ mod tests {
         );
     }
 
-
     // ========================================================================
     // Child ordering tests — verify JSX source order is preserved
     // ========================================================================
@@ -2015,14 +2416,8 @@ mod tests {
             .iter()
             .filter_map(|fact| {
                 let arr = fact.as_array()?;
-                if arr.len() >= 4
-                    && arr[0].as_str()? == parent_id
-                    && arr[1].as_str()? == "child"
-                {
-                    Some((
-                        arr[2].as_str()?.to_string(),
-                        arr[3].as_str()?.to_string(),
-                    ))
+                if arr.len() >= 4 && arr[0].as_str()? == parent_id && arr[1].as_str()? == "child" {
+                    Some((arr[2].as_str()?.to_string(), arr[3].as_str()?.to_string()))
                 } else {
                     None
                 }
@@ -2091,9 +2486,21 @@ mod tests {
         let children = get_children(&facts, "root/app");
 
         assert_eq!(children.len(), 3, "app should have 3 children");
-        assert!(children[0].1.ends_with("/z-first"), "first child: {:?}", children);
-        assert!(children[1].1.ends_with("/a-second"), "second child: {:?}", children);
-        assert!(children[2].1.ends_with("/m-third"), "third child: {:?}", children);
+        assert!(
+            children[0].1.ends_with("/z-first"),
+            "first child: {:?}",
+            children
+        );
+        assert!(
+            children[1].1.ends_with("/a-second"),
+            "second child: {:?}",
+            children
+        );
+        assert!(
+            children[2].1.ends_with("/m-third"),
+            "third child: {:?}",
+            children
+        );
     }
 
     #[test]
@@ -2122,10 +2529,27 @@ mod tests {
         let facts = engine.current_facts_json();
         let children = get_children(&facts, "root/app");
 
-        assert_eq!(children.len(), 3, "app should have 3 children: {:?}", children);
-        assert!(children[0].1.ends_with("/header"), "first should be header: {:?}", children);
-        assert!(children[1].1.ends_with("/dynamic"), "second should be dynamic: {:?}", children);
-        assert!(children[2].1.ends_with("/footer"), "third should be footer: {:?}", children);
+        assert_eq!(
+            children.len(),
+            3,
+            "app should have 3 children: {:?}",
+            children
+        );
+        assert!(
+            children[0].1.ends_with("/header"),
+            "first should be header: {:?}",
+            children
+        );
+        assert!(
+            children[1].1.ends_with("/dynamic"),
+            "second should be dynamic: {:?}",
+            children
+        );
+        assert!(
+            children[2].1.ends_with("/footer"),
+            "third should be footer: {:?}",
+            children
+        );
     }
 
     #[test]
@@ -2157,9 +2581,18 @@ mod tests {
         let facts = engine.current_facts_json();
         let children = get_children(&facts, "root/app");
 
-        assert_eq!(children.len(), 3, "app should have 3 children: {:?}", children);
+        assert_eq!(
+            children.len(),
+            3,
+            "app should have 3 children: {:?}",
+            children
+        );
         assert!(children[0].1.ends_with("/when-a"), "first: {:?}", children);
-        assert!(children[1].1.ends_with("/static-mid"), "second: {:?}", children);
+        assert!(
+            children[1].1.ends_with("/static-mid"),
+            "second: {:?}",
+            children
+        );
         assert!(children[2].1.ends_with("/when-b"), "third: {:?}", children);
     }
 
@@ -2183,11 +2616,24 @@ mod tests {
         let facts = engine.current_facts_json();
         let children = get_children(&facts, "root");
 
-        assert_eq!(children.len(), 2, "root should have 2 children: {:?}", children);
+        assert_eq!(
+            children.len(),
+            2,
+            "root should have 2 children: {:?}",
+            children
+        );
         // "second" was declared first, so it should appear first despite
         // alphabetical ordering of the name
-        assert!(children[0].1.ends_with("/second"), "first child: {:?}", children);
-        assert!(children[1].1.ends_with("/first"), "second child: {:?}", children);
+        assert!(
+            children[0].1.ends_with("/second"),
+            "first child: {:?}",
+            children
+        );
+        assert!(
+            children[1].1.ends_with("/first"),
+            "second child: {:?}",
+            children
+        );
     }
 
     #[test]
@@ -2224,9 +2670,6 @@ mod tests {
             facts.contains("Alice:active"),
             "should have Alice:active: {facts}"
         );
-        assert!(
-            facts.contains("Bob:idle"),
-            "should have Bob:idle: {facts}"
-        );
+        assert!(facts.contains("Bob:idle"), "should have Bob:idle: {facts}");
     }
 }

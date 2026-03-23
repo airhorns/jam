@@ -98,11 +98,7 @@ fn print_entity_tree(
 ) -> String {
     let mut output = String::new();
     if visited.contains(id) {
-        output.push_str(&format!(
-            "{:indent$}[cycle: {id}]\n",
-            "",
-            indent = indent
-        ));
+        output.push_str(&format!("{:indent$}[cycle: {id}]\n", "", indent = indent));
         return output;
     }
     visited.insert(id.to_string());
@@ -138,11 +134,7 @@ fn print_entity_tree(
             output.push_str(&format!("{:indent$}</{type_str}>\n", "", indent = indent));
         }
     } else {
-        output.push_str(&format!(
-            "{:indent$}[missing: {id}]\n",
-            "",
-            indent = indent
-        ));
+        output.push_str(&format!("{:indent$}[missing: {id}]\n", "", indent = indent));
     }
 
     output
@@ -204,8 +196,14 @@ fn test_puddy_entity_tree_structure() {
     );
 
     // Sidebar should come before detail (correct ordering)
-    let sidebar_pos = app_children.iter().position(|c| c.contains("sidebar")).unwrap();
-    let detail_pos = app_children.iter().position(|c| c.contains("detail")).unwrap();
+    let sidebar_pos = app_children
+        .iter()
+        .position(|c| c.contains("sidebar"))
+        .unwrap();
+    let detail_pos = app_children
+        .iter()
+        .position(|c| c.contains("detail"))
+        .unwrap();
     assert!(
         sidebar_pos < detail_pos,
         "sidebar should come before detail: sidebar={sidebar_pos}, detail={detail_pos}"
@@ -252,17 +250,17 @@ fn test_puddy_new_session_button() {
     // Find the new session button
     let facts_json = engine.current_facts_json();
     let entities = build_entity_map(&facts_json);
-    let new_session_entity = entities
-        .keys()
-        .find(|k| k.contains("new-session"))
-        .cloned();
+    let new_session_entity = entities.keys().find(|k| k.contains("new-session")).cloned();
     assert!(
         new_session_entity.is_some(),
         "should have a new-session button"
     );
     let btn_id = new_session_entity.unwrap();
     let entity = &entities[&btn_id];
-    assert_eq!(entity.entity_type, "Button", "new-session should be a Button");
+    assert_eq!(
+        entity.entity_type, "Button",
+        "new-session should be a Button"
+    );
     assert!(
         entity.properties.contains_key("onPress"),
         "connected button should have onPress callback"
@@ -270,13 +268,15 @@ fn test_puddy_new_session_button() {
 
     // Create a session via eval_js (button would use SessionManager which needs a real server)
     engine
-        .eval_js(r#"
+        .eval_js(
+            r#"
             hold("session-s1", () => {
                 claim("session", "s1", "agent", "claude");
                 claim("session", "s1", "status", "starting");
             });
             hold("ui", () => { claim("ui", "selectedSession", "s1"); });
-        "#)
+        "#,
+        )
         .unwrap();
     let _ = engine.step_json();
 
@@ -297,7 +297,8 @@ fn test_puddy_send_message() {
 
     // Create a session and select it via eval_js
     engine
-        .eval_js(r#"
+        .eval_js(
+            r#"
             hold("connection", () => {
                 claim("connection", "status", "connected");
                 claim("connection", "hostname", "localhost");
@@ -307,7 +308,8 @@ fn test_puddy_send_message() {
                 claim("session", "s1", "status", "active");
             });
             hold("ui", () => { claim("ui", "selectedSession", "s1"); });
-        "#)
+        "#,
+        )
         .unwrap();
     let _ = engine.step_json();
 

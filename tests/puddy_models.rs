@@ -72,9 +72,7 @@ fn engine_with_networking() -> JamEngine {
 /// Helper: evaluate JS in the engine's existing context and return claims as JSON string.
 /// Uses eval_js() so the code runs in the same scope as the loaded models.
 fn eval_and_get_facts(engine: &mut JamEngine, setup_js: &str) -> String {
-    let ts = format!(
-        "const t = globalThis.__test;\n{setup_js}"
-    );
+    let ts = format!("const t = globalThis.__test;\n{setup_js}");
 
     engine.eval_js(&ts).expect("Failed to eval test script");
     let _ = engine.step_json();
@@ -105,11 +103,20 @@ fn test_parses_agent_message_chunk() {
         "#,
     );
 
-    assert!(facts.contains(r#""result_type","event""#), "should be event: {facts}");
-    assert!(facts.contains(r#""payload_type","agentMessageChunk""#), "payload type: {facts}");
+    assert!(
+        facts.contains(r#""result_type","event""#),
+        "should be event: {facts}"
+    );
+    assert!(
+        facts.contains(r#""payload_type","agentMessageChunk""#),
+        "payload type: {facts}"
+    );
     assert!(facts.contains(r#""text","Hello""#), "text: {facts}");
     assert!(facts.contains(r#""event_index",1"#), "event index: {facts}");
-    assert!(facts.contains(r#""idx_after",1"#), "idx incremented: {facts}");
+    assert!(
+        facts.contains(r#""idx_after",1"#),
+        "idx incremented: {facts}"
+    );
 }
 
 #[test]
@@ -129,7 +136,10 @@ fn test_parses_agent_thought_chunk() {
         "#,
     );
 
-    assert!(facts.contains(r#""payload_type","agentThoughtChunk""#), "{facts}");
+    assert!(
+        facts.contains(r#""payload_type","agentThoughtChunk""#),
+        "{facts}"
+    );
     assert!(facts.contains(r#""text","thinking...""#), "{facts}");
 }
 
@@ -184,7 +194,10 @@ fn test_parses_tool_call_update() {
         "#,
     );
 
-    assert!(facts.contains(r#""payload_type","toolCallUpdate""#), "{facts}");
+    assert!(
+        facts.contains(r#""payload_type","toolCallUpdate""#),
+        "{facts}"
+    );
     assert!(facts.contains(r#""status","completed""#), "{facts}");
 }
 
@@ -426,12 +439,30 @@ fn test_tool_call_finalizes_streaming_text_first() {
         "#,
     );
 
-    assert!(facts.contains(r#""messages",2"#), "should have 2 messages: {facts}");
-    assert!(facts.contains(r#""first_kind","text""#), "first is text: {facts}");
-    assert!(facts.contains(r#""first_text","Let me check...""#), "text content: {facts}");
-    assert!(facts.contains(r#""second_kind","toolUse""#), "second is toolUse: {facts}");
-    assert!(facts.contains(r#""second_name","Read file""#), "tool name: {facts}");
-    assert!(facts.contains(r#""streaming_null",true"#), "streaming cleared: {facts}");
+    assert!(
+        facts.contains(r#""messages",2"#),
+        "should have 2 messages: {facts}"
+    );
+    assert!(
+        facts.contains(r#""first_kind","text""#),
+        "first is text: {facts}"
+    );
+    assert!(
+        facts.contains(r#""first_text","Let me check...""#),
+        "text content: {facts}"
+    );
+    assert!(
+        facts.contains(r#""second_kind","toolUse""#),
+        "second is toolUse: {facts}"
+    );
+    assert!(
+        facts.contains(r#""second_name","Read file""#),
+        "tool name: {facts}"
+    );
+    assert!(
+        facts.contains(r#""streaming_null",true"#),
+        "streaming cleared: {facts}"
+    );
 }
 
 #[test]
@@ -545,7 +576,6 @@ fn test_client_code_loads_alone() {
     );
 }
 
-
 #[test]
 fn test_manager_loads_in_combined() {
     let mut engine = JamEngine::new();
@@ -577,9 +607,18 @@ fn test_networking_code_loads() {
         "#,
     );
 
-    assert!(facts.contains(r#""has_client",true"#), "SandboxAgentClient: {facts}");
-    assert!(facts.contains(r#""has_error",true"#), "SandboxAgentError: {facts}");
-    assert!(facts.contains(r#""has_manager",true"#), "SessionManager: {facts}");
+    assert!(
+        facts.contains(r#""has_client",true"#),
+        "SandboxAgentClient: {facts}"
+    );
+    assert!(
+        facts.contains(r#""has_error",true"#),
+        "SandboxAgentError: {facts}"
+    );
+    assert!(
+        facts.contains(r#""has_manager",true"#),
+        "SessionManager: {facts}"
+    );
 }
 
 #[test]
@@ -625,7 +664,10 @@ fn test_session_manager_readiness_no_agents() {
     );
 
     assert!(facts.contains(r#""ready",false"#), "{facts}");
-    assert!(facts.contains(r#""error","No agents found on server""#), "{facts}");
+    assert!(
+        facts.contains(r#""error","No agents found on server""#),
+        "{facts}"
+    );
 }
 
 #[test]
@@ -682,7 +724,10 @@ fn test_puddy_app_loads_with_ui_structure() {
 
     // Root structure
     assert!(f.contains(r#""isa","VStack""#), "root VStack: {f}");
-    assert!(f.contains(r#""isa","NavigationSplitView""#), "nav split: {f}");
+    assert!(
+        f.contains(r#""isa","NavigationSplitView""#),
+        "nav split: {f}"
+    );
 
     // Connection status shows disconnected
     assert!(f.contains("Disconnected"), "disconnected text: {f}");
@@ -714,7 +759,10 @@ fn test_puddy_create_session_via_button() {
             None
         }
     });
-    assert!(callback_id.is_some(), "should find new-session callback: {f}");
+    assert!(
+        callback_id.is_some(),
+        "should find new-session callback: {f}"
+    );
 
     // Press the new session button
     let result = engine.fire_event_by_callback_id(&callback_id.unwrap());
@@ -722,8 +770,14 @@ fn test_puddy_create_session_via_button() {
 
     // After pressing, there should be a session in the facts
     let f = engine.current_facts_json();
-    assert!(f.contains(r#""agent","claude""#), "session created with agent: {f}");
-    assert!(f.contains(r#""status","starting""#), "session status starting: {f}");
+    assert!(
+        f.contains(r#""agent","claude""#),
+        "session created with agent: {f}"
+    );
+    assert!(
+        f.contains(r#""status","starting""#),
+        "session status starting: {f}"
+    );
 }
 
 #[test]
@@ -731,12 +785,16 @@ fn test_puddy_session_appears_in_sidebar() {
     let mut engine = load_puddy_app();
 
     // Inject a session via hold
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("sessions", () => {
             claim("session", "test-session", "agent", "claude");
             claim("session", "test-session", "status", "active");
         });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
 
     let f = engine.current_facts_json();
@@ -752,13 +810,17 @@ fn test_puddy_select_session_shows_detail() {
     let mut engine = load_puddy_app();
 
     // Inject a session and select it
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("sessions", () => {
             claim("session", "test-session", "agent", "claude");
             claim("session", "test-session", "status", "active");
         });
         hold("ui", () => { claim("ui", "selectedSession", "test-session"); });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
 
     let f = engine.current_facts_json();
@@ -780,12 +842,16 @@ fn test_puddy_connection_status_updates_reactively() {
     assert!(f.contains("Disconnected"), "initial: disconnected: {f}");
 
     // Update connection status via hold
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("connection", () => {
             claim("connection", "status", "connected");
             claim("connection", "hostname", "myserver.local");
         });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
 
     let f = engine.current_facts_json();
@@ -806,28 +872,29 @@ fn test_puddy_connection_status_updates_reactively() {
 fn test_cross_join_no_shared_vars() {
     // Test that a 2-pattern rule with no shared variables produces a cross-product
     use jam::engine::Engine;
-    use jam::rule::{Program, RuleSpec};
     use jam::pattern::{Pattern, PatternTerm};
-    use jam::term::{Term, Statement};
+    use jam::rule::{Program, RuleSpec};
+    use jam::term::{Statement, Term};
     use std::sync::Arc;
 
     let mut engine = Engine::new();
-    engine.add_program(
-        Program::new("test")
-            .with_rules(vec![
-                RuleSpec::new(
-                    vec![
-                        Pattern::new(vec![PatternTerm::Exact(Term::sym("a")), PatternTerm::Bind("x".into())]),
-                        Pattern::new(vec![PatternTerm::Exact(Term::sym("b")), PatternTerm::Bind("y".into())]),
-                    ],
-                    |bindings, _| {
-                        let x = bindings.get("x").unwrap().clone();
-                        let y = bindings.get("y").unwrap().clone();
-                        vec![Statement::new(vec![Term::sym("result"), x, y])]
-                    },
-                ),
+    engine.add_program(Program::new("test").with_rules(vec![RuleSpec::new(
+        vec![
+            Pattern::new(vec![
+                PatternTerm::Exact(Term::sym("a")),
+                PatternTerm::Bind("x".into()),
             ]),
-    );
+            Pattern::new(vec![
+                PatternTerm::Exact(Term::sym("b")),
+                PatternTerm::Bind("y".into()),
+            ]),
+        ],
+        |bindings, _| {
+            let x = bindings.get("x").unwrap().clone();
+            let y = bindings.get("y").unwrap().clone();
+            vec![Statement::new(vec![Term::sym("result"), x, y])]
+        },
+    )]));
 
     engine.assert_fact(Statement::new(vec![Term::sym("a"), Term::sym("1")]));
     engine.assert_fact(Statement::new(vec![Term::sym("b"), Term::sym("2")]));
@@ -836,7 +903,11 @@ fn test_cross_join_no_shared_vars() {
     let has_result = result.deltas.iter().any(|(s, w)| {
         *w > 0 && s == &Statement::new(vec![Term::sym("result"), Term::sym("1"), Term::sym("2")])
     });
-    assert!(has_result, "cross-join should produce result: {:?}", result.deltas);
+    assert!(
+        has_result,
+        "cross-join should produce result: {:?}",
+        result.deltas
+    );
 }
 
 #[test]
@@ -867,14 +938,18 @@ fn test_nested_when_in_jsx() {
     assert!(!result.starts_with("ERROR"), "load failed: {result}");
 
     // Check how many rules were compiled
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         claim("rule_count", globalThis.__jam.rules.length);
         for (let i = 0; i < globalThis.__jam.rules.length; i++) {
             const r = globalThis.__jam.rules[i];
             claim("rule_" + i + "_patterns", r.patterns.length);
             claim("rule_" + i + "_whens", r.whens.length);
         }
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
 
     let f = engine.current_facts_json();
@@ -915,9 +990,15 @@ fn test_nested_when_with_shared_vars_in_jsx() {
     let f = engine.current_facts_json();
     eprintln!("shared var facts: {f}");
     // Should show detail for item-1 only (matched via shared $id)
-    assert!(f.contains(r#""text","First item""#), "should render item-1 text claim: {f}");
+    assert!(
+        f.contains(r#""text","First item""#),
+        "should render item-1 text claim: {f}"
+    );
     // Item-2 data exists as a base fact but should NOT have a rendered text claim
-    assert!(!f.contains(r#""text","Second item""#), "should not render item-2: {f}");
+    assert!(
+        !f.contains(r#""text","Second item""#),
+        "should not render item-2: {f}"
+    );
 }
 
 #[test]
@@ -950,7 +1031,10 @@ fn test_join_3_and_6_term_patterns() {
     let f = engine.current_facts_json();
     eprintln!("3+6 join: {f}");
     assert!(f.contains(r#""id=s1""#), "outer when: {f}");
-    assert!(f.contains(r#""text","Hello""#), "message should render: {f}");
+    assert!(
+        f.contains(r#""text","Hello""#),
+        "message should render: {f}"
+    );
 }
 
 #[test]
@@ -987,7 +1071,10 @@ fn test_join_with_late_fact_insertion() {
     let _ = engine.step_json();
 
     let f = engine.current_facts_json();
-    assert!(f.contains(r#""text","Hello""#), "4-term late fact join: {f}");
+    assert!(
+        f.contains(r#""text","Hello""#),
+        "4-term late fact join: {f}"
+    );
 
     // (no 6-term test here, see test_join_with_6_term_late_fact)
 }
@@ -1073,13 +1160,17 @@ fn test_puddy_messages_render_in_detail() {
     let mut engine = load_puddy_app();
 
     // Create a session and select it
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("sessions", () => {
             claim("session", "s1", "agent", "claude");
             claim("session", "s1", "status", "active");
         });
         hold("ui", () => { claim("ui", "selectedSession", "s1"); });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
 
     // Add messages via hold (the same way the app's addMessage does it)
@@ -1095,7 +1186,10 @@ fn test_puddy_messages_render_in_detail() {
     assert!(f.contains(r#"["message","s1","m2"#), "message fact m2: {f}");
     // The join rule should render messages with icons
     assert!(f.contains("Hello agent!"), "user message text: {f}");
-    assert!(f.contains("Hi! How can I help?"), "assistant message text: {f}");
+    assert!(
+        f.contains("Hi! How can I help?"),
+        "assistant message text: {f}"
+    );
     assert!(f.contains("\u{1F464}"), "user icon 👤: {f}"); // 👤
     assert!(f.contains("\u{2728}"), "assistant icon ✨: {f}"); // ✨
 }
@@ -1104,13 +1198,17 @@ fn test_puddy_messages_render_in_detail() {
 fn test_puddy_tool_messages_render() {
     let mut engine = load_puddy_app();
 
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("sessions", () => {
             claim("session", "s1", "agent", "claude");
             claim("session", "s1", "status", "active");
         });
         hold("ui", () => { claim("ui", "selectedSession", "s1"); });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
 
     engine.eval_js(r#"
@@ -1129,18 +1227,25 @@ fn test_puddy_tool_messages_render() {
 fn test_puddy_streaming_text_shows() {
     let mut engine = load_puddy_app();
 
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("sessions", () => {
             claim("session", "s1", "agent", "claude");
             claim("session", "s1", "status", "active");
             claim("session", "s1", "streamingText", "I am thinking...");
         });
         hold("ui", () => { claim("ui", "selectedSession", "s1"); });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
 
     let f = engine.current_facts_json();
-    assert!(f.contains("I am thinking..."), "streaming text should show: {f}");
+    assert!(
+        f.contains("I am thinking..."),
+        "streaming text should show: {f}"
+    );
 }
 
 #[test]
@@ -1148,13 +1253,17 @@ fn test_puddy_text_input_adds_message() {
     let mut engine = load_puddy_app();
 
     // Create and select a session
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("sessions", () => {
             claim("session", "s1", "agent", "claude");
             claim("session", "s1", "status", "active");
         });
         hold("ui", () => { claim("ui", "selectedSession", "s1"); });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
 
     // Find the TextField's onSubmit callback
@@ -1177,7 +1286,7 @@ fn test_puddy_text_input_adds_message() {
     let result = engine.fire_event_with_data(
         &callback_id.unwrap().replace(":onSubmit", ""),
         "onSubmit",
-        "Test message from user"
+        "Test message from user",
     );
     assert!(!result.starts_with("ERROR"), "fire failed: {result}");
 
@@ -1205,50 +1314,72 @@ fn test_e2e_full_session_lifecycle() {
     assert!(f.contains("Select a session"), "1c: no selection");
 
     // 2. Simulate connection
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("connection", () => {
             claim("connection", "status", "connected");
             claim("connection", "hostname", "agent.local");
         });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
     let f = engine.current_facts_json();
     assert!(f.contains("agent.local"), "2a: hostname shows");
     assert!(f.contains(r#""foregroundColor","green""#), "2b: green dot");
 
     // 3. Create a session (simulating what the button callback does)
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("session-s1", () => {
             claim("session", "s1", "agent", "claude");
             claim("session", "s1", "status", "starting");
         });
         hold("ui", () => { claim("ui", "selectedSession", "s1"); });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
     let f = engine.current_facts_json();
     assert!(f.contains("Session: s1"), "3a: detail title");
     // Session row should exist in sidebar with starting status
-    assert!(f.contains(r#""status","starting""#), "3b: starting status in facts");
+    assert!(
+        f.contains(r#""status","starting""#),
+        "3b: starting status in facts"
+    );
 
     // 4. Session becomes active with streaming text
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("session-s1", () => {
             claim("session", "s1", "agent", "claude");
             claim("session", "s1", "status", "active");
             claim("session", "s1", "streamingText", "Let me help you with that...");
         });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
     let f = engine.current_facts_json();
-    assert!(f.contains("Let me help you with that..."), "4a: streaming text");
+    assert!(
+        f.contains("Let me help you with that..."),
+        "4a: streaming text"
+    );
 
     // 5. Messages arrive
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("session-s1-msgs", () => {
             claim("message", "s1", "m1", "user", "text", "Hello Claude!");
             claim("message", "s1", "m2", "assistant", "text", "Hi! How can I help?");
         });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
     let f = engine.current_facts_json();
     assert!(f.contains("Hello Claude!"), "5a: user message");
@@ -1257,27 +1388,35 @@ fn test_e2e_full_session_lifecycle() {
     assert!(f.contains("\u{2728}"), "5d: assistant icon ✨");
 
     // 6. Tool call
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("session-s1-msgs", () => {
             claim("message", "s1", "m1", "user", "text", "Hello Claude!");
             claim("message", "s1", "m2", "assistant", "text", "Hi! How can I help?");
             claim("message", "s1", "m3", "assistant", "toolUse", "Read file");
             claim("message", "s1", "m4", "tool", "toolResult", "completed");
         });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
     let f = engine.current_facts_json();
     assert!(f.contains("Read file"), "6a: tool use");
     assert!(f.contains("\u{2713}"), "6b: checkmark ✓");
 
     // 7. Session ends
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("session-s1", () => {
             claim("session", "s1", "agent", "claude");
             claim("session", "s1", "status", "ended");
             claim("session", "s1", "statusDetail", "end_turn");
         });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
     let f = engine.current_facts_json();
     // Session status should update in sidebar
@@ -1292,7 +1431,9 @@ fn test_e2e_multiple_sessions() {
     let mut engine = load_puddy_app();
 
     // Create two sessions
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("session-s1", () => {
             claim("session", "s1", "agent", "claude");
             claim("session", "s1", "status", "active");
@@ -1301,7 +1442,9 @@ fn test_e2e_multiple_sessions() {
             claim("session", "s2", "agent", "claude");
             claim("session", "s2", "status", "starting");
         });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
 
     let f = engine.current_facts_json();
@@ -1310,9 +1453,13 @@ fn test_e2e_multiple_sessions() {
     assert!(f.contains("s2"), "session 2 in sidebar");
 
     // Select session 2
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("ui", () => { claim("ui", "selectedSession", "s2"); });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
 
     let f = engine.current_facts_json();
@@ -1324,13 +1471,17 @@ fn test_e2e_text_input_sends_message() {
     let mut engine = load_puddy_app();
 
     // Set up session
-    engine.eval_js(r#"
+    engine
+        .eval_js(
+            r#"
         hold("session-s1", () => {
             claim("session", "s1", "agent", "claude");
             claim("session", "s1", "status", "active");
         });
         hold("ui", () => { claim("ui", "selectedSession", "s1"); });
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     let _ = engine.step_json();
 
     // Find TextField onSubmit callback
@@ -1384,7 +1535,10 @@ fn test_e2e_new_session_button() {
 
     // Press the button
     let result = engine.fire_event_by_callback_id(&callback_id.unwrap());
-    assert!(!result.starts_with("ERROR"), "button press failed: {result}");
+    assert!(
+        !result.starts_with("ERROR"),
+        "button press failed: {result}"
+    );
 
     // A session should now exist
     let f = engine.current_facts_json();
@@ -1434,7 +1588,10 @@ fn test_session_state_machine_full_lifecycle() {
     );
 
     assert!(facts.contains(r#""status","active""#), "{facts}");
-    assert!(facts.contains(r#""streaming","Hello, how can I help?""#), "{facts}");
+    assert!(
+        facts.contains(r#""streaming","Hello, how can I help?""#),
+        "{facts}"
+    );
     assert!(facts.contains(r#""after_tool_messages",2"#), "{facts}");
     assert!(facts.contains(r#""final_status","ended""#), "{facts}");
     assert!(facts.contains(r#""final_reason","end_turn""#), "{facts}");

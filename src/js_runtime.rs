@@ -79,7 +79,8 @@ impl JsContext {
         let runtime_js = get_runtime_js();
         tokio_rt.block_on(context.with(|ctx| {
             init_llrt_globals(&ctx).expect("Failed to init LLRT globals");
-            ctx.eval::<(), _>(runtime_js).expect("Failed to eval Jam runtime");
+            ctx.eval::<(), _>(runtime_js)
+                .expect("Failed to eval Jam runtime");
         }));
 
         JsContext {
@@ -92,21 +93,20 @@ impl JsContext {
     /// Eval additional JS code in the context (e.g., a new program).
     pub(crate) fn eval(&self, js: &str) -> Result<(), String> {
         self.tokio_rt.block_on(self.context.with(|ctx| {
-            ctx.eval::<(), _>(js)
-                .map_err(|e| {
-                    // Try to get the actual exception message
-                    let catch = ctx.catch();
-                    let detail = if let Some(exc) = catch.as_exception() {
-                        let msg = exc.message().unwrap_or_default();
-                        let stack = exc.stack().unwrap_or_default();
-                        format!("{msg}\n{stack}")
-                    } else if let Some(s) = catch.as_string() {
-                        s.to_string().unwrap_or_default()
-                    } else {
-                        format!("{e}")
-                    };
-                    format!("Eval error: {detail}")
-                })
+            ctx.eval::<(), _>(js).map_err(|e| {
+                // Try to get the actual exception message
+                let catch = ctx.catch();
+                let detail = if let Some(exc) = catch.as_exception() {
+                    let msg = exc.message().unwrap_or_default();
+                    let stack = exc.stack().unwrap_or_default();
+                    format!("{msg}\n{stack}")
+                } else if let Some(s) = catch.as_string() {
+                    s.to_string().unwrap_or_default()
+                } else {
+                    format!("{e}")
+                };
+                format!("Eval error: {detail}")
+            })
         }))
     }
 
@@ -129,7 +129,9 @@ impl JsContext {
     /// We just yield the tokio runtime so drive() can make progress.
     pub(crate) fn settle(&self, timeout: std::time::Duration) {
         self.tokio_rt.block_on(async {
-            tokio::time::timeout(timeout, self.runtime.idle()).await.ok();
+            tokio::time::timeout(timeout, self.runtime.idle())
+                .await
+                .ok();
         });
     }
 
@@ -262,16 +264,13 @@ impl JsRuntime {
                     fire.call((callback_id, js_str))
                         .map_err(|e| format!("Callback error: {e}"))?
                 }
-                None => {
-                    fire.call((callback_id, Value::new_undefined(ctx.clone())))
-                        .map_err(|e| format!("Callback error: {e}"))?
-                }
+                None => fire
+                    .call((callback_id, Value::new_undefined(ctx.clone())))
+                    .map_err(|e| format!("Callback error: {e}"))?,
             };
 
             if !result {
-                return Err(format!(
-                    "No callback registered for {callback_id}"
-                ));
+                return Err(format!("No callback registered for {callback_id}"));
             }
             Ok(())
         });
@@ -297,8 +296,7 @@ impl JsRuntime {
         let guard = self.shared.lock().unwrap();
         guard.with(|ctx| {
             let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
-            let refresh: Function =
-                jam.get("refreshCallbacks").map_err(|e| format!("{e}"))?;
+            let refresh: Function = jam.get("refreshCallbacks").map_err(|e| format!("{e}"))?;
             refresh
                 .call::<_, ()>((facts_json,))
                 .map_err(|e| format!("Callback refresh error: {e}"))?;
@@ -376,9 +374,7 @@ fn js_value_to_term(val: &Value) -> Result<Term, String> {
         return Ok(Term::Int(n as i64));
     }
     if let Some(s) = val.as_string() {
-        Ok(Term::Symbol(
-            s.to_string().map_err(|e| format!("{e}"))?,
-        ))
+        Ok(Term::Symbol(s.to_string().map_err(|e| format!("{e}"))?))
     } else if let Some(b) = val.as_bool() {
         Ok(Term::Bool(b))
     } else {
@@ -423,7 +419,10 @@ fn js_value_to_pattern_term(val: &Value) -> Result<PatternTermOrOr, String> {
 
 /// Convert a JS pattern array to a PatternExpr.
 fn js_pattern_to_expr(val: &Value) -> Result<PatternExpr, String> {
-    let arr = val.clone().into_array().ok_or("Expected array for pattern")?;
+    let arr = val
+        .clone()
+        .into_array()
+        .ok_or("Expected array for pattern")?;
     let mut terms: Vec<PatternTermOrOr> = Vec::new();
     for i in 0..arr.len() {
         let v: Value = arr.get(i).map_err(|e| format!("{e}"))?;
@@ -492,7 +491,10 @@ fn extract_rule_patterns(
 
         // Extract patterns
         let patterns_val: Value = rule_obj.get("patterns").map_err(|e| format!("{e}"))?;
-        let patterns_arr = patterns_val.clone().into_array().ok_or("Expected patterns array")?;
+        let patterns_arr = patterns_val
+            .clone()
+            .into_array()
+            .ok_or("Expected patterns array")?;
 
         let mut exprs = Vec::new();
         for j in 0..patterns_arr.len() {
@@ -602,7 +604,9 @@ fn create_body_fn(path: Vec<RulePathSegment>, shared: Arc<Mutex<JsContext>>) -> 
                     }
                 }
             }
-            let rule = current.as_object().expect("Rule path did not resolve to object");
+            let rule = current
+                .as_object()
+                .expect("Rule path did not resolve to object");
             let body: Function = rule.get("body").unwrap();
 
             if let Err(e) = body.call::<_, ()>((bindings_obj, is_insertion)) {
@@ -765,10 +769,8 @@ mod tests {
         engine.add_program(program);
         let result = engine.step();
 
-        assert!(result
-            .deltas
-            .iter()
-            .any(|(s, w)| *w > 0 && s == &Statement::new(vec![
+        assert!(result.deltas.iter().any(|(s, w)| *w > 0
+            && s == &Statement::new(vec![
                 Term::sym("omar"),
                 Term::sym("is"),
                 Term::sym("awesome")
