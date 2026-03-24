@@ -1,3 +1,4 @@
 packages:
   - "ts"
   - "examples/*/ts"
+  - "examples/puddy-vite"
