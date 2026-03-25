@@ -12,7 +12,13 @@ export interface ToolCallUpdateData {
   toolCallId: string;
   title?: string;
   status?: string;
+  content?: ToolCallContent[];
 }
+
+export type ToolCallContent =
+  | { type: "text"; text: string }
+  | { type: "diff"; path: string; oldText: string; newText: string }
+  | { type: "terminal"; terminalId: string };
 
 export interface UsageUpdateData {
   costAmount?: number;
@@ -21,12 +27,35 @@ export interface UsageUpdateData {
   used: number;
 }
 
+export type PlanEntryStatus = "pending" | "in_progress" | "completed";
+export type PlanEntryPriority = "high" | "medium" | "low";
+
+export interface PlanEntry {
+  content: string;
+  priority: PlanEntryPriority;
+  status: PlanEntryStatus;
+}
+
+export interface PlanData {
+  entries: PlanEntry[];
+}
+
+export interface AvailableCommand {
+  name: string;
+  description: string;
+  inputHint?: string;
+}
+
 export type EventPayload =
   | { type: "agentMessageChunk"; text: string }
   | { type: "agentThoughtChunk"; text: string }
   | { type: "toolCall"; data: ToolCallData }
   | { type: "toolCallUpdate"; data: ToolCallUpdateData }
   | { type: "usageUpdate"; data: UsageUpdateData }
+  | { type: "plan"; data: PlanData }
+  | { type: "currentModeUpdate"; modeId: string }
+  | { type: "availableCommandsUpdate"; commands: AvailableCommand[] }
+  | { type: "sessionInfoUpdate"; title?: string }
   | { type: "sessionEnd"; stopReason: string }
   | { type: "unknown"; sessionUpdate: string };
 
@@ -123,6 +152,20 @@ export function parseACPMessage(
     }
 
     case "tool_call_update": {
+      // Parse content array from tool call results
+      let content: ToolCallContent[] | undefined;
+      if (Array.isArray(update.content)) {
+        content = [];
+        for (const block of update.content) {
+          if (block.type === "text" && typeof block.text === "string") {
+            content.push({ type: "text", text: block.text });
+          } else if (block.type === "diff") {
+            content.push({ type: "diff", path: block.path ?? "", oldText: block.oldText ?? "", newText: block.newText ?? "" });
+          } else if (block.type === "terminal" && typeof block.terminalId === "string") {
+            content.push({ type: "terminal", terminalId: block.terminalId });
+          }
+        }
+      }
       return {
         type: "event",
         event: {
@@ -134,6 +177,7 @@ export function parseACPMessage(
               toolCallId: update.toolCallId ?? "",
               title: update.title,
               status: update.status,
+              content,
             },
           },
         },
@@ -155,6 +199,70 @@ export function parseACPMessage(
               costCurrency: update.cost?.currency,
             },
           },
+        },
+      };
+    }
+
+    case "plan": {
+      const entries: PlanEntry[] = [];
+      if (Array.isArray(update.entries)) {
+        for (const e of update.entries) {
+          entries.push({
+            content: e.content ?? "",
+            priority: e.priority ?? "medium",
+            status: e.status ?? "pending",
+          });
+        }
+      }
+      return {
+        type: "event",
+        event: {
+          id,
+          eventIndex: idx,
+          payload: { type: "plan", data: { entries } },
+        },
+      };
+    }
+
+    case "current_mode_update": {
+      return {
+        type: "event",
+        event: {
+          id,
+          eventIndex: idx,
+          payload: { type: "currentModeUpdate", modeId: update.modeId ?? update.currentModeId ?? "" },
+        },
+      };
+    }
+
+    case "available_commands_update": {
+      const commands: AvailableCommand[] = [];
+      if (Array.isArray(update.availableCommands)) {
+        for (const cmd of update.availableCommands) {
+          commands.push({
+            name: cmd.name ?? "",
+            description: cmd.description ?? "",
+            inputHint: cmd.input?.hint,
+          });
+        }
+      }
+      return {
+        type: "event",
+        event: {
+          id,
+          eventIndex: idx,
+          payload: { type: "availableCommandsUpdate", commands },
+        },
+      };
+    }
+
+    case "session_info_update": {
+      return {
+        type: "event",
+        event: {
+          id,
+          eventIndex: idx,
+          payload: { type: "sessionInfoUpdate", title: update.title },
         },
       };
     }

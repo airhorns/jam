@@ -80,6 +80,25 @@ public class JamEngineWrapper {
         return id
     }
 
+    /// Load a multi-file TypeScript program as ES modules.
+    /// Each file is a (path, source) pair. The last file is the entry point.
+    @discardableResult
+    public func loadProgramFiles(name: String, files: [(path: String, source: String)]) throws -> UInt64 {
+        // Encode as JSON array of [path, source] pairs
+        let jsonArray = files.map { [$0.path, $0.source] }
+        let jsonData = try JSONSerialization.data(withJSONObject: jsonArray)
+        let filesJson = String(data: jsonData, encoding: .utf8) ?? "[]"
+
+        let result = engine.load_program_files(name, filesJson).toString()
+        if result.hasPrefix("ERROR: ") {
+            throw JamError.loadFailed(String(result.dropFirst(7)))
+        }
+        guard let id = UInt64(result) else {
+            throw JamError.invalidProgramId(result)
+        }
+        return id
+    }
+
     public func removeProgram(_ id: UInt64) {
         engine.remove_program(id)
     }

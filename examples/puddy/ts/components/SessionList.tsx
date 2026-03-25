@@ -1,5 +1,5 @@
-import { h } from "../jam";
-import { VStack, HStack, Text, Button, Circle, Divider, type Color } from "../components";
+import { h } from "@jam/types";
+import { VStack, HStack, Text, Button, Circle, Divider, type Color } from "@jam/types";
 import type { AgentSession } from "../models/session";
 import { isTerminal } from "../models/session";
 

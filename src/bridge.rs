@@ -47,6 +47,55 @@ impl JamEngine {
                     self.apply_hold_op(id, op);
                 }
 
+                // Apply any top-level assert/retract operations
+                self.apply_pending_facts();
+
+                id.to_string()
+            }
+            Err(e) => format!("ERROR: {e}"),
+        }
+    }
+
+    /// Load a multi-file TypeScript program as ES modules.
+    /// `files_json` is a JSON array of `[path, source]` pairs.
+    /// The last file is the entry point.
+    pub fn load_program_files(&mut self, name: &str, files_json: &str) -> String {
+        let files: Vec<(String, String)> = match serde_json::from_str(files_json) {
+            Ok(f) => f,
+            Err(e) => return format!("ERROR: Invalid files JSON: {e}"),
+        };
+        let file_refs: Vec<(&str, &str)> = files.iter().map(|(p, s)| (p.as_str(), s.as_str())).collect();
+
+        match self.js_runtime.load_program_files(name, &file_refs) {
+            Ok(program) => {
+                let hold_ops: Vec<HoldOp> = program.hold_ops.clone();
+                let id = self.engine.add_program(program);
+                self.active_program_id = Some(id);
+
+                for op in &hold_ops {
+                    self.apply_hold_op(id, op);
+                }
+                self.apply_pending_facts();
+
+                id.to_string()
+            }
+            Err(e) => format!("ERROR: {e}"),
+        }
+    }
+
+    /// Load a multi-file TypeScript program as ES modules (native Rust API).
+    pub fn load_program_files_native(&mut self, name: &str, files: &[(&str, &str)]) -> String {
+        match self.js_runtime.load_program_files(name, files) {
+            Ok(program) => {
+                let hold_ops: Vec<HoldOp> = program.hold_ops.clone();
+                let id = self.engine.add_program(program);
+                self.active_program_id = Some(id);
+
+                for op in &hold_ops {
+                    self.apply_hold_op(id, op);
+                }
+                self.apply_pending_facts();
+
                 id.to_string()
             }
             Err(e) => format!("ERROR: {e}"),
@@ -85,9 +134,13 @@ impl JamEngine {
                     self.apply_hold_op(pid, op);
                 }
 
-                // Note: claims from callbacks are intentionally ignored.
-                // claim() inside a callback is a runtime error — only hold() is allowed
-                // because callbacks are imperative (no automatic retraction lifecycle).
+                // Apply raw assert/retract operations
+                for stmt in result.asserts {
+                    self.engine.assert_fact(stmt);
+                }
+                for stmt in result.retracts {
+                    self.engine.retract_fact(stmt);
+                }
 
                 // Step the engine to propagate changes
                 self.step_json()
@@ -102,6 +155,24 @@ impl JamEngine {
             name: Some(op.key.clone()),
         };
         self.engine.hold(key, op.stmts.clone());
+    }
+
+    /// Read and apply pending assert/retract operations from the JS context.
+    fn apply_pending_facts(&mut self) {
+        let guard = self.js_runtime.shared.lock().unwrap();
+        let asserts = guard.with(|ctx| crate::js_runtime::read_pending_facts(&ctx, "getAsserts").unwrap_or_default());
+        let retracts = guard.with(|ctx| crate::js_runtime::read_pending_facts(&ctx, "getRetracts").unwrap_or_default());
+        drop(guard);
+        self.apply_pending_facts_from(asserts, retracts);
+    }
+
+    fn apply_pending_facts_from(&mut self, asserts: Vec<Statement>, retracts: Vec<Statement>) {
+        for stmt in asserts {
+            self.engine.assert_fact(stmt);
+        }
+        for stmt in retracts {
+            self.engine.retract_fact(stmt);
+        }
     }
 
     pub fn remove_program(&mut self, program_id: u64) {
@@ -131,10 +202,11 @@ impl JamEngine {
     }
 
     /// Eval JS code in the shared context (for testing/scripting).
+    /// Uses eval (not module eval) so globals are available without imports.
     /// Claims produced go to __topLevelClaims.
     pub fn eval_js(&mut self, code: &str) -> Result<(), String> {
         let js = transpile::transpile_ts_to_js(code, "eval.ts")?;
-        let js = transpile::strip_imports(&js);
+        let js = transpile::strip_imports(&js); // eval snippets don't have real imports
 
         let guard = self.js_runtime.shared.lock().unwrap();
         guard.with(|ctx| {
@@ -151,8 +223,10 @@ impl JamEngine {
             let claims_val: rquickjs::Value = jam.get("topLevelClaims").unwrap();
             crate::js_runtime::js_array_to_statements(&claims_val).unwrap_or_default()
         });
-        // Extract hold ops
+        // Extract hold ops and assert/retract ops
         let hold_ops = guard.with(|ctx| crate::js_runtime::read_hold_ops(&ctx).unwrap_or_default());
+        let asserts = guard.with(|ctx| crate::js_runtime::read_pending_facts(&ctx, "getAsserts").unwrap_or_default());
+        let retracts = guard.with(|ctx| crate::js_runtime::read_pending_facts(&ctx, "getRetracts").unwrap_or_default());
         drop(guard);
 
         for claim in claims {
@@ -164,6 +238,9 @@ impl JamEngine {
         for op in &hold_ops {
             self.apply_hold_op(pid, op);
         }
+
+        // Apply assert/retract operations
+        self.apply_pending_facts_from(asserts, retracts);
 
         Ok(())
     }
@@ -195,14 +272,22 @@ impl JamEngine {
         guard.drain_jobs();
 
         let hold_ops = guard.with(|ctx| crate::js_runtime::read_hold_ops(&ctx).unwrap_or_default());
+        let asserts = guard.with(|ctx| crate::js_runtime::read_pending_facts(&ctx, "getAsserts").unwrap_or_default());
+        let retracts = guard.with(|ctx| crate::js_runtime::read_pending_facts(&ctx, "getRetracts").unwrap_or_default());
         drop(guard);
 
         let pid = self.active_program_id.unwrap_or(0);
         for op in &hold_ops {
             self.apply_hold_op(pid, op);
         }
+        for stmt in &asserts {
+            self.engine.assert_fact(stmt.clone());
+        }
+        for stmt in &retracts {
+            self.engine.retract_fact(stmt.clone());
+        }
 
-        if !hold_ops.is_empty() {
+        if !hold_ops.is_empty() || !asserts.is_empty() || !retracts.is_empty() {
             self.step_json();
             "CHANGED".to_string()
         } else {
@@ -279,6 +364,8 @@ mod ffi {
         fn new() -> JamEngine;
 
         fn load_program(&mut self, name: &str, ts_source: &str) -> String;
+
+        fn load_program_files(&mut self, name: &str, files_json: &str) -> String;
 
         fn remove_program(&mut self, program_id: u64);
 
@@ -2671,5 +2758,146 @@ mod tests {
             "should have Alice:active: {facts}"
         );
         assert!(facts.contains("Bob:idle"), "should have Bob:idle: {facts}");
+    }
+
+    // ========================================================================
+    // assert() / retract() tests
+    // ========================================================================
+
+    #[test]
+    fn test_assert_from_top_level() {
+        let mut engine = JamEngine::new();
+        let ts = r#"
+            assert("color", "red");
+            assert("color", "blue");
+        "#;
+        let result = engine.load_program("test", ts);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""color","red""#), "assert red: {f}");
+        assert!(f.contains(r#""color","blue""#), "assert blue: {f}");
+    }
+
+    #[test]
+    fn test_retract_removes_asserted_fact() {
+        let mut engine = JamEngine::new();
+        let ts = r#"
+            assert("color", "red");
+            assert("color", "blue");
+        "#;
+        let result = engine.load_program("test", ts);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Retract via eval_js
+        engine.eval_js(r#"retract("color", "red");"#).unwrap();
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(!f.contains(r#""color","red""#), "red should be gone: {f}");
+        assert!(f.contains(r#""color","blue""#), "blue should remain: {f}");
+    }
+
+    #[test]
+    fn test_assert_from_callback() {
+        // assert() should work from callbacks (unlike claim() which throws)
+        let mut engine = JamEngine::new();
+        let ts = r#"
+            render(
+                <Button key="btn" label="Go" onPress={() => {
+                    assert("clicked", true);
+                }} />
+            );
+        "#;
+        let result = engine.load_program("test.tsx", ts);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        // Fact shouldn't exist yet
+        let f = engine.current_facts_json();
+        assert!(!f.contains(r#""clicked""#), "not clicked yet: {f}");
+
+        // Fire the callback
+        engine.fire_event("root/btn", "onPress");
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""clicked",true"#), "assert from callback: {f}");
+    }
+
+    #[test]
+    fn test_assert_persists_across_holds() {
+        // assert() facts should NOT be retracted when hold() is re-executed
+        let mut engine = JamEngine::new();
+        let ts = r#"
+            assert("permanent", "fact");
+            hold("mutable", () => { claim("mutable", "v1"); });
+        "#;
+        let result = engine.load_program("test", ts);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""permanent","fact""#), "initial: {f}");
+        assert!(f.contains(r#""mutable","v1""#), "initial hold: {f}");
+
+        // Re-execute hold — should retract mutable but NOT permanent
+        engine.eval_js(r#"hold("mutable", () => { claim("mutable", "v2"); });"#).unwrap();
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""permanent","fact""#), "permanent survived: {f}");
+        assert!(f.contains(r#""mutable","v2""#), "mutable updated: {f}");
+        assert!(!f.contains(r#""mutable","v1""#), "old mutable gone: {f}");
+    }
+
+    #[test]
+    fn test_assert_and_retract_from_eval_js() {
+        let mut engine = JamEngine::new();
+        let ts = r#"
+            assert("session", "s1", "status", "starting");
+        "#;
+        let result = engine.load_program("test", ts);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""status","starting""#), "initial: {f}");
+
+        // Update: retract old, assert new
+        engine.eval_js(r#"
+            retract("session", "s1", "status", "starting");
+            assert("session", "s1", "status", "active");
+        "#).unwrap();
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(!f.contains(r#""status","starting""#), "old gone: {f}");
+        assert!(f.contains(r#""status","active""#), "new present: {f}");
+    }
+
+    #[test]
+    fn test_when_reacts_to_asserted_facts() {
+        // when() rules should fire on assert()ed facts just like claim()ed ones
+        let mut engine = JamEngine::new();
+        let ts = r#"
+            when(["item", $.id, "name", $.name], ({ id, name }) => {
+                claim("display", id, name);
+            });
+            assert("item", "i1", "name", "Alice");
+        "#;
+        let result = engine.load_program("test", ts);
+        assert!(!result.starts_with("ERROR"), "load failed: {result}");
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(f.contains(r#""display","i1","Alice""#), "when reacted to assert: {f}");
+
+        // Retract the fact — derived claim should also disappear
+        engine.eval_js(r#"retract("item", "i1", "name", "Alice");"#).unwrap();
+        let _ = engine.step_json();
+
+        let f = engine.current_facts_json();
+        assert!(!f.contains(r#""display""#), "derived fact retracted: {f}");
     }
 }

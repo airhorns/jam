@@ -1,5 +1,5 @@
-import { h, Fragment } from "../jam";
-import { HStack, Text, Circle, Button, type Color } from "../components";
+import { h, Fragment } from "@jam/types";
+import { HStack, Text, Circle, Button, type Color } from "@jam/types";
 
 export function ConnectionStatusBar({ isConnected, hostname, pingMs, error, onRetry }: {
   key?: string;

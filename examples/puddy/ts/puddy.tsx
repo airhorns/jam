@@ -1,6 +1,6 @@
 // Puddy — reactive chat app built entirely on Jam's claim system.
 
-import { $, when, hold, claim, render, h } from "./jam";
+import { $, when, hold, claim, render, h } from "@jam/types";
 import {
   VStack,
   HStack,
@@ -13,24 +13,19 @@ import {
   Circle,
   Spacer,
   ProgressView,
-} from "./components";
+} from "@jam/types";
+import { SessionManager } from "./networking/session-manager";
 
 // --- Session manager ---
-// SessionManager is defined in networking/session-manager.ts which is loaded
-// before this file in the full app, but not in unit tests.
-
-const sessionManager: any =
-  typeof SessionManager !== "undefined" ? new SessionManager() : null;
+const sessionManager = new SessionManager();
+// Expose on globalThis so eval_js test scripts can interact with it
+(globalThis as any).sessionManager = sessionManager;
 
 // --- Initial state ---
 
 hold("connection", () => {
-  claim("connection", "status", sessionManager ? "checking" : "disconnected");
-  claim("connection", "hostname", sessionManager ? sessionManager.hostname : "localhost");
-});
-
-hold("sessions", () => {
-  // initially empty
+  claim("connection", "status", "checking");
+  claim("connection", "hostname", sessionManager.hostname);
 });
 
 hold("ui", () => {
@@ -38,23 +33,7 @@ hold("ui", () => {
 });
 
 // Check connection on startup (async — driven by runtime idle())
-if (sessionManager) {
-  sessionManager.checkConnection();
-}
-
-// --- Fallback helpers for when SessionManager is unavailable (tests) ---
-let _msgCounter = 0;
-function addMessageDirect(
-  sessionId: string,
-  sender: string,
-  kindType: string,
-  content: string,
-) {
-  const msgId = `msg-${_msgCounter++}`;
-  hold(`msg-${sessionId}-${msgId}`, () => {
-    claim("message", sessionId, msgId, sender, kindType, content);
-  });
-}
+sessionManager.checkConnection();
 
 // --- Render ---
 
@@ -110,19 +89,14 @@ render(
             key="new-session"
             label="+ New Session"
             onPress={() => {
-              let id: string;
-              if (sessionManager) {
-                id = sessionManager.createNewSession();
-              } else {
-                id = "s-" + Date.now();
-                hold(`session-${id}`, () => {
-                  claim("session", id, "agent", "claude");
-                  claim("session", id, "status", "starting");
+              try {
+                const id = sessionManager.createNewSession();
+                hold("ui", () => {
+                  claim("ui", "selectedSession", id);
                 });
+              } catch (err: any) {
+                console.error("Failed to create session:", err.message ?? err);
               }
-              hold("ui", () => {
-                claim("ui", "selectedSession", id);
-              });
             }}
           />
         ) : (
@@ -169,14 +143,54 @@ render(
 
       <Divider key="top-div" />
 
+      {/* Mode badge — top-level when */}
+      {when(
+        ["session", $.sid, "currentMode", $.mode],
+        ({ sid, mode }) => (
+          <HStack key={`mode-badge-${sid}`} spacing={8} padding={4}>
+            <Text font="caption" foregroundColor="blue">
+              {`[${mode}]`}
+            </Text>
+          </HStack>
+        ),
+      )}
+
       {when(["ui", "selectedSession", $.selectedId], ({ selectedId }) => (
         <VStack key="content">
-          <Text key="detail-title" font="headline" padding={12}>
-            {selectedId ? `Session: ${selectedId}` : "Select a session"}
-          </Text>
+          {/* Header */}
+          <HStack key="detail-header" spacing={8} padding={12}>
+            <Text key="detail-title" font="headline">
+              {selectedId ? `Session: ${selectedId}` : "Select a session"}
+            </Text>
+          </HStack>
 
           <Divider key="detail-div" />
 
+          {/* Plan / Todo list entries */}
+          {when(
+            ["plan", $.sid, $.entryId, $.planContent, $.planStatus, $.planPriority],
+            ({ sid, entryId, planContent, planStatus, planPriority }) => {
+              const statusIcon =
+                planStatus === "completed" ? "[done]" :
+                planStatus === "in_progress" ? "[...]" :
+                "[ ]";
+              const statusColor =
+                planStatus === "completed" ? "green" :
+                planStatus === "in_progress" ? "blue" :
+                "secondary";
+              return (
+                <HStack key={`plan-${sid}-${entryId}`} spacing={8}>
+                  <Text font="body" foregroundColor={statusColor}>{statusIcon}</Text>
+                  <Text font="body">{planContent}</Text>
+                  {planPriority === "high" ? (
+                    <Text key="priority" font="caption" foregroundColor="red">!</Text>
+                  ) : null}
+                </HStack>
+              );
+            },
+          )}
+
+          {/* Messages */}
           <ScrollView key="detail-messages" padding={12}>
             <VStack key="msg-list" alignment="leading" spacing={8}>
               {when(
@@ -189,34 +203,34 @@ render(
                   $.content,
                 ],
                 ({ msgId, sender, kind, content }) => {
-                  const icon =
-                    sender === "user"
-                      ? "👤"
-                      : sender === "assistant"
-                        ? "✨"
-                        : "🔧";
-                  const color =
-                    sender === "user"
-                      ? "blue"
-                      : sender === "assistant"
-                        ? "purple"
-                        : "orange";
+                  // Thought messages — dimmed
+                  if (kind === "thought") {
+                    return (
+                      <HStack key={`msg-${msgId}`} spacing={8}>
+                        <Text foregroundColor="secondary">...</Text>
+                        <Text font="caption" foregroundColor="secondary">{content}</Text>
+                      </HStack>
+                    );
+                  }
 
+                  // Tool use — show name
                   if (kind === "toolUse") {
                     return (
                       <HStack key={`msg-${msgId}`} spacing={8}>
-                        <Text foregroundColor="orange">🔧</Text>
+                        <Text foregroundColor="orange">~</Text>
                         <Text font="callout" foregroundColor="orange">
                           {content}
                         </Text>
                       </HStack>
                     );
                   }
+
+                  // Tool result
                   if (kind === "toolResult") {
                     const statusColor =
                       content === "completed" ? "green" : "red";
                     const statusIcon =
-                      content === "completed" ? "✓" : "✗";
+                      content === "completed" ? "+" : "x";
                     return (
                       <HStack key={`msg-${msgId}`} spacing={8}>
                         <Text foregroundColor={statusColor}>
@@ -228,6 +242,33 @@ render(
                       </HStack>
                     );
                   }
+
+                  // Mode change — system message
+                  if (kind === "modeChange") {
+                    return (
+                      <HStack key={`msg-${msgId}`} spacing={8}>
+                        <Text foregroundColor="blue">*</Text>
+                        <Text font="caption" foregroundColor="blue">
+                          {`Mode: ${content}`}
+                        </Text>
+                      </HStack>
+                    );
+                  }
+
+                  // Text messages (user + assistant)
+                  const icon =
+                    sender === "user"
+                      ? ">"
+                      : sender === "assistant"
+                        ? "<"
+                        : "#";
+                  const color =
+                    sender === "user"
+                      ? "blue"
+                      : sender === "assistant"
+                        ? "purple"
+                        : "orange";
+
                   return (
                     <HStack key={`msg-${msgId}`} spacing={8}>
                       <Text foregroundColor={color}>{icon}</Text>
@@ -239,14 +280,43 @@ render(
             </VStack>
           </ScrollView>
 
+          {/* Streaming thought indicator */}
+          {when(
+            ["session", $.selectedId, "streamingThought", $.thought],
+            ({ thought }) =>
+              thought ? (
+                <HStack key="streaming-thought" spacing={8} padding={8}>
+                  <Text foregroundColor="secondary">...</Text>
+                  <Text font="caption" foregroundColor="secondary">
+                    {thought}
+                  </Text>
+                </HStack>
+              ) : null,
+          )}
+
+          {/* Streaming text indicator */}
           {when(
             ["session", $.selectedId, "streamingText", $.streaming],
             ({ streaming }) =>
               streaming ? (
                 <HStack key="streaming" spacing={8} padding={8}>
-                  <Text foregroundColor="purple">✨</Text>
+                  <Text foregroundColor="purple">{"<"}</Text>
                   <Text font="body" foregroundColor="secondary">
                     {streaming}
+                  </Text>
+                </HStack>
+              ) : null,
+          )}
+
+          {/* Active tools indicator */}
+          {when(
+            ["session", $.selectedId, "hasActiveTools", $.hasTools],
+            ({ hasTools }) =>
+              hasTools === "true" ? (
+                <HStack key="active-tools" spacing={8} padding={8}>
+                  <ProgressView key="tools-spinner" />
+                  <Text key="tools-label" font="caption" foregroundColor="orange">
+                    Tools running...
                   </Text>
                 </HStack>
               ) : null,
@@ -260,13 +330,8 @@ render(
                 key="input"
                 placeholder="Type a message..."
                 onSubmit={(text: string) => {
-                  if (
-                    sessionManager &&
-                    sessionManager.sessions.has(selectedId)
-                  ) {
+                  if (sessionManager.hasSession(selectedId)) {
                     sessionManager.sendMessage(selectedId, text);
-                  } else {
-                    addMessageDirect(selectedId, "user", "text", text);
                   }
                 }}
                 font="body"

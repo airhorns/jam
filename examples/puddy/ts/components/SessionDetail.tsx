@@ -1,5 +1,5 @@
-import { h } from "../jam";
-import { VStack, HStack, Text, ScrollView, TextField, Button, ProgressView, Divider } from "../components";
+import { h } from "@jam/types";
+import { VStack, HStack, Text, ScrollView, TextField, Button, ProgressView, Divider } from "@jam/types";
 import type { AgentSession } from "../models/session";
 import { isTerminal } from "../models/session";
 import { ConversationItemView } from "./ConversationItem";

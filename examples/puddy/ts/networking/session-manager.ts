@@ -1,19 +1,25 @@
-// SessionManager — orchestrates agent sessions using hold() for reactive state.
-// All state mutations go through hold(), which triggers when() rules to re-render.
+// SessionManager — orchestrates agent sessions using assert/retract for state.
+// All session state lives in the fact database. Only streaming accumulators
+// (which need incremental appending) live in JS.
 
+import { hold, claim, assert, retract } from "@jam/types";
 import { type AgentEvent } from "../models/events";
-import { type AgentSession, applyEvent, createSession } from "../models/session";
+import { isTerminalStatus } from "../models/session";
 import { SandboxAgentClient, SandboxAgentError, type AgentInfo } from "./client";
 
-// These are available as globals from the Jam runtime
-declare function hold(keyOrFn: string | (() => void), maybeFn?: () => void): void;
-declare function claim(...terms: any[]): void;
-
+let _nextMsgId = 0;
 let _nextUserMsgId = 0;
 
 export class SessionManager {
   private client: SandboxAgentClient;
-  sessions: Map<string, AgentSession> = new Map();
+
+  // Minimal JS-only state: streaming accumulators (can't incrementally append to a fact)
+  private streamingText: Map<string, string> = new Map();
+  private streamingThought: Map<string, string> = new Map();
+  // Track session IDs and their current status for retract-before-assert pattern
+  private sessionStatuses: Map<string, string> = new Map();
+  // Track old plan entry counts so we can retract them
+  private planEntryCounts: Map<string, number> = new Map();
 
   isConnected = false;
   connectionError?: string;
@@ -34,6 +40,10 @@ export class SessionManager {
 
   get preferredAgent(): AgentInfo | undefined {
     return this.agents.find((a) => a.installed && a.credentialsAvailable);
+  }
+
+  hasSession(id: string): boolean {
+    return this.sessionStatuses.has(id);
   }
 
   get agentReadinessError(): string | undefined {
@@ -75,11 +85,13 @@ export class SessionManager {
     if (!agent) throw SandboxAgentError.noReadyAgent();
 
     const sessionId = "s-" + Date.now();
-    const session = createSession(sessionId, agent);
-    this.sessions.set(sessionId, session);
-    this.syncSessionState(sessionId);
 
-    // Async: connect to backend (runs during drain_async)
+    // Assert session facts directly into the database
+    assert("session", sessionId, "agent", agent);
+    assert("session", sessionId, "status", "starting");
+    this.sessionStatuses.set(sessionId, "starting");
+
+    // Async: connect to backend
     this.connectSession(sessionId, agent, initialPrompt);
 
     return sessionId;
@@ -89,69 +101,162 @@ export class SessionManager {
     try {
       await this.client.createSession(sessionId, agent);
 
-      const session = this.sessions.get(sessionId);
-      if (session) {
-        session.status = { type: "active" };
-        this.syncSessionState(sessionId);
-      }
+      this.setStatus(sessionId, "active");
 
       if (initialPrompt) {
         this.sendMessage(sessionId, initialPrompt);
       }
     } catch (err: any) {
-      const s = this.sessions.get(sessionId);
-      if (s) {
-        s.status = { type: "failed", error: err.message ?? String(err) };
-        this.syncSessionState(sessionId);
-      }
+      this.setStatus(sessionId, "failed");
+      assert("session", sessionId, "statusDetail", err.message ?? String(err));
     }
   }
 
   sendMessage(sessionId: string, message: string): void {
-    this.addUserMessage(sessionId, message);
+    // Add user message
+    const msgId = `umsg-${_nextUserMsgId++}`;
+    assert("message", sessionId, msgId, "user", "text", message);
 
-    // Mark session as waiting for response
-    const session = this.sessions.get(sessionId);
-    if (session) {
-      session.streamingText = "Thinking...";
-      this.syncSessionState(sessionId);
-    }
-
-    // Send prompt with SSE event capture.
-    // The callback fires (during drain_async) when the agent responds.
+    // Send prompt with SSE event capture — events arrive incrementally
     this.client.sendPromptWithEvents(
       sessionId,
       message,
-      (events) => this.applyEvents(sessionId, events),
+      (event) => this.handleEvent(sessionId, event),
+      () => {
+        // POST completed — nothing to do, events already applied
+      },
       (err) => {
         console.error("sendMessage error:", err.message ?? err);
-        const s = this.sessions.get(sessionId);
-        if (s) {
-          s.streamingText = undefined;
-          this.syncSessionState(sessionId);
-        }
+        this.clearStreaming(sessionId);
       },
     );
   }
 
-  private applyEvents(sessionId: string, events: AgentEvent[]): void {
-    let session = this.sessions.get(sessionId);
-    if (!session) return;
+  private handleEvent(sessionId: string, event: AgentEvent): void {
+    const p = event.payload;
 
-    session.streamingText = undefined;
+    switch (p.type) {
+      case "agentMessageChunk": {
+        this.ensureActive(sessionId);
+        const oldText = this.streamingText.get(sessionId);
+        const newText = (oldText ?? "") + p.text;
+        if (oldText) retract("session", sessionId, "streamingText", oldText);
+        assert("session", sessionId, "streamingText", newText);
+        this.streamingText.set(sessionId, newText);
+        break;
+      }
 
-    for (const event of events) {
-      if (event.eventIndex <= session.lastEventIndex) continue;
-      session = applyEvent(session, event);
-      this.sessions.set(sessionId, session);
+      case "agentThoughtChunk": {
+        this.ensureActive(sessionId);
+        const oldThought = this.streamingThought.get(sessionId);
+        const newThought = (oldThought ?? "") + p.text;
+        if (oldThought) retract("session", sessionId, "streamingThought", oldThought);
+        assert("session", sessionId, "streamingThought", newThought);
+        this.streamingThought.set(sessionId, newThought);
+        break;
+      }
+
+      case "toolCall":
+        this.finalizeStreaming(sessionId);
+        assert("message", sessionId, p.data.toolCallId, "assistant", "toolUse", p.data.title);
+        assert("message", sessionId, p.data.toolCallId, "toolStatus", p.data.status ?? "pending");
+        assert("session", sessionId, "hasActiveTools", "true");
+        break;
+
+      case "toolCallUpdate": {
+        const status = p.data.status ?? "in_progress";
+        // Update tool status
+        retract("message", sessionId, p.data.toolCallId, "toolStatus", p.data.status ?? "pending");
+        assert("message", sessionId, p.data.toolCallId, "toolStatus", status);
+        // Add result message for completed/failed
+        if (status === "completed" || status === "failed") {
+          assert("message", sessionId, p.data.toolCallId + "-result", "tool", "toolResult", status);
+        }
+        break;
+      }
+
+      case "usageUpdate":
+        // Usage is transient — use hold so it auto-replaces
+        hold(`usage-${sessionId}`, () => {
+          if (p.data.costAmount != null) {
+            claim("session", sessionId, "costAmount", p.data.costAmount);
+            claim("session", sessionId, "costCurrency", p.data.costCurrency ?? "USD");
+          }
+          claim("session", sessionId, "contextSize", p.data.size);
+          claim("session", sessionId, "contextUsed", p.data.used);
+        });
+        break;
+
+      case "plan": {
+        this.ensureActive(sessionId);
+        // Retract old plan entries
+        const oldCount = this.planEntryCounts.get(sessionId) ?? 0;
+        for (let i = 0; i < oldCount; i++) {
+          // We can't retract individual entries easily without knowing their content,
+          // so use hold() for the plan which auto-retracts the previous set.
+        }
+        // Use hold for plan entries — they get replaced as a whole each time
+        hold(`plan-${sessionId}`, () => {
+          for (let i = 0; i < p.data.entries.length; i++) {
+            const entry = p.data.entries[i];
+            claim("plan", sessionId, `entry-${i}`, entry.content, entry.status, entry.priority);
+          }
+          claim("plan", sessionId, "count", String(p.data.entries.length));
+        });
+        this.planEntryCounts.set(sessionId, p.data.entries.length);
+        break;
+      }
+
+      case "currentModeUpdate":
+        assert("session", sessionId, "currentMode", p.modeId);
+        // Add mode change message
+        const modeId = `mode-${_nextMsgId++}`;
+        assert("message", sessionId, modeId, "system", "modeChange", p.modeId);
+        break;
+
+      case "availableCommandsUpdate":
+        // Use hold for commands — they get replaced as a whole
+        hold(`commands-${sessionId}`, () => {
+          for (const cmd of p.commands) {
+            claim("command", sessionId, cmd.name, cmd.description);
+          }
+        });
+        break;
+
+      case "sessionInfoUpdate":
+        if (p.title) {
+          assert("session", sessionId, "title", p.title);
+        }
+        break;
+
+      case "sessionEnd":
+        this.finalizeStreaming(sessionId);
+        this.setStatus(sessionId, "ended");
+        assert("session", sessionId, "statusDetail", p.stopReason);
+        // Clear active tools indicator
+        retract("session", sessionId, "hasActiveTools", "true");
+        break;
+
+      case "unknown":
+        break;
     }
-    this.syncSessionState(sessionId);
   }
 
   async destroySession(id: string): Promise<void> {
-    this.sessions.delete(id);
-    hold(`session-${id}`, () => {});
-    hold(`session-${id}-msgs`, () => {});
+    // Clean up JS-side state
+    this.streamingText.delete(id);
+    this.streamingThought.delete(id);
+    this.sessionStatuses.delete(id);
+    this.planEntryCounts.delete(id);
+
+    // Clean up holds
+    hold(`plan-${id}`, () => {});
+    hold(`commands-${id}`, () => {});
+    hold(`usage-${id}`, () => {});
+
+    // Note: assert()ed facts for this session remain in the DB.
+    // The UI just won't display them if the session is removed from the sidebar.
+    // A full cleanup would require tracking all asserted facts per session.
 
     try {
       await this.client.destroySession(id);
@@ -160,7 +265,53 @@ export class SessionManager {
     }
   }
 
-  // --- Reactive State Sync ---
+  // --- Helpers ---
+
+  private setStatus(sessionId: string, status: string): void {
+    const old = this.sessionStatuses.get(sessionId);
+    if (old) retract("session", sessionId, "status", old);
+    assert("session", sessionId, "status", status);
+    this.sessionStatuses.set(sessionId, status);
+  }
+
+  private ensureActive(sessionId: string): void {
+    if (this.sessionStatuses.get(sessionId) === "starting") {
+      this.setStatus(sessionId, "active");
+    }
+  }
+
+  private finalizeStreaming(sessionId: string): void {
+    // Finalize streaming text into a message
+    const text = this.streamingText.get(sessionId);
+    if (text) {
+      retract("session", sessionId, "streamingText", text);
+      assert("message", sessionId, `msg-${_nextMsgId++}`, "assistant", "text", text);
+      this.streamingText.delete(sessionId);
+    }
+
+    // Finalize streaming thought into a message
+    const thought = this.streamingThought.get(sessionId);
+    if (thought) {
+      retract("session", sessionId, "streamingThought", thought);
+      assert("message", sessionId, `thought-${_nextMsgId++}`, "assistant", "thought", thought);
+      this.streamingThought.delete(sessionId);
+    }
+  }
+
+  private clearStreaming(sessionId: string): void {
+    const text = this.streamingText.get(sessionId);
+    if (text) {
+      retract("session", sessionId, "streamingText", text);
+      this.streamingText.delete(sessionId);
+    }
+    const thought = this.streamingThought.get(sessionId);
+    if (thought) {
+      retract("session", sessionId, "streamingThought", thought);
+      this.streamingThought.delete(sessionId);
+    }
+  }
+
+  // --- Connection State (uses hold since it's a single mutable value that replaces itself) ---
 
   private syncConnectionState(): void {
     hold("connection", () => {
@@ -170,52 +321,6 @@ export class SessionManager {
         claim("connection", "error", this.connectionError);
       }
     });
-  }
-
-  private syncSessionState(sessionId: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-
-    hold(`session-${sessionId}`, () => {
-      claim("session", sessionId, "agent", session.agent);
-      claim("session", sessionId, "status", session.status.type);
-
-      if (session.status.type === "ended") {
-        claim("session", sessionId, "statusDetail", (session.status as any).reason);
-      } else if (session.status.type === "failed") {
-        claim("session", sessionId, "statusDetail", (session.status as any).error);
-      }
-
-      if (session.streamingText) {
-        claim("session", sessionId, "streamingText", session.streamingText);
-      }
-    });
-
-    hold(`session-${sessionId}-msgs`, () => {
-      for (const msg of session.messages) {
-        const content =
-          msg.kind.type === "text" ? msg.kind.text :
-          msg.kind.type === "toolUse" ? msg.kind.name :
-          msg.kind.type === "toolResult" ? msg.kind.status :
-          "";
-        claim("message", sessionId, msg.id, msg.sender, msg.kind.type, content);
-      }
-    });
-  }
-
-  private addUserMessage(sessionId: string, text: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-
-    const msgId = `umsg-${_nextUserMsgId++}`;
-    session.messages.push({
-      id: msgId,
-      sender: "user",
-      kind: { type: "text", text },
-      timestamp: Date.now(),
-    });
-    this.sessions.set(sessionId, session);
-    this.syncSessionState(sessionId);
   }
 
   disconnectAll(): void {}

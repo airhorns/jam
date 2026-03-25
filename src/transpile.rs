@@ -63,17 +63,58 @@ pub fn transpile_ts_to_js(source: &str, filename: &str) -> Result<String, String
 }
 
 /// Strip import declarations and export keywords from transpiled JS.
-/// The jam runtime is loaded as globals, so imports are unnecessary,
-/// and exports don't work in QuickJS's non-module evaluation mode.
+/// Used for the runtime module (concatenated from multiple files).
 pub fn strip_imports(js: &str) -> String {
     js.lines()
         .filter(|line| {
             let trimmed = line.trim();
-            // Remove import lines entirely
             !trimmed.starts_with("import ")
         })
         .map(|line| {
-            // Strip "export " prefix from declarations
+            if line.trim_start().starts_with("export ") {
+                line.replacen("export ", "", 1)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Strip import declarations only, keeping exports intact.
+/// Used for the runtime module source where exports are needed for ES module interface.
+pub fn strip_only_imports(js: &str) -> String {
+    js.lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.starts_with("import ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Strip relative import declarations (./foo, ../foo) but keep package imports (@jam/types).
+/// Used for concatenated files where relative imports are resolved by concatenation.
+pub fn strip_relative_imports(js: &str) -> String {
+    js.lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            if !trimmed.starts_with("import ") {
+                return true; // not an import
+            }
+            // Keep imports from packages (contain @), strip relative imports (contain ./)
+            !trimmed.contains("\"./") && !trimmed.contains("\"../")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Strip export keywords from transpiled JS but keep imports.
+/// Used for user programs evaluated as ES modules — imports resolve
+/// to the built-in @jam/types module, but top-level exports are unnecessary.
+pub fn strip_exports(js: &str) -> String {
+    js.lines()
+        .map(|line| {
             if line.trim_start().starts_with("export ") {
                 line.replacen("export ", "", 1)
             } else {

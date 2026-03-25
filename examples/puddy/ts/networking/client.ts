@@ -102,13 +102,14 @@ export class SandboxAgentClient {
   // --- Prompt with SSE ---
   // ACP flow: open SSE GET first → POST prompt → SSE delivers events during processing.
   // Both requests run concurrently as standard fetch() promises.
-  // When the POST completes (agent is done), we abort the SSE connection
-  // and read whatever text was received.
+  // Events are processed incrementally as they arrive via onEvent callback.
+  // When the POST completes (agent is done), we abort the SSE connection.
 
   sendPromptWithEvents(
     sessionId: string,
     prompt: string,
-    onComplete: (events: AgentEvent[]) => void,
+    onEvent: (event: AgentEvent) => void,
+    onComplete: () => void,
     onError: (err: Error) => void,
   ): void {
     const acpSessionId = this.acpSessionIds.get(sessionId);
@@ -122,16 +123,11 @@ export class SandboxAgentClient {
     const sseUrl = `${this.baseURL}/v1/acp/${sessionId}`;
     const postBody = JSON.stringify(this.makeJsonRpc("session/prompt", params));
 
-    // ACP flow: open SSE GET first, then POST prompt.
-    // Both run concurrently as standard fetch() promises.
-    // SSE body is read via ReadableStream (response.body.getReader()).
-
-    // Use a shared accumulator so we can read SSE text even if the promise hasn't resolved
-    const sseAccumulator = { text: "" };
     const sseAbort = new AbortController();
+    const eventIndex = { value: 0 };
 
-    // 1. Start SSE reader (reads body incrementally via ReadableStream)
-    this.readSSEStream(sseUrl, sseAbort.signal, sseAccumulator);
+    // 1. Start SSE reader (processes events incrementally as they arrive)
+    this.readSSEStream(sseUrl, sseAbort.signal, eventIndex, onEvent);
 
     // 2. POST the prompt (resolves when agent finishes)
     fetch(sseUrl, {
@@ -146,9 +142,9 @@ export class SandboxAgentClient {
         const data: any = await response.json();
         this.checkJsonRpcError(data);
 
-        // 3. POST done — abort SSE and use accumulated text
+        // 3. POST done — abort SSE stream
         sseAbort.abort();
-        onComplete(this.parseSSEText(sseAccumulator.text));
+        onComplete();
       })
       .catch((err) => {
         sseAbort.abort();
@@ -157,11 +153,12 @@ export class SandboxAgentClient {
   }
 
   // Read an SSE stream incrementally using response.body.getReader().
-  // Accumulates text into the shared accumulator object.
+  // Parses and dispatches events as each SSE line arrives.
   private async readSSEStream(
     url: string,
     signal: AbortSignal,
-    accumulator: { text: string },
+    eventIndex: { value: number },
+    onEvent: (event: AgentEvent) => void,
   ): Promise<void> {
     try {
       const response = await fetch(url, {
@@ -177,14 +174,45 @@ export class SandboxAgentClient {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        accumulator.text += decoder.decode(value, { stream: true });
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete SSE lines from the buffer
+        let newlineIdx: number;
+        while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, newlineIdx);
+          buffer = buffer.slice(newlineIdx + 1);
+
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6).trim();
+          if (!data) continue;
+
+          try {
+            const json = JSON.parse(data);
+            if (json.error) continue;
+          } catch {
+            continue;
+          }
+
+          const result = parseACPMessage(data, eventIndex);
+          if (result.type === "event") {
+            onEvent(result.event);
+          } else if (result.type === "sessionEnd") {
+            eventIndex.value += 1;
+            onEvent({
+              id: "evt-end",
+              eventIndex: eventIndex.value,
+              payload: { type: "sessionEnd", stopReason: result.stopReason },
+            });
+          }
+        }
       }
     } catch {
-      // AbortError or network error — accumulated text is already in the accumulator
+      // AbortError or network error — events already dispatched
     }
   }
 
@@ -223,35 +251,4 @@ export class SandboxAgentClient {
     }
   }
 
-  private parseSSEText(text: string): AgentEvent[] {
-    const events: AgentEvent[] = [];
-    const eventIndex = { value: 0 };
-
-    for (const line of text.split("\n")) {
-      if (!line.startsWith("data: ")) continue;
-      const data = line.slice(6).trim();
-      if (!data) continue;
-
-      try {
-        const json = JSON.parse(data);
-        if (json.error) continue;
-      } catch {
-        continue;
-      }
-
-      const result = parseACPMessage(data, eventIndex);
-      if (result.type === "event") {
-        events.push(result.event);
-      } else if (result.type === "sessionEnd") {
-        eventIndex.value += 1;
-        events.push({
-          id: "evt-end",
-          eventIndex: eventIndex.value,
-          payload: { type: "sessionEnd", stopReason: result.stopReason },
-        });
-      }
-    }
-
-    return events;
-  }
 }

@@ -6,26 +6,19 @@ use jam::bridge::JamEngine;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Load the full puddy program into an engine, matching the file order
-/// from ContentView.swift.
+/// Load the full puddy program into an engine as ES modules.
 fn engine_with_full_puddy() -> JamEngine {
     let mut engine = JamEngine::new();
 
-    let files = [
-        include_str!("../examples/puddy/ts/models/events.ts"),
-        include_str!("../examples/puddy/ts/models/session.ts"),
-        include_str!("../examples/puddy/ts/networking/client.ts"),
-        include_str!("../examples/puddy/ts/networking/session-manager.ts"),
-        include_str!("../examples/puddy/ts/components/ConversationItem.tsx"),
-        include_str!("../examples/puddy/ts/components/SessionList.tsx"),
-        include_str!("../examples/puddy/ts/components/SessionDetail.tsx"),
-        include_str!("../examples/puddy/ts/components/ConnectionStatus.tsx"),
-        include_str!("../examples/puddy/ts/puddy.tsx"),
+    let files: Vec<(&str, &str)> = vec![
+        ("models/events.ts", include_str!("../examples/puddy/ts/models/events.ts")),
+        ("models/session.ts", include_str!("../examples/puddy/ts/models/session.ts")),
+        ("networking/client.ts", include_str!("../examples/puddy/ts/networking/client.ts")),
+        ("networking/session-manager.ts", include_str!("../examples/puddy/ts/networking/session-manager.ts")),
+        ("puddy.tsx", include_str!("../examples/puddy/ts/puddy.tsx")),
     ];
 
-    let combined: String = files.join("\n");
-
-    let result = engine.load_program("puddy.tsx", &combined);
+    let result = engine.load_program_files_native("puddy", &files);
     assert!(
         !result.starts_with("ERROR"),
         "Failed to load puddy program: {result}"
@@ -292,22 +285,126 @@ fn test_puddy_new_session_button() {
 }
 
 #[test]
+fn test_puddy_new_session_button_click() {
+    // Click the "New Session" button when no agent has credentials.
+    // SessionManager.createNewSession() throws NoReadyAgent.
+    // The button callback has a try/catch so it should not crash.
+    let mut engine = engine_with_full_puddy();
+
+    // Set connected so button is enabled
+    engine
+        .eval_js("hold('connection', () => { claim('connection', 'status', 'connected'); claim('connection', 'hostname', 'localhost'); });")
+        .unwrap();
+    let _ = engine.step_json();
+
+    // Find and click the button
+    let facts_json = engine.current_facts_json();
+    let entities = build_entity_map(&facts_json);
+    let btn_id = entities.keys().find(|k| k.contains("new-session")).cloned().unwrap();
+
+    let result = engine.fire_event(&btn_id, "onPress");
+    // Should not crash — the try/catch handles the NoReadyAgent error
+    assert!(
+        !result.starts_with("ERROR"),
+        "Clicking new session button should not crash: {result}"
+    );
+}
+
+#[test]
+fn test_puddy_new_session_button_click_with_session_manager() {
+    // Test with SessionManager actually initialized — simulates the real app.
+    // SessionManager.createNewSession() will throw NoReadyAgent since no agents
+    // have credentials. The button callback must handle this gracefully.
+    let mut engine = engine_with_full_puddy();
+
+    // Mock: set connection status and make SessionManager think it's connected
+    // but with no ready agents (simulates real scenario where server is up but no agent credentials)
+    engine
+        .eval_js(r#"
+            hold('connection', () => {
+                claim('connection', 'status', 'connected');
+                claim('connection', 'hostname', 'localhost');
+            });
+            // Simulate that sessionManager exists and is connected but has no ready agents
+            if (typeof sessionManager !== 'undefined' && sessionManager) {
+                sessionManager.isConnected = true;
+                sessionManager.agents = [{ id: "claude", installed: true, credentialsAvailable: false }];
+            }
+        "#)
+        .unwrap();
+    let _ = engine.step_json();
+
+    // Find and click the button
+    let facts_json = engine.current_facts_json();
+    let entities = build_entity_map(&facts_json);
+    let btn_id = entities.keys().find(|k| k.contains("new-session")).cloned().unwrap();
+
+    let result = engine.fire_event(&btn_id, "onPress");
+    eprintln!("New session button with SM (no creds): {result}");
+    // This SHOULD NOT crash — the callback should handle the NoReadyAgent error
+    assert!(
+        !result.starts_with("ERROR"),
+        "Button click with no ready agent should not crash: {result}"
+    );
+}
+
+#[test]
+fn test_puddy_new_session_button_click_with_ready_agent() {
+    // Test with SessionManager initialized and a ready agent.
+    // createNewSession will succeed, but connectSession will fail (no server).
+    // The session should still appear in the UI with "starting" then "failed" status.
+    let mut engine = engine_with_full_puddy();
+
+    engine
+        .eval_js(r#"
+            hold('connection', () => {
+                claim('connection', 'status', 'connected');
+                claim('connection', 'hostname', 'localhost');
+            });
+            if (typeof sessionManager !== 'undefined' && sessionManager) {
+                sessionManager.isConnected = true;
+                sessionManager.agents = [{ id: "claude", installed: true, credentialsAvailable: true }];
+            }
+        "#)
+        .unwrap();
+    let _ = engine.step_json();
+
+    let facts_json = engine.current_facts_json();
+    let entities = build_entity_map(&facts_json);
+    let btn_id = entities.keys().find(|k| k.contains("new-session")).cloned().unwrap();
+
+    let result = engine.fire_event(&btn_id, "onPress");
+    eprintln!("New session button with ready agent: {result}");
+    assert!(
+        !result.starts_with("ERROR"),
+        "Button click with ready agent should not crash: {result}"
+    );
+
+    // Session should have been created with starting status
+    let facts_json = engine.current_facts_json();
+    assert!(
+        facts_json.contains(r#""starting"#),
+        "session should be in starting status: {facts_json}"
+    );
+}
+
+#[test]
 fn test_puddy_send_message() {
     let mut engine = engine_with_full_puddy();
 
-    // Create a session and select it via eval_js
+    // Set up a ready agent and create a session through SessionManager
     engine
         .eval_js(
             r#"
+            sessionManager.isConnected = true;
+            sessionManager.agents = [{ id: "claude", installed: true, credentialsAvailable: true }];
             hold("connection", () => {
                 claim("connection", "status", "connected");
                 claim("connection", "hostname", "localhost");
             });
-            hold("session-s1", () => {
-                claim("session", "s1", "agent", "claude");
-                claim("session", "s1", "status", "active");
-            });
-            hold("ui", () => { claim("ui", "selectedSession", "s1"); });
+            // Create session through SessionManager so hasSession() returns true
+            const sid = sessionManager.createNewSession();
+            hold("ui", () => { claim("ui", "selectedSession", sid); });
         "#,
         )
         .unwrap();
@@ -328,11 +425,175 @@ fn test_puddy_send_message() {
     engine.fire_event_with_data(&input_id, "onSubmit", "Hello world");
     let _ = engine.step_json();
 
-    // Should have a message fact (via SessionManager.sendMessage or fallback addMessageDirect)
+    // Should have a user message fact via SessionManager.sendMessage
     let facts_json = engine.current_facts_json();
     assert!(
         facts_json.contains("Hello world"),
         "should have the submitted message in facts"
+    );
+}
+
+#[test]
+fn test_puddy_thought_messages_render() {
+    let mut engine = engine_with_full_puddy();
+
+    engine
+        .eval_js(
+            r#"
+            hold("sessions", () => {
+                claim("session", "s1", "agent", "claude");
+                claim("session", "s1", "status", "active");
+            });
+            hold("ui", () => { claim("ui", "selectedSession", "s1"); });
+            hold("msg-s1-t1", () => { claim("message", "s1", "t1", "assistant", "thought", "Let me think about this..."); });
+        "#,
+        )
+        .unwrap();
+    let _ = engine.step_json();
+
+    let facts_json = engine.current_facts_json();
+    assert!(
+        facts_json.contains("Let me think about this..."),
+        "thought message should render: {facts_json}"
+    );
+    // Should use the dimmed "..." prefix
+    assert!(
+        facts_json.contains("\"...\""),
+        "thought should have ... prefix: {facts_json}"
+    );
+}
+
+#[test]
+fn test_puddy_mode_change_renders() {
+    let mut engine = engine_with_full_puddy();
+
+    engine
+        .eval_js(
+            r#"
+            hold("sessions", () => {
+                claim("session", "s1", "agent", "claude");
+                claim("session", "s1", "status", "active");
+                claim("session", "s1", "currentMode", "architect");
+            });
+            hold("ui", () => { claim("ui", "selectedSession", "s1"); });
+            hold("msg-s1-mc1", () => { claim("message", "s1", "mc1", "system", "modeChange", "architect"); });
+        "#,
+        )
+        .unwrap();
+    let _ = engine.step_json();
+
+    let facts_json = engine.current_facts_json();
+    // Mode badge should render
+    assert!(
+        facts_json.contains("[architect]"),
+        "mode badge should render: {facts_json}"
+    );
+    // Mode change message should render
+    assert!(
+        facts_json.contains("Mode: architect"),
+        "mode change message should render: {facts_json}"
+    );
+}
+
+#[test]
+fn test_puddy_plan_renders() {
+    let mut engine = engine_with_full_puddy();
+
+    engine
+        .eval_js(
+            r#"
+            hold("sessions", () => {
+                claim("session", "s1", "agent", "claude");
+                claim("session", "s1", "status", "active");
+            });
+            hold("ui", () => { claim("ui", "selectedSession", "s1"); });
+            hold("plan-s1", () => {
+                claim("plan", "s1", "entry-0", "Read the file", "completed", "high");
+                claim("plan", "s1", "entry-1", "Fix the bug", "in_progress", "medium");
+                claim("plan", "s1", "entry-2", "Run tests", "pending", "low");
+                claim("plan", "s1", "count", "3");
+            });
+        "#,
+        )
+        .unwrap();
+    let _ = engine.step_json();
+
+    let facts_json = engine.current_facts_json();
+    // Plan entries should render with content and status indicators
+    assert!(
+        facts_json.contains("Read the file"),
+        "plan entry 0: {facts_json}"
+    );
+    assert!(
+        facts_json.contains("Fix the bug"),
+        "plan entry 1: {facts_json}"
+    );
+    assert!(
+        facts_json.contains("Run tests"),
+        "plan entry 2: {facts_json}"
+    );
+    // Status indicators
+    assert!(
+        facts_json.contains("[done]"),
+        "completed status: {facts_json}"
+    );
+    assert!(
+        facts_json.contains("[...]"),
+        "in_progress status: {facts_json}"
+    );
+    assert!(
+        facts_json.contains("[ ]"),
+        "pending status: {facts_json}"
+    );
+}
+
+#[test]
+fn test_puddy_streaming_thought_shows() {
+    let mut engine = engine_with_full_puddy();
+
+    engine
+        .eval_js(
+            r#"
+            hold("sessions", () => {
+                claim("session", "s1", "agent", "claude");
+                claim("session", "s1", "status", "active");
+                claim("session", "s1", "streamingThought", "Analyzing the code...");
+            });
+            hold("ui", () => { claim("ui", "selectedSession", "s1"); });
+        "#,
+        )
+        .unwrap();
+    let _ = engine.step_json();
+
+    let facts_json = engine.current_facts_json();
+    assert!(
+        facts_json.contains("Analyzing the code..."),
+        "streaming thought should show: {facts_json}"
+    );
+}
+
+#[test]
+fn test_puddy_active_tools_indicator() {
+    let mut engine = engine_with_full_puddy();
+
+    engine
+        .eval_js(
+            r#"
+            hold("sessions", () => {
+                claim("session", "s1", "agent", "claude");
+                claim("session", "s1", "status", "active");
+                claim("session", "s1", "hasActiveTools", "true");
+            });
+            hold("ui", () => { claim("ui", "selectedSession", "s1"); });
+        "#,
+        )
+        .unwrap();
+    let _ = engine.step_json();
+
+    let facts_json = engine.current_facts_json();
+    assert!(
+        facts_json.contains("Tools running..."),
+        "active tools indicator should show: {facts_json}"
     );
 }
 

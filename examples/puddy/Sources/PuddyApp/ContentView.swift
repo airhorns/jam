@@ -28,7 +28,7 @@ struct ContentView: View {
     }
 
     private func loadProgram() {
-        // Read and concatenate all puddy TypeScript files
+        // Load puddy TypeScript files as ES modules
         let tsDir = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -36,27 +36,23 @@ struct ContentView: View {
             .appendingPathComponent("ts")
 
         do {
-            let files = [
+            // Files listed with entry point last
+            let filePaths = [
                 "models/events.ts",
                 "models/session.ts",
                 "networking/client.ts",
                 "networking/session-manager.ts",
-                "components/ConversationItem.tsx",
-                "components/SessionList.tsx",
-                "components/SessionDetail.tsx",
-                "components/ConnectionStatus.tsx",
                 "puddy.tsx",
             ]
 
-            var combined = ""
-            for file in files {
+            var files: [(path: String, source: String)] = []
+            for file in filePaths {
                 let path = tsDir.appendingPathComponent(file)
                 let source = try String(contentsOf: path, encoding: .utf8)
-                combined += source + "\n"
+                files.append((path: file, source: source))
             }
 
-            // Use .tsx extension so JSX transpilation is enabled
-            try engine.loadProgram(name: "puddy.tsx", source: combined)
+            try engine.loadProgramFiles(name: "puddy", files: files)
             engine.step()
             isLoaded = true
 

@@ -1,5 +1,5 @@
-import { h } from "../jam";
-import { HStack, Text, type Color } from "../components";
+import { h } from "@jam/types";
+import { HStack, Text, type Color } from "@jam/types";
 import type { ConversationItem, ConversationSender } from "../models/session";
 
 function senderColor(sender: ConversationSender): Color {

@@ -1,4 +1,3 @@
-import CJamBridge
 
 public class JamEngine: JamEngineRefMut {
     var isOwned: Bool = true
@@ -28,6 +27,14 @@ extension JamEngineRefMut {
         return ts_source.toRustStr({ ts_sourceAsRustStr in
             return name.toRustStr({ nameAsRustStr in
             RustString(ptr: __swift_bridge__$JamEngine$load_program(ptr, nameAsRustStr, ts_sourceAsRustStr))
+        })
+        })
+    }
+
+    public func load_program_files<GenericToRustStr: ToRustStr>(_ name: GenericToRustStr, _ files_json: GenericToRustStr) -> RustString {
+        return files_json.toRustStr({ files_jsonAsRustStr in
+            return name.toRustStr({ nameAsRustStr in
+            RustString(ptr: __swift_bridge__$JamEngine$load_program_files(ptr, nameAsRustStr, files_jsonAsRustStr))
         })
         })
     }

@@ -43,16 +43,20 @@ let __registrationDepth = 0;
  * The current entity identity, like Folk's `$this`.
  * Scoped by child() and render(). Defaults to "root".
  * Used to derive entity IDs for claims and JSX elements.
+ * Exported as a live binding — importers always see the current value.
  */
 const __thisStack: string[] = ["root"];
+let $this: string = "root";
 
-Object.defineProperty(globalThis, "$this", {
-  get() {
-    return __thisStack[__thisStack.length - 1];
-  },
-});
+function __pushThis(id: string) {
+  __thisStack.push(id);
+  $this = __thisStack[__thisStack.length - 1];
+}
 
-declare var $this: string;
+function __popThis() {
+  __thisStack.pop();
+  $this = __thisStack[__thisStack.length - 1];
+}
 
 // --- child(): scoped nesting ---
 
@@ -75,11 +79,11 @@ function child(name: string, fn: () => void): void {
   __childOrder.set(parent, order + 1);
   const sortKey = String(order).padStart(5, "0") + "#" + name;
   claim(parent, "child", sortKey, childId);
-  __thisStack.push(childId);
+  __pushThis(childId);
   try {
     fn();
   } finally {
-    __thisStack.pop();
+    __popThis();
   }
 }
 
@@ -126,6 +130,38 @@ const __holdOps: HoldOp[] = [];
 const __holdAutoKeyCounters: Map<string, number> = new Map();
 let __inHold = false;
 let __holdCollector: any[][] | null = null;
+
+// --- assert/retract: raw fact operations (no lifecycle management) ---
+
+const __pendingAsserts: any[][] = [];
+const __pendingRetracts: any[][] = [];
+
+/**
+ * Assert a raw fact into the database. Unlike claim(), this fact persists
+ * until explicitly retract()ed — it has no automatic lifecycle.
+ *
+ * Use for imperative state management where you control the lifecycle yourself
+ * (e.g., ingesting data from an external source).
+ *
+ * Can be called from anywhere: top-level, hold(), when(), callbacks, async.
+ *
+ * @example
+ * assert("session", "s1", "status", "active");
+ */
+function assert(...terms: any[]): void {
+  __pendingAsserts.push(terms);
+}
+
+/**
+ * Retract a previously assert()ed fact from the database.
+ * The terms must exactly match a previously asserted fact.
+ *
+ * @example
+ * retract("session", "s1", "status", "active");
+ */
+function retract(...terms: any[]): void {
+  __pendingRetracts.push(terms);
+}
 
 /**
  * Persistent mutable state, like Folk's Hold!.
@@ -300,7 +336,7 @@ function when(...args: any[]): WhenMarker {
 // Wraps the body to push parentId onto $this, and auto-renders JSX returns.
 function __registerWhen(marker: WhenMarker, parentId: string): void {
   const wrappedBody = (bindings: any, isInsertion?: boolean) => {
-    __thisStack.push(parentId);
+    __pushThis(parentId);
     try {
       const result = marker.body(bindings);
       if (result && result.__jamElement) {
@@ -312,7 +348,7 @@ function __registerWhen(marker: WhenMarker, parentId: string): void {
         render(result, parentId, isInsertion);
       }
     } finally {
-      __thisStack.pop();
+      __popThis();
     }
   };
 
@@ -509,7 +545,7 @@ function render(element: any, parentId?: string, isInsertion?: boolean): void {
 
   // Process children — push entityId to $this stack so nested elements
   // and when() markers get the right parent context
-  __thisStack.push(entityId);
+  __pushThis(entityId);
   __childCounters.set(entityId, 0);
   __childOrder.set(entityId, 0);
   try {
@@ -521,7 +557,7 @@ function render(element: any, parentId?: string, isInsertion?: boolean): void {
       }
     }
   } finally {
-    __thisStack.pop();
+    __popThis();
   }
 }
 
@@ -567,6 +603,13 @@ function __matchPattern(
   // Read and clear pending hold ops
   getHoldOps(): HoldOp[] {
     return __holdOps.splice(0);
+  },
+  // Read and clear pending assert/retract ops
+  getAsserts(): any[][] {
+    return __pendingAsserts.splice(0);
+  },
+  getRetracts(): any[][] {
+    return __pendingRetracts.splice(0);
   },
   // Fire a callback by its deterministic ID, optionally passing data
   fireCallback(callbackId: string, data?: any): boolean {
@@ -619,8 +662,14 @@ function __matchPattern(
   },
 };
 
-// Re-export to globalThis so user scripts can use them without imports
-// ($this is already set via Object.defineProperty above)
+// --- ES module exports ---
+// User scripts import these: import { $, when, claim } from "@jam/types"
+export { $, _, or, when, claim, wish, child, hold, assert, retract, h, render, Fragment, $this };
+
+// Also set on globalThis so the runtime's own code (callbacks, etc.) can access them.
 Object.assign(globalThis, {
-  $, _, or, when, claim, wish, child, hold, h, render, Fragment,
+  $, _, or, when, claim, wish, child, hold, assert, retract, h, render, Fragment,
+});
+Object.defineProperty(globalThis, "$this", {
+  get() { return $this; },
 });

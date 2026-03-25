@@ -201,9 +201,14 @@ export declare function when<
   body: (bindings: MergeBindings3<P1, P2, P3>) => void,
 ): Rule;
 
-// claim() and wish() — assert facts
+// claim() and wish() — assert facts (lifecycle-managed)
 export declare function claim(...terms: Term[]): void;
 export declare function wish(...terms: Term[]): void;
+
+// assert() / retract() — raw fact operations (no lifecycle management)
+// Facts persist until explicitly retracted. Can be called from anywhere.
+export declare function assert(...terms: Term[]): void;
+export declare function retract(...terms: Term[]): void;
 
 // hold() — persistent mutable state (like Folk's Hold!)
 // Creates a scope where claim() calls accumulate facts.

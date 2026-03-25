@@ -10,10 +10,15 @@
 
       # Get rust toolchain from rust-toolchain.toml
       rustToolchain = rustPkgs.rust-bin.fromRustupToolchainFile ../../rust-toolchain.toml;
+
+      # Use GCC 13 stdenv on Linux — GCC 15 breaks mimalloc-rust-sys (removed ATOMIC_VAR_INIT).
+      # On macOS the default stdenv uses clang, which doesn't have this issue.
+      mkShell = if pkgs.stdenv.isLinux
+        then pkgs.mkShell.override { stdenv = pkgs.gcc13Stdenv; }
+        else pkgs.mkShell;
     in
     {
-      # Use GCC 13 stdenv — GCC 15 breaks mimalloc-rust-sys (removed ATOMIC_VAR_INIT)
-      devShells.default = (pkgs.mkShell.override { stdenv = pkgs.gcc13Stdenv; }) {
+      devShells.default = mkShell {
         name = "jam-shell";
         packages = [
           rustToolchain

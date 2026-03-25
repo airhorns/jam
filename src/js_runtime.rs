@@ -1,11 +1,130 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use rquickjs::{AsyncContext, AsyncRuntime, Function, Object, Value};
+use rquickjs::loader::{Loader, Resolver};
+use rquickjs::{AsyncContext, AsyncRuntime, Function, Module, Object, Value};
 
 use crate::pattern::{Pattern, PatternTerm};
 use crate::rule::{BodyFn, HoldOp, PatternExpr, Program, RuleSpec};
 use crate::term::{Statement, Term};
 use crate::transpile;
+
+/// The module name used for the Jam runtime module.
+/// User scripts import from this: `import { $, when, claim } from "@jam/types"`
+const JAM_MODULE_NAME: &str = "@jam/types";
+
+// ============================================================================
+// ModuleRegistry — in-memory ES module resolver + loader
+// ============================================================================
+
+/// In-memory ES module store. Implements both `Resolver` and `Loader` for rquickjs.
+/// Modules are registered by path and resolved using standard relative path rules.
+/// Uses interior mutability so the same registry can serve as both resolver and loader.
+#[derive(Clone)]
+struct ModuleRegistry {
+    /// Map from resolved module path to transpiled JS source.
+    modules: Arc<Mutex<HashMap<String, String>>>,
+}
+
+impl ModuleRegistry {
+    fn new() -> Self {
+        Self {
+            modules: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    fn register(&self, path: &str, source: String) {
+        self.modules.lock().unwrap().insert(path.to_string(), source);
+    }
+
+    fn has(&self, path: &str) -> bool {
+        self.modules.lock().unwrap().contains_key(path)
+    }
+
+    /// Resolve a module name relative to a base path.
+    fn resolve_path(base: &str, name: &str) -> String {
+        // Package imports (e.g., @jam/types) — return as-is
+        if !name.starts_with('.') {
+            return name.to_string();
+        }
+
+        // Relative imports: resolve relative to the base module's directory
+        let base_dir = if let Some(idx) = base.rfind('/') {
+            &base[..idx]
+        } else {
+            ""
+        };
+
+        let mut parts: Vec<&str> = if base_dir.is_empty() {
+            vec![]
+        } else {
+            base_dir.split('/').collect()
+        };
+
+        for segment in name.split('/') {
+            match segment {
+                "." | "" => {}
+                ".." => { parts.pop(); }
+                s => parts.push(s),
+            }
+        }
+
+        parts.join("/")
+    }
+}
+
+impl Resolver for ModuleRegistry {
+    fn resolve<'js>(
+        &mut self,
+        _ctx: &rquickjs::Ctx<'js>,
+        base: &str,
+        name: &str,
+    ) -> rquickjs::Result<String> {
+        let resolved = Self::resolve_path(base, name);
+        let modules = self.modules.lock().unwrap();
+
+        // Check exact match first
+        if modules.contains_key(&resolved) {
+            return Ok(resolved);
+        }
+
+        // Try common extensions
+        for ext in &["js", "ts", "tsx"] {
+            let with_ext = format!("{resolved}.{ext}");
+            if modules.contains_key(&with_ext) {
+                return Ok(with_ext);
+            }
+        }
+
+        // Try index files
+        for ext in &["js", "ts", "tsx"] {
+            let index = format!("{resolved}/index.{ext}");
+            if modules.contains_key(&index) {
+                return Ok(index);
+            }
+        }
+
+        Err(rquickjs::Error::new_resolving_message(
+            base,
+            name,
+            format!("module not found: '{name}' (resolved to '{resolved}')"),
+        ))
+    }
+}
+
+impl Loader for ModuleRegistry {
+    fn load<'js>(
+        &mut self,
+        ctx: &rquickjs::Ctx<'js>,
+        name: &str,
+    ) -> rquickjs::Result<Module<'js, rquickjs::module::Declared>> {
+        let modules = self.modules.lock().unwrap();
+        let source = modules.get(name).ok_or_else(|| {
+            rquickjs::Error::new_loading_message(name, "module source not found in registry")
+        })?;
+        Module::declare(ctx.clone(), name, source.as_str())
+    }
+}
 
 /// Initialize LLRT globals (console, fetch, etc.) on a QuickJS context.
 /// Requires BasePrimordials initialization first (caches JS built-in constructors).
@@ -22,12 +141,12 @@ fn init_llrt_globals(ctx: &rquickjs::Ctx<'_>) -> rquickjs::Result<()> {
     Ok(())
 }
 
-/// The Jam runtime JavaScript source, transpiled from TypeScript at first use.
-/// Includes both the core runtime and the SwiftUI component library.
-fn get_runtime_js() -> &'static str {
+/// The Jam runtime JavaScript source as an ES module (@jam/types).
+/// Imports are stripped (files concatenated), but exports are preserved.
+fn get_runtime_js_module() -> &'static str {
     use std::sync::OnceLock;
-    static RUNTIME_JS: OnceLock<String> = OnceLock::new();
-    RUNTIME_JS.get_or_init(|| {
+    static RUNTIME_MODULE_JS: OnceLock<String> = OnceLock::new();
+    RUNTIME_MODULE_JS.get_or_init(|| {
         let runtime_ts = include_str!("../ts/runtime.ts");
         let components_ts = include_str!("../ts/components.ts");
 
@@ -36,8 +155,9 @@ fn get_runtime_js() -> &'static str {
         let components_js = transpile::transpile_ts_to_js(components_ts, "components.ts")
             .expect("Failed to transpile jam components");
 
-        let runtime_js = transpile::strip_imports(&runtime_js);
-        let components_js = transpile::strip_imports(&components_js);
+        // Only strip imports, keep exports for the module interface
+        let runtime_js = transpile::strip_only_imports(&runtime_js);
+        let components_js = transpile::strip_only_imports(&components_js);
 
         format!("{runtime_js}\n{components_js}")
     })
@@ -49,6 +169,8 @@ pub(crate) struct JsContext {
     runtime: AsyncRuntime,
     context: AsyncContext,
     tokio_rt: tokio::runtime::Runtime,
+    /// Module registry for ES module resolution and loading.
+    registry: ModuleRegistry,
 }
 
 // Safety: QuickJS is single-threaded. We protect access with a Mutex
@@ -65,49 +187,97 @@ impl JsContext {
 
         let runtime = tokio_rt
             .block_on(async { AsyncRuntime::new().expect("Failed to create async runtime") });
+
+        // Set up the module registry for user file resolution.
+        // @jam/types is pre-declared as a real module (not a shim).
+        let registry = ModuleRegistry::new();
+        tokio_rt.block_on(async { runtime.set_loader(registry.clone(), registry.clone()).await });
+
         let context = tokio_rt
             .block_on(async { AsyncContext::full(&runtime).await })
             .expect("Failed to create async context");
 
         // Spawn drive() as a background tokio task.
-        // This continuously drives spawned futures (fetch, timers, etc.)
-        // without blocking. When I/O completes, drive() wakes up, executes
-        // the JS continuation, then goes back to sleep.
         tokio_rt.spawn(runtime.drive());
 
-        // Initialize LLRT globals and Jam runtime
-        let runtime_js = get_runtime_js();
+        // Initialize LLRT globals
         tokio_rt.block_on(context.with(|ctx| {
             init_llrt_globals(&ctx).expect("Failed to init LLRT globals");
-            ctx.eval::<(), _>(runtime_js)
-                .expect("Failed to eval Jam runtime");
         }));
 
-        JsContext {
+        let js_ctx = JsContext {
             runtime,
             context,
             tokio_rt,
-        }
+            registry,
+        };
+
+        // Declare and evaluate the Jam runtime as the @jam/types ES module.
+        // This is the REAL module (not a shim) — it has proper exports AND
+        // sets globalThis as a side effect for eval_js compatibility.
+        let runtime_module_js = get_runtime_js_module();
+        // Register in the registry so the resolver can find it for import resolution
+        js_ctx.registry.register(JAM_MODULE_NAME, runtime_module_js.to_string());
+        js_ctx.declare_module(JAM_MODULE_NAME, runtime_module_js)
+            .expect("Failed to declare @jam/types module");
+        js_ctx.eval_module(JAM_MODULE_NAME)
+            .expect("Failed to eval @jam/types module");
+
+        js_ctx
     }
 
     /// Eval additional JS code in the context (e.g., a new program).
     pub(crate) fn eval(&self, js: &str) -> Result<(), String> {
         self.tokio_rt.block_on(self.context.with(|ctx| {
             ctx.eval::<(), _>(js).map_err(|e| {
-                // Try to get the actual exception message
-                let catch = ctx.catch();
-                let detail = if let Some(exc) = catch.as_exception() {
-                    let msg = exc.message().unwrap_or_default();
-                    let stack = exc.stack().unwrap_or_default();
-                    format!("{msg}\n{stack}")
-                } else if let Some(s) = catch.as_string() {
-                    s.to_string().unwrap_or_default()
-                } else {
-                    format!("{e}")
-                };
-                format!("Eval error: {detail}")
+                Self::format_js_error(&ctx, e, "Eval error")
             })
         }))
+    }
+
+    /// Declare a module (parse and register, but don't eval yet).
+    pub(crate) fn declare_module(&self, name: &str, js: &str) -> Result<(), String> {
+        self.tokio_rt.block_on(self.context.with(|ctx| {
+            Module::declare(ctx.clone(), name, js)
+                .map_err(|e| Self::format_js_error(&ctx, e, "Module declare error"))?;
+            Ok(())
+        }))
+    }
+
+    /// Evaluate a previously declared module by name.
+    /// Uses Module::evaluate which creates a new wrapper module that imports
+    /// the target, triggering its evaluation and all its dependencies.
+    pub(crate) fn eval_module(&self, name: &str) -> Result<(), String> {
+        self.tokio_rt.block_on(self.context.with(|ctx| {
+            // Create a tiny wrapper module that imports the target.
+            // This triggers evaluation of the target and all its deps.
+            // We use Module::declare + eval (not Module::evaluate) to avoid
+            // the declare step calling the loader for already-declared modules.
+            let wrapper_name = format!("__entry_{name}");
+            let wrapper_js = format!("export * from '{name}';");
+            let module = Module::declare(ctx.clone(), wrapper_name, wrapper_js)
+                .map_err(|e| Self::format_js_error(&ctx, e, "Module entry declare error"))?;
+            let (_module, _promise) = module.eval()
+                .map_err(|e| Self::format_js_error(&ctx, e, "Module entry eval error"))?;
+            // Drive pending jobs to complete the module evaluation
+            while ctx.execute_pending_job() {}
+            Ok(())
+        }))
+    }
+
+    /// Extract a detailed error message from a QuickJS exception.
+    fn format_js_error(ctx: &rquickjs::Ctx<'_>, e: rquickjs::Error, prefix: &str) -> String {
+        let catch = ctx.catch();
+        let detail = if let Some(exc) = catch.as_exception() {
+            let msg = exc.message().unwrap_or_default();
+            let stack = exc.stack().unwrap_or_default();
+            format!("{msg}\n{stack}")
+        } else if let Some(s) = catch.as_string() {
+            s.to_string().unwrap_or_default()
+        } else {
+            format!("{e}")
+        };
+        format!("{prefix}: {detail}")
     }
 
     /// Execute all currently-ready JS jobs (microtasks, resolved promise callbacks).
@@ -141,10 +311,12 @@ impl JsContext {
     }
 }
 
-/// Result of firing a callback: hold ops + claims produced.
+/// Result of firing a callback: hold ops, claims, and raw assert/retract ops.
 pub struct CallbackResult {
     pub hold_ops: Vec<HoldOp>,
     pub claims: Vec<Statement>,
+    pub asserts: Vec<Statement>,
+    pub retracts: Vec<Statement>,
 }
 
 /// A JavaScript runtime for loading Jam programs written in TypeScript.
@@ -167,6 +339,8 @@ impl JsRuntime {
 
     /// Load a TypeScript program and extract its rules and claims.
     /// Multiple programs can be loaded — they share the same QuickJS context.
+    /// User code can use `import { ... } from "@jam/types"` for explicit imports,
+    /// or just use the globals (claim, when, etc.) which are always available.
     pub fn load_program(&mut self, name: &str, ts_source: &str) -> Result<Program, String> {
         let filename = if name.contains('.') {
             name.to_string()
@@ -174,7 +348,14 @@ impl JsRuntime {
             format!("{name}.ts")
         };
         let js = transpile::transpile_ts_to_js(ts_source, &filename)?;
-        let js = transpile::strip_imports(&js);
+
+        // Check if this code imports from @jam/types — if so, evaluate as an ES module.
+        // Relative imports (./jam, ../components, ./models/events) are from concatenated
+        // files and get stripped. Only `@jam/types` imports trigger real module mode.
+        let has_module_imports = js.lines().any(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("import ") && trimmed.contains(JAM_MODULE_NAME)
+        });
 
         let guard = self.shared.lock().unwrap();
 
@@ -190,8 +371,16 @@ impl JsRuntime {
             ctx.eval::<(), _>("__jam.topLevelClaims.length = 0;").ok();
         });
 
-        // Eval the user's program
-        guard.eval(&js)?;
+        if has_module_imports {
+            // ES module mode: declare and eval as a module
+            let js = transpile::strip_relative_imports(&js);
+            guard.declare_module(name, &js)?;
+            guard.eval_module(name)?;
+        } else {
+            // Script mode: strip all imports and exports, use globalThis
+            let js = transpile::strip_imports(&js);
+            guard.eval(&js)?;
+        }
 
         // Wait for top-level async work (fetch, etc.) to settle.
         // drive() handles I/O in the background; settle() drains the results.
@@ -239,6 +428,101 @@ impl JsRuntime {
         })
     }
 
+    /// Load a multi-file TypeScript program as ES modules.
+    /// Each file is transpiled and registered in the module registry.
+    /// The entry point is evaluated as an ES module; its imports are resolved
+    /// against the other registered files via the module registry.
+    ///
+    /// `files` is a slice of (path, source) pairs. The last file is the entry point.
+    pub fn load_program_files(
+        &mut self,
+        name: &str,
+        files: &[(&str, &str)],
+    ) -> Result<Program, String> {
+        if files.is_empty() {
+            return Err("No files provided".to_string());
+        }
+
+        let guard = self.shared.lock().unwrap();
+
+        // Transpile each file and pre-declare all modules.
+        // This avoids the need for a runtime module loader — all modules are
+        // already in QuickJS's module cache when the entry point is evaluated.
+        let mut transpiled: Vec<(String, String)> = Vec::new();
+        for &(path, source) in files {
+            let js = transpile::transpile_ts_to_js(source, path)?;
+            transpiled.push((path.to_string(), js));
+        }
+
+        // Register all files in the module registry (for the resolver) and
+        // declare them as modules in QuickJS (for the loader to find).
+        for (path, js) in &transpiled {
+            // Register in our resolver so it can resolve relative imports
+            guard.registry.register(path, js.clone());
+        }
+
+        // Declare all non-entry modules first (so they're available for import).
+        for (path, js) in &transpiled[..transpiled.len() - 1] {
+            guard.declare_module(path, js)?;
+        }
+
+        // Remember how many rules exist before this program
+        let rules_before = guard.with(|ctx| {
+            let jam: Object = ctx.globals().get("__jam").unwrap();
+            let rules: rquickjs::Array = jam.get("rules").unwrap();
+            rules.len()
+        });
+
+        // Clear top-level claims
+        guard.with(|ctx| {
+            ctx.eval::<(), _>("__jam.topLevelClaims.length = 0;").ok();
+        });
+
+        // Declare and evaluate the entry point module.
+        // Its imports resolve to the pre-declared modules above.
+        let (entry_path, entry_js) = transpiled.last().unwrap();
+        guard.declare_module(entry_path, entry_js)?;
+        guard.eval_module(entry_path)?;
+
+        // Wait for async work to settle
+        guard.settle(std::time::Duration::from_secs(10));
+
+        // Finalize when() markers
+        guard.with(|ctx| {
+            let jam: Object = ctx.globals().get("__jam").unwrap();
+            let finalize: Function = jam.get("finalize").unwrap();
+            finalize.call::<_, ()>(()).ok();
+        });
+
+        // Extract claims and rules
+        let (claims, rule_data) = guard.with(|ctx| {
+            let globals = ctx.globals();
+            let jam: Object = globals.get("__jam").map_err(|e| format!("{e}"))?;
+            let claims_val: Value = jam.get("topLevelClaims").map_err(|e| format!("{e}"))?;
+            let claims = js_array_to_statements(&claims_val)?;
+            let rules_val: Value = jam.get("rules").map_err(|e| format!("{e}"))?;
+            let rule_data = extract_rule_patterns(&ctx, &rules_val)?;
+            Ok::<_, String>((claims, rule_data))
+        })?;
+
+        let new_rules = &rule_data[rules_before..];
+        let shared = self.shared.clone();
+        let root_path: Vec<RulePathSegment> = vec![];
+        let rules = build_rule_specs(new_rules, &shared, rules_before, &root_path);
+        let hold_ops = guard.with(|ctx| read_hold_ops(&ctx)).unwrap_or_default();
+
+        drop(guard);
+
+        self.rules_before_load = rules_before + new_rules.len();
+
+        Ok(Program {
+            name: name.to_string(),
+            claims,
+            rules,
+            hold_ops,
+        })
+    }
+
     /// Fire a callback by its deterministic ID, optionally passing data.
     /// Returns hold operations AND claims produced by the callback.
     pub fn fire_callback(
@@ -257,17 +541,30 @@ impl JsRuntime {
             let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
             let fire: Function = jam.get("fireCallback").map_err(|e| format!("{e}"))?;
 
-            let result: bool = match data {
+            let call_result: Result<bool, rquickjs::Error> = match data {
                 Some(s) => {
                     let js_str = rquickjs::String::from_str(ctx.clone(), s)
                         .map_err(|e| format!("String creation error: {e}"))?;
                     fire.call((callback_id, js_str))
-                        .map_err(|e| format!("Callback error: {e}"))?
                 }
                 None => fire
-                    .call((callback_id, Value::new_undefined(ctx.clone())))
-                    .map_err(|e| format!("Callback error: {e}"))?,
+                    .call((callback_id, Value::new_undefined(ctx.clone()))),
             };
+
+            let result: bool = call_result.map_err(|e| {
+                // Extract the actual JS exception details
+                let catch = ctx.catch();
+                let detail = if let Some(exc) = catch.as_exception() {
+                    let msg = exc.message().unwrap_or_default();
+                    let stack = exc.stack().unwrap_or_default();
+                    format!("{msg}\n{stack}")
+                } else if let Some(s) = catch.as_string() {
+                    s.to_string().unwrap_or_default()
+                } else {
+                    format!("{e}")
+                };
+                format!("Callback error ({callback_id}): {detail}")
+            })?;
 
             if !result {
                 return Err(format!("No callback registered for {callback_id}"));
@@ -280,15 +577,17 @@ impl JsRuntime {
         // Any async work (fetch, etc.) started by the callback will be
         // driven to completion on the next idle() call (e.g., during step).
 
-        // Read both hold ops and claims
+        // Read hold ops, claims, and raw assert/retract ops
         let hold_ops = guard.with(|ctx| read_hold_ops(&ctx))?;
         let claims = guard.with(|ctx| {
             let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
             let claims_val: Value = jam.get("topLevelClaims").map_err(|e| format!("{e}"))?;
             js_array_to_statements(&claims_val)
         })?;
+        let asserts = guard.with(|ctx| read_pending_facts(&ctx, "getAsserts"))?;
+        let retracts = guard.with(|ctx| read_pending_facts(&ctx, "getRetracts"))?;
 
-        Ok(CallbackResult { hold_ops, claims })
+        Ok(CallbackResult { hold_ops, claims, asserts, retracts })
     }
 
     /// Refresh callbacks by re-deriving them from current facts.
@@ -331,6 +630,15 @@ pub(crate) fn read_hold_ops(ctx: &rquickjs::Ctx<'_>) -> Result<Vec<HoldOp>, Stri
         ops.push(HoldOp { key, stmts });
     }
     Ok(ops)
+}
+
+/// Read and clear pending assert or retract operations from the JS __jam object.
+/// `method_name` should be "getAsserts" or "getRetracts".
+pub(crate) fn read_pending_facts(ctx: &rquickjs::Ctx<'_>, method_name: &str) -> Result<Vec<Statement>, String> {
+    let jam: Object = ctx.globals().get("__jam").map_err(|e| format!("{e}"))?;
+    let getter: Function = jam.get(method_name).map_err(|e| format!("{e}"))?;
+    let val: Value = getter.call(()).map_err(|e| format!("{e}"))?;
+    js_array_to_statements(&val)
 }
 
 /// Extracted rule data (patterns + nested structure, no JS function references).
