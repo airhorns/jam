@@ -1,8 +1,10 @@
 // Primitives — the public API for interacting with the fact database.
 //
-// assert/retract/set: imperative mutations
-// when: reactive query (returns MobX IObservableArray)
-// whenever: reactive rule (when patterns match, run body that produces derived facts)
+// Everything lives in one unified fact map. Fine-grained per-pattern
+// indexes prevent circular reactivity: writing a VDOM fact only bumps
+// version counters for patterns that could match it. App-state patterns
+// like ["todo", $.id, "title", $.title] don't match VDOM facts like
+// ["e1", "tag", "div"], so component re-execution doesn't trigger.
 
 import { action, computed, reaction, runInAction, comparer, IComputedValue } from "mobx";
 import { db, type Term, type Pattern, type Bindings, _ as wildcard } from "./db";
@@ -25,51 +27,49 @@ export const set: (...terms: Term[]) => void = action((...terms: Term[]) => {
 });
 
 /**
- * Reactive query. Returns a MobX computed that re-evaluates when facts change.
- * Access .get() to read the current Bindings[].
- * MobX automatically tracks this as a dependency in autorun/computed/reaction.
+ * Claim a fact — semantic alias for assert.
+ * Convention: use claim() for VDOM / decoration facts,
+ * assert() for app-state facts. Same underlying operation.
+ */
+export const claim = assert;
+
+/** Retract a claim — semantic alias for retract. */
+export const retractClaim = retract;
+
+/**
+ * Reactive query with fine-grained tracking. Returns a per-pattern
+ * computed index with structural equality. Only re-evaluates when a
+ * fact that could match these patterns is written or removed.
  */
 export function when(...patterns: Pattern[]): IComputedValue<Bindings[]> {
-  return computed(() => db.query(...patterns));
+  return db.index(...patterns);
 }
 
 /**
- * Reactive rule: when patterns match, run body. Body can assert derived facts.
- * Returns a disposer function to stop the rule.
- *
- * Unlike `when` (which just queries), `whenever` runs a side-effecting body
- * and manages the lifecycle of facts it produces.
+ * Reactive rule: when patterns match, run body.
+ * Body can assert/claim facts freely.
+ * Returns a disposer.
  */
 export function whenever(
   patterns: Pattern[],
   body: (matches: Bindings[]) => void,
 ): () => void {
-  // Track which facts this rule has asserted so we can retract them on re-run
-  let previousFactKeys: string[] = [];
+  let prevFactKeys: string[] = [];
 
-  // Use reaction to separate the tracking (data) from the effect (body).
-  // The data function reads from db.facts (tracked by MobX).
-  // The effect function runs the body and manages derived facts (untracked writes).
+  const idx = db.index(...patterns);
+
   const disposer = reaction(
-    () => db.query(...patterns),
+    () => idx.get(),
     (matches) => {
       runInAction(() => {
-        // Retract facts from previous run
-        for (const key of previousFactKeys) {
-          const fact = JSON.parse(key) as Term[];
-          db.retract(...fact);
-        }
-        previousFactKeys = [];
+        for (const key of prevFactKeys) db.facts.delete(key);
+        prevFactKeys = [];
 
-        // Collect facts asserted during body execution
         const before = new Set(db.facts.keys());
         body(matches);
 
-        // Track newly asserted facts
         for (const key of db.facts.keys()) {
-          if (!before.has(key)) {
-            previousFactKeys.push(key);
-          }
+          if (!before.has(key)) prevFactKeys.push(key);
         }
       });
     },
@@ -77,13 +77,9 @@ export function whenever(
   );
 
   return () => {
-    // On disposal, retract all facts this rule produced
     runInAction(() => {
-      for (const key of previousFactKeys) {
-        const fact = JSON.parse(key) as Term[];
-        db.retract(...fact);
-      }
-      previousFactKeys = [];
+      for (const key of prevFactKeys) db.facts.delete(key);
+      prevFactKeys = [];
     });
     disposer();
   };

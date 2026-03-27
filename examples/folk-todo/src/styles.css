@@ -57,7 +57,11 @@ body {
   gap: 12px;
 }
 
-/* NOTE: no .done styling here — that's provided by the strikethrough program */
+/* Strikethrough styling — applied when the strikethrough program claims the class */
+.strikethrough .title {
+  text-decoration: line-through;
+  color: #aaa;
+}
 
 .todo-item .toggle {
   width: 28px;

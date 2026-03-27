@@ -1,292 +1,204 @@
-// Renderer — executes the component tree reactively and patches the real DOM.
+// Renderer — two-phase reactive pipeline over the unified fact database.
 //
-// Architecture:
-// 1. MobX autorun re-runs the component function when app-state facts change
-// 2. Component function produces a VNode tree (plain JS objects)
-// 3. Reconciler diffs VNodes against the real DOM and patches
-// 4. VDOM facts are emitted into the DB for introspection (separate observable)
+// Phase 1 (emit): autorun executes the component tree. Components call
+//   when().get() which reads per-pattern indexes — fine-grained tracking.
+//   VDOM writes don't match app-state patterns, so no cycle.
 //
-// The key insight: component functions read app-state facts via when().get(),
-// which establishes MobX tracking. When those facts change, the autorun
-// re-runs the component, producing a new VNode tree, which gets reconciled.
+// Phase 2 (patch): autorun reads db.facts directly and reconciles ALL
+//   claims (component + external) into real DOM.
 
-import { autorun } from "mobx";
-import type { VNode, VChild } from "./jsx";
-
-// --- DOM Reconciler ---
-
-interface ManagedNode {
-  dom: Node;
-  vnode: VChild;
-  children: ManagedNode[];
-  handlers: Map<string, EventListener>;
-}
-
-function createDom(vnode: VChild): ManagedNode | null {
-  if (vnode == null || typeof vnode === "boolean") return null;
-
-  if (typeof vnode === "string" || typeof vnode === "number") {
-    return {
-      dom: document.createTextNode(String(vnode)),
-      vnode,
-      children: [],
-      handlers: new Map(),
-    };
-  }
-
-  if (Array.isArray(vnode)) {
-    // Arrays are handled at the parent level
-    return null;
-  }
-
-  if (!vnode.__vnode) return null;
-
-  if (typeof vnode.tag === "function") {
-    // Component: execute it
-    const result = vnode.tag(vnode.props);
-    return createDom(result);
-  }
-
-  if (vnode.tag === "__fragment") {
-    // Fragments shouldn't reach here — handled by flattenChildren
-    return null;
-  }
-
-  const el = document.createElement(vnode.tag as string);
-  const handlers = new Map<string, EventListener>();
-
-  // Set props
-  for (const [key, value] of Object.entries(vnode.props)) {
-    if (key === "key") continue;
-    if (key.startsWith("on") && typeof value === "function") {
-      const event = key.slice(2).toLowerCase();
-      el.addEventListener(event, value as EventListener);
-      handlers.set(event, value as EventListener);
-    } else if (key === "checked" || key === "value" || key === "disabled") {
-      (el as any)[key] = value;
-    } else if (value != null && value !== false) {
-      el.setAttribute(key, String(value));
-    }
-  }
-
-  // Process children
-  const children: ManagedNode[] = [];
-  const flatChildren = flattenChildren(vnode.children);
-  for (const child of flatChildren) {
-    const managed = createDom(child);
-    if (managed) {
-      el.appendChild(managed.dom);
-      children.push(managed);
-    }
-  }
-
-  return { dom: el, vnode, children, handlers };
-}
-
-/** Flatten VChild arrays, fragments, and components into a flat list of renderable items. */
-function flattenChildren(children: VChild[]): VChild[] {
-  const result: VChild[] = [];
-  for (const child of children) {
-    if (child == null || typeof child === "boolean") continue;
-    if (Array.isArray(child)) {
-      result.push(...flattenChildren(child));
-    } else if (typeof child === "object" && "__vnode" in child && child.tag === "__fragment") {
-      result.push(...flattenChildren(child.children));
-    } else {
-      result.push(child);
-    }
-  }
-  return result;
-}
-
-/** Reconcile: diff old managed tree against new VNode, patch DOM in place. */
-function reconcile(
-  parent: Node,
-  oldManaged: ManagedNode | null,
-  newVnode: VChild,
-  index: number,
-): ManagedNode | null {
-  // New is null/empty
-  if (newVnode == null || typeof newVnode === "boolean") {
-    if (oldManaged) {
-      parent.removeChild(oldManaged.dom);
-    }
-    return null;
-  }
-
-  // Text node
-  if (typeof newVnode === "string" || typeof newVnode === "number") {
-    const text = String(newVnode);
-    if (oldManaged && oldManaged.dom instanceof Text) {
-      if (oldManaged.dom.textContent !== text) {
-        oldManaged.dom.textContent = text;
-      }
-      return { ...oldManaged, vnode: newVnode };
-    }
-    // Replace
-    const node = document.createTextNode(text);
-    if (oldManaged) {
-      parent.replaceChild(node, oldManaged.dom);
-    } else {
-      insertAt(parent, node, index);
-    }
-    return { dom: node, vnode: newVnode, children: [], handlers: new Map() };
-  }
-
-  // Component
-  if (typeof newVnode === "object" && "__vnode" in newVnode && typeof newVnode.tag === "function") {
-    const result = newVnode.tag(newVnode.props);
-    return reconcile(parent, oldManaged, result, index);
-  }
-
-  // Element
-  if (typeof newVnode === "object" && "__vnode" in newVnode && typeof newVnode.tag === "string") {
-    const tag = newVnode.tag;
-
-    // Can we reuse the existing DOM element?
-    if (
-      oldManaged &&
-      oldManaged.dom instanceof HTMLElement &&
-      oldManaged.dom.tagName.toLowerCase() === tag
-    ) {
-      const el = oldManaged.dom;
-      // Update props
-      updateProps(el, oldManaged, newVnode);
-      // Update handlers
-      updateHandlers(el, oldManaged.handlers, newVnode.props);
-      // Reconcile children
-      const newChildren = reconcileChildren(el, oldManaged.children, flattenChildren(newVnode.children));
-      return {
-        dom: el,
-        vnode: newVnode,
-        children: newChildren,
-        handlers: oldManaged.handlers,
-      };
-    }
-
-    // Different tag or no old node — create fresh
-    const managed = createDom(newVnode);
-    if (!managed) return null;
-    if (oldManaged) {
-      parent.replaceChild(managed.dom, oldManaged.dom);
-    } else {
-      insertAt(parent, managed.dom, index);
-    }
-    return managed;
-  }
-
-  return null;
-}
-
-function reconcileChildren(
-  parent: HTMLElement,
-  oldChildren: ManagedNode[],
-  newVnodes: VChild[],
-): ManagedNode[] {
-  const result: ManagedNode[] = [];
-  const maxLen = Math.max(oldChildren.length, newVnodes.length);
-
-  for (let i = 0; i < maxLen; i++) {
-    const oldChild = i < oldChildren.length ? oldChildren[i] : null;
-    const newChild = i < newVnodes.length ? newVnodes[i] : null;
-    const managed = reconcile(parent, oldChild, newChild, i);
-    if (managed) result.push(managed);
-  }
-
-  return result;
-}
-
-function updateProps(el: HTMLElement, oldManaged: ManagedNode, newVnode: VNode) {
-  const oldProps = (oldManaged.vnode as VNode)?.props ?? {};
-  const newProps = newVnode.props;
-
-  // Remove old props not in new
-  for (const key of Object.keys(oldProps)) {
-    if (key === "key" || key.startsWith("on")) continue;
-    if (!(key in newProps)) {
-      if (key === "checked" || key === "value" || key === "disabled") {
-        (el as any)[key] = undefined;
-      } else {
-        el.removeAttribute(key);
-      }
-    }
-  }
-
-  // Set new props
-  for (const [key, value] of Object.entries(newProps)) {
-    if (key === "key" || key.startsWith("on")) continue;
-    if (key === "checked" || key === "value" || key === "disabled") {
-      if ((el as any)[key] !== value) {
-        (el as any)[key] = value;
-      }
-    } else if (value != null && value !== false) {
-      const strVal = String(value);
-      if (el.getAttribute(key) !== strVal) {
-        el.setAttribute(key, strVal);
-      }
-    } else {
-      el.removeAttribute(key);
-    }
-  }
-}
-
-function updateHandlers(
-  el: HTMLElement,
-  oldHandlers: Map<string, EventListener>,
-  newProps: Record<string, unknown>,
-) {
-  // Remove old handlers
-  for (const [event, listener] of oldHandlers) {
-    el.removeEventListener(event, listener);
-  }
-  oldHandlers.clear();
-
-  // Add new handlers
-  for (const [key, value] of Object.entries(newProps)) {
-    if (key.startsWith("on") && typeof value === "function") {
-      const event = key.slice(2).toLowerCase();
-      el.addEventListener(event, value as EventListener);
-      oldHandlers.set(event, value as EventListener);
-    }
-  }
-}
-
-function insertAt(parent: Node, node: Node, index: number) {
-  const ref = parent.childNodes[index];
-  if (ref) {
-    parent.insertBefore(node, ref);
-  } else {
-    parent.appendChild(node);
-  }
-}
-
-// --- Mount ---
+import { autorun, reaction, runInAction } from "mobx";
+import { db, type Term } from "./db";
+import { type VNode, type VChild, emitVdom } from "./jsx";
 
 /**
  * Mount a component tree into a DOM container.
- * Re-renders reactively when app-state facts change.
+ * Returns a disposer to unmount.
  */
 export function mount(rootVnode: VChild, container: HTMLElement): () => void {
-  let currentTree: ManagedNode | null = null;
+  let componentKeys = new Set<string>();
 
-  const disposer = autorun(() => {
-    // This autorun tracks any MobX observables read during component execution.
-    // Component functions call when().get() which reads db.facts — tracked!
-    // When app-state facts change, this re-runs.
+  // --- Phase 1: Emit VDOM claims from component tree ---
+  // Use reaction: the data function executes the component tree (tracking
+  // per-pattern indexes via when()), the effect function writes VDOM claims.
+  // This cleanly separates tracked reads from map writes.
+  const emitDisposer = reaction(
+    () => {
+      // TRACKED: execute component tree. Components call when().get()
+      // which reads per-pattern version counters (fine-grained tracking).
+      let vnode: VChild = rootVnode;
+      if (typeof rootVnode === "object" && rootVnode !== null && "__vnode" in rootVnode) {
+        const rn = rootVnode as VNode;
+        if (typeof rn.tag === "function") {
+          vnode = (rn.tag as Function)(rn.props);
+        }
+      }
+      return vnode;
+    },
+    (vnode) => {
+      // EFFECT: clear old component claims and emit new ones.
+      // This writes to db.facts but doesn't re-trigger the data function
+      // because reaction separates tracking from effects.
+      runInAction(() => {
+        for (const key of componentKeys) db.facts.delete(key);
+        componentKeys = new Set();
 
-    // Execute the component tree to produce a VNode
-    // (Component functions that call when().get() will establish MobX tracking)
-    let vnode: VChild = rootVnode;
-    if (typeof rootVnode === "object" && rootVnode !== null && "__vnode" in rootVnode) {
-      const rn = rootVnode as VNode;
-      if (typeof rn.tag === "function") {
-        vnode = (rn.tag as Function)(rn.props);
+        const before = new Set(db.facts.keys());
+        emitVdom(vnode, "__root", 0);
+
+        for (const key of db.facts.keys()) {
+          if (!before.has(key)) componentKeys.add(key);
+        }
+      });
+    },
+    // Always fire effect when data function re-runs — VNodes are new objects
+    // each time so reference equality would always trigger anyway.
+    { fireImmediately: true, equals: () => false },
+  );
+
+  // --- Phase 2: Patch DOM from all VDOM claims ---
+  const managed = new Map<string, HTMLElement | Text>();
+
+  const patchDisposer = autorun(() => {
+    // Read the full facts map — tracks ALL changes
+    const allFacts = Array.from(db.facts.values());
+
+    const tags = new Map<string, string>();
+    const classes = new Map<string, Set<string>>();
+    const props = new Map<string, Map<string, Term>>();
+    const texts = new Map<string, string>();
+    const handlers = new Map<string, Map<string, string>>();
+    const children = new Map<string, [number, string][]>();
+
+    for (const fact of allFacts) {
+      const entity = String(fact[0]);
+      const attr = fact[1];
+
+      if (attr === "tag") {
+        tags.set(entity, String(fact[2]));
+      } else if (attr === "class") {
+        if (!classes.has(entity)) classes.set(entity, new Set());
+        classes.get(entity)!.add(String(fact[2]));
+      } else if (attr === "prop") {
+        if (!props.has(entity)) props.set(entity, new Map());
+        props.get(entity)!.set(String(fact[2]), fact[3]);
+      } else if (attr === "text") {
+        texts.set(entity, String(fact[2]));
+      } else if (attr === "handler") {
+        if (!handlers.has(entity)) handlers.set(entity, new Map());
+        handlers.get(entity)!.set(String(fact[2]), String(fact[3]));
+      } else if (attr === "child") {
+        if (!children.has(entity)) children.set(entity, []);
+        children.get(entity)!.push([fact[2] as number, String(fact[3])]);
       }
     }
 
-    // Reconcile against the real DOM
-    currentTree = reconcile(container, currentTree, vnode, 0);
+    for (const [, list] of children) list.sort((a, b) => a[0] - b[0]);
+
+    const visited = new Set<string>();
+
+    function reconcile(entityId: string): Node | null {
+      const tag = tags.get(entityId);
+      if (!tag || visited.has(entityId)) return null;
+      visited.add(entityId);
+
+      if (tag === "__text") {
+        const text = texts.get(entityId) ?? "";
+        let node = managed.get(entityId);
+        if (node instanceof Text) {
+          if (node.textContent !== text) node.textContent = text;
+        } else {
+          node = document.createTextNode(text);
+          managed.set(entityId, node);
+        }
+        return node;
+      }
+
+      let el = managed.get(entityId);
+      if (!(el instanceof HTMLElement) || el.tagName.toLowerCase() !== tag) {
+        el = document.createElement(tag);
+        managed.set(entityId, el);
+      }
+
+      // Classes — merged from ALL sources
+      const clsSet = classes.get(entityId);
+      const clsStr = clsSet ? Array.from(clsSet).sort().join(" ") : "";
+      if (el.getAttribute("class") !== clsStr) {
+        if (clsStr) el.setAttribute("class", clsStr);
+        else el.removeAttribute("class");
+      }
+
+      const elProps = props.get(entityId);
+      const activeAttrs = new Set<string>();
+      if (elProps) {
+        for (const [key, value] of elProps) {
+          activeAttrs.add(key);
+          if (key === "checked" || key === "value" || key === "disabled") {
+            if ((el as any)[key] !== value) (el as any)[key] = value;
+          } else {
+            const strVal = String(value);
+            if (el.getAttribute(key) !== strVal) el.setAttribute(key, strVal);
+          }
+        }
+      }
+      for (let i = el.attributes.length - 1; i >= 0; i--) {
+        const name = el.attributes[i].name;
+        if (name === "class") continue;
+        if (!activeAttrs.has(name)) el.removeAttribute(name);
+      }
+
+      const oldHandlers: Map<string, EventListener> = (el as any).__handlers ?? new Map();
+      for (const [event, listener] of oldHandlers) el.removeEventListener(event, listener);
+      const newHandlers = new Map<string, EventListener>();
+      const elHandlers = handlers.get(entityId);
+      if (elHandlers) {
+        for (const [event, refKey] of elHandlers) {
+          const fn = db.getRef(refKey) as EventListener;
+          if (fn) {
+            el.addEventListener(event, fn);
+            newHandlers.set(event, fn);
+          }
+        }
+      }
+      (el as any).__handlers = newHandlers;
+
+      const childList = children.get(entityId) ?? [];
+      const childNodes: Node[] = [];
+      for (const [, childId] of childList) {
+        const node = reconcile(childId);
+        if (node) childNodes.push(node);
+      }
+      for (let i = 0; i < childNodes.length; i++) {
+        if (el.childNodes[i] !== childNodes[i]) {
+          el.insertBefore(childNodes[i], el.childNodes[i] || null);
+        }
+      }
+      while (el.childNodes.length > childNodes.length) {
+        el.removeChild(el.lastChild!);
+      }
+
+      return el;
+    }
+
+    const rootChildren = children.get("__root") ?? [];
+    const rootNodes: Node[] = [];
+    for (const [, childId] of rootChildren) {
+      const node = reconcile(childId);
+      if (node) rootNodes.push(node);
+    }
+    for (let i = 0; i < rootNodes.length; i++) {
+      if (container.childNodes[i] !== rootNodes[i]) {
+        container.insertBefore(rootNodes[i], container.childNodes[i] || null);
+      }
+    }
+    while (container.childNodes.length > rootNodes.length) {
+      container.removeChild(container.lastChild!);
+    }
+
+    for (const id of managed.keys()) {
+      if (!visited.has(id)) managed.delete(id);
+    }
   });
 
-  return disposer;
+  return () => { emitDisposer(); patchDisposer(); };
 }

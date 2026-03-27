@@ -1,10 +1,11 @@
-// FactDB — MobX-backed fact store with pattern matching.
+// FactDB — MobX-backed fact store with fine-grained per-pattern reactivity.
 //
-// All facts (app state + VDOM) live here. Facts are tuples of Terms.
-// MobX observability means any computed/autorun reading query results
-// automatically re-runs when the underlying facts change.
+// Single unified fact space. Per-pattern indexes prevent circular
+// reactivity: when a fact is written, only patterns that could match
+// it are invalidated. VDOM facts don't match app-state patterns, so
+// writing VDOM doesn't trigger component re-execution.
 
-import { observable, action, makeObservable } from "mobx";
+import { observable, action, computed, untracked, makeObservable, comparer, type IComputedValue } from "mobx";
 
 export type Term = string | number | boolean;
 export type Fact = Term[];
@@ -67,14 +68,47 @@ function mergeBindings(a: Bindings, b: Bindings): Bindings | null {
   return merged;
 }
 
+/**
+ * Could a fact possibly match a pattern? Quick check using only the
+ * literal (non-binding, non-wildcard) terms in the pattern. If any
+ * literal at a fixed position doesn't match, the fact can't match.
+ */
+function couldMatch(pattern: Pattern, fact: Fact): boolean {
+  if (pattern.length !== fact.length) return false;
+  for (let i = 0; i < pattern.length; i++) {
+    const p = pattern[i];
+    if (p === _ || isBinding(p)) continue;
+    if (p !== fact[i]) return false;
+  }
+  return true;
+}
+
+/** Serialize a pattern set for use as a cache key. */
+function patternsKey(patterns: Pattern[]): string {
+  return JSON.stringify(patterns.map(p =>
+    p.map(t => {
+      if (t === _) return "__WILD__";
+      if (isBinding(t)) return `__BIND__${t.name}`;
+      return t;
+    })
+  ));
+}
+
 // --- FactDB ---
 
 export class FactDB {
-  /** Observable map: JSON key → Fact. Reading this in a computed/autorun tracks it. */
+  /** All facts — app state, VDOM, decorations. One unified space. */
   readonly facts = observable.map<string, Fact>();
 
   /** Side-channel for non-serializable values (function refs for event handlers). */
   readonly refs = new Map<string, unknown>();
+
+  /**
+   * Per-pattern-set version counters. Each registered pattern set gets
+   * its own observable version. When a fact is written/removed, only
+   * versions for patterns that could match it are bumped.
+   */
+  private patternVersions = new Map<string, { patterns: Pattern[]; version: { get(): number; set(v: number): void } }>();
 
   constructor() {
     makeObservable(this, {
@@ -88,53 +122,80 @@ export class FactDB {
     return JSON.stringify(fact);
   }
 
+  /** Bump version counters for pattern sets that could match this fact. */
+  private invalidatePatterns(fact: Fact): void {
+    for (const entry of this.patternVersions.values()) {
+      for (const pattern of entry.patterns) {
+        if (couldMatch(pattern, fact)) {
+          entry.version.set(entry.version.get() + 1);
+          break; // only need to bump once per pattern set
+        }
+      }
+    }
+  }
+
   assert(...terms: Term[]): void {
     const key = this.factKey(terms);
     if (!this.facts.has(key)) {
       this.facts.set(key, terms);
+      this.invalidatePatterns(terms);
     }
   }
 
   retract(...terms: (Term | Wildcard)[]): void {
-    // If no wildcards, direct removal
     if (!terms.includes(_)) {
       const key = this.factKey(terms as Term[]);
-      this.facts.delete(key);
+      if (this.facts.has(key)) {
+        this.facts.delete(key);
+        this.invalidatePatterns(terms as Term[]);
+      }
       return;
     }
-    // Wildcard retraction: match and remove all matching facts
-    const toRemove: string[] = [];
+    const toRemove: [string, Fact][] = [];
     for (const [key, fact] of this.facts) {
       if (fact.length !== terms.length) continue;
       let matches = true;
       for (let i = 0; i < terms.length; i++) {
         if (terms[i] === _) continue;
-        if (terms[i] !== fact[i]) {
-          matches = false;
-          break;
-        }
+        if (terms[i] !== fact[i]) { matches = false; break; }
       }
-      if (matches) toRemove.push(key);
+      if (matches) toRemove.push([key, fact]);
     }
-    for (const key of toRemove) {
+    for (const [key, fact] of toRemove) {
       this.facts.delete(key);
+      this.invalidatePatterns(fact);
     }
   }
 
-  /**
-   * Set: upsert the last term. Retracts any fact matching [...keyTerms, _],
-   * then asserts [...keyTerms, value].
-   */
   set(...terms: Term[]): void {
     if (terms.length < 2) throw new Error("set() requires at least 2 terms");
-    // Build the retraction pattern: everything except the last term, then wildcard
-    const keyTerms = terms.slice(0, -1);
-    const retractPattern: (Term | Wildcard)[] = [...keyTerms, _];
-    this.retract(...retractPattern);
+    this.retract(...terms.slice(0, -1), _);
     this.assert(...terms);
   }
 
-  /** Query with one or more patterns, returning all matching binding sets. */
+  /**
+   * Create a per-pattern-set computed index. Returns a computed that:
+   * - Tracks only the version counter for these patterns (fine-grained)
+   * - Re-evaluates (scans all facts) only when that counter bumps
+   * - Uses structural comparison so observers only re-run on actual changes
+   */
+  index(...patterns: Pattern[]): IComputedValue<Bindings[]> {
+    const key = patternsKey(patterns);
+    if (!this.patternVersions.has(key)) {
+      this.patternVersions.set(key, { patterns, version: observable.box(0) });
+    }
+    const entry = this.patternVersions.get(key)!;
+
+    return computed(
+      () => {
+        entry.version.get(); // track ONLY this pattern set's version
+        return untracked(() => this.query(...patterns)); // scan facts WITHOUT tracking the map
+      },
+      { equals: comparer.structural },
+    );
+  }
+
+  /** Query all facts matching patterns (non-reactive, point-in-time). */
   query(...patterns: Pattern[]): Bindings[] {
     if (patterns.length === 0) return [];
     if (patterns.length === 1) return this.querySingle(patterns[0]);
@@ -169,18 +230,11 @@ export class FactDB {
     return current;
   }
 
-  /** Store a non-serializable ref (e.g. event handler function). */
-  setRef(key: string, value: unknown): void {
-    this.refs.set(key, value);
-  }
+  // --- Refs ---
 
-  getRef(key: string): unknown {
-    return this.refs.get(key);
-  }
-
-  deleteRef(key: string): void {
-    this.refs.delete(key);
-  }
+  setRef(key: string, value: unknown): void { this.refs.set(key, value); }
+  getRef(key: string): unknown { return this.refs.get(key); }
+  deleteRef(key: string): void { this.refs.delete(key); }
 }
 
 // Global singleton
