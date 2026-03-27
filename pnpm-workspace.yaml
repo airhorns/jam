@@ -1,4 +1,5 @@
 packages:
   - "."
+  - "examples/counter"
   - "examples/folk-todo"
   - "examples/puddy-vite"

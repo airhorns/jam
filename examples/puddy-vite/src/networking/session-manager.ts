@@ -1,8 +1,8 @@
-// SessionManager — orchestrates agent sessions using assert/retract for state.
+// SessionManager — orchestrates agent sessions using assert/retract/set for state.
 // All session state lives in the fact database. Only streaming accumulators
 // (which need incremental appending) live in JS.
 
-import { hold, claim, assert, retract } from "../jam";
+import { assert, retract, set, _ } from "@jam/core";
 import { type AgentEvent } from "../models/events";
 import { isTerminalStatus } from "../models/session";
 import { SandboxAgentClient, SandboxAgentError, type AgentInfo } from "./client";
@@ -18,8 +18,6 @@ export class SessionManager {
   private streamingThought: Map<string, string> = new Map();
   // Track session IDs and their current status for retract-before-assert pattern
   private sessionStatuses: Map<string, string> = new Map();
-  // Track old plan entry counts so we can retract them
-  private planEntryCounts: Map<string, number> = new Map();
 
   isConnected = false;
   connectionError?: string;
@@ -86,12 +84,10 @@ export class SessionManager {
 
     const sessionId = "s-" + Date.now();
 
-    // Assert session facts directly into the database
     assert("session", sessionId, "agent", agent);
     assert("session", sessionId, "status", "starting");
     this.sessionStatuses.set(sessionId, "starting");
 
-    // Async: connect to backend
     this.connectSession(sessionId, agent, initialPrompt);
 
     return sessionId;
@@ -101,7 +97,6 @@ export class SessionManager {
     try {
       await this.client.createSession(sessionId, agent);
 
-      // Open a single long-lived SSE stream for this session
       this.client.startEventStream(
         sessionId,
         (event) => this.handleEvent(sessionId, event),
@@ -123,20 +118,14 @@ export class SessionManager {
   }
 
   sendMessage(sessionId: string, message: string): void {
-    // Add user message
     const msgId = `umsg-${_nextUserMsgId++}`;
     assert("message", sessionId, msgId, "user", "text", message);
-
-    // Show thinking indicator until first event arrives
     assert("session", sessionId, "thinking", "true");
 
-    // POST the prompt — events arrive on the already-open SSE stream
     this.client.sendPrompt(
       sessionId,
       message,
-      () => {
-        // POST completed — nothing to do, events already applied
-      },
+      () => {},
       (err) => {
         console.error("sendMessage error:", err.message ?? err);
         this.clearStreaming(sessionId);
@@ -177,10 +166,8 @@ export class SessionManager {
 
       case "toolCallUpdate": {
         const status = p.data.status ?? "in_progress";
-        // Update tool status
         retract("message", sessionId, p.data.toolCallId, "toolStatus", p.data.status ?? "pending");
         assert("message", sessionId, p.data.toolCallId, "toolStatus", status);
-        // Add result message for completed/failed
         if (status === "completed" || status === "failed") {
           assert("message", sessionId, p.data.toolCallId + "-result", "tool", "toolResult", status);
         }
@@ -188,56 +175,42 @@ export class SessionManager {
       }
 
       case "usageUpdate":
-        // Usage is transient — use hold so it auto-replaces
-        hold(`usage-${sessionId}`, () => {
-          if (p.data.costAmount != null) {
-            claim("session", sessionId, "costAmount", p.data.costAmount);
-            claim("session", sessionId, "costCurrency", p.data.costCurrency ?? "USD");
-          }
-          claim("session", sessionId, "contextSize", p.data.size);
-          claim("session", sessionId, "contextUsed", p.data.used);
-        });
+        if (p.data.costAmount != null) {
+          set("session", sessionId, "costAmount", p.data.costAmount);
+          set("session", sessionId, "costCurrency", p.data.costCurrency ?? "USD");
+        }
+        set("session", sessionId, "contextSize", p.data.size);
+        set("session", sessionId, "contextUsed", p.data.used);
         break;
 
       case "plan": {
         this.ensureActive(sessionId);
-        // Retract old plan entries
-        const oldCount = this.planEntryCounts.get(sessionId) ?? 0;
-        for (let i = 0; i < oldCount; i++) {
-          // We can't retract individual entries easily without knowing their content,
-          // so use hold() for the plan which auto-retracts the previous set.
+        // Retract all old plan entries for this session, then assert new ones
+        retract("plan", sessionId, _, _, _, _);
+        for (let i = 0; i < p.data.entries.length; i++) {
+          const entry = p.data.entries[i];
+          assert("plan", sessionId, `entry-${i}`, entry.content, entry.status, entry.priority);
         }
-        // Use hold for plan entries — they get replaced as a whole each time
-        hold(`plan-${sessionId}`, () => {
-          for (let i = 0; i < p.data.entries.length; i++) {
-            const entry = p.data.entries[i];
-            claim("plan", sessionId, `entry-${i}`, entry.content, entry.status, entry.priority);
-          }
-          claim("plan", sessionId, "count", String(p.data.entries.length));
-        });
-        this.planEntryCounts.set(sessionId, p.data.entries.length);
         break;
       }
 
       case "currentModeUpdate":
-        assert("session", sessionId, "currentMode", p.modeId);
-        // Add mode change message
+        set("session", sessionId, "currentMode", p.modeId);
         const modeId = `mode-${_nextMsgId++}`;
         assert("message", sessionId, modeId, "system", "modeChange", p.modeId);
         break;
 
       case "availableCommandsUpdate":
-        // Use hold for commands — they get replaced as a whole
-        hold(`commands-${sessionId}`, () => {
-          for (const cmd of p.commands) {
-            claim("command", sessionId, cmd.name, cmd.description);
-          }
-        });
+        // Retract old commands, assert new
+        retract("command", sessionId, _, _);
+        for (const cmd of p.commands) {
+          assert("command", sessionId, cmd.name, cmd.description);
+        }
         break;
 
       case "sessionInfoUpdate":
         if (p.title) {
-          assert("session", sessionId, "title", p.title);
+          set("session", sessionId, "title", p.title);
         }
         break;
 
@@ -245,7 +218,6 @@ export class SessionManager {
         this.finalizeStreaming(sessionId);
         this.setStatus(sessionId, "ended");
         assert("session", sessionId, "statusDetail", p.stopReason);
-        // Clear active tools indicator
         retract("session", sessionId, "hasActiveTools", "true");
         break;
 
@@ -255,20 +227,13 @@ export class SessionManager {
   }
 
   async destroySession(id: string): Promise<void> {
-    // Clean up JS-side state
     this.streamingText.delete(id);
     this.streamingThought.delete(id);
     this.sessionStatuses.delete(id);
-    this.planEntryCounts.delete(id);
 
-    // Clean up holds
-    hold(`plan-${id}`, () => {});
-    hold(`commands-${id}`, () => {});
-    hold(`usage-${id}`, () => {});
-
-    // Note: assert()ed facts for this session remain in the DB.
-    // The UI just won't display them if the session is removed from the sidebar.
-    // A full cleanup would require tracking all asserted facts per session.
+    // Clean up fact groups
+    retract("plan", id, _, _, _, _);
+    retract("command", id, _, _);
 
     try {
       await this.client.destroySession(id);
@@ -290,13 +255,11 @@ export class SessionManager {
     if (this.sessionStatuses.get(sessionId) === "starting") {
       this.setStatus(sessionId, "active");
     }
-    // Clear thinking indicator on first event
     retract("session", sessionId, "thinking", "true");
   }
 
   private finalizeStreaming(sessionId: string): void {
     retract("session", sessionId, "thinking", "true");
-    // Finalize streaming text into a message
     const text = this.streamingText.get(sessionId);
     if (text) {
       retract("session", sessionId, "streamingText", text);
@@ -304,7 +267,6 @@ export class SessionManager {
       this.streamingText.delete(sessionId);
     }
 
-    // Finalize streaming thought into a message
     const thought = this.streamingThought.get(sessionId);
     if (thought) {
       retract("session", sessionId, "streamingThought", thought);
@@ -326,16 +288,12 @@ export class SessionManager {
     }
   }
 
-  // --- Connection State (uses hold since it's a single mutable value that replaces itself) ---
-
   private syncConnectionState(): void {
-    hold("connection", () => {
-      claim("connection", "status", this.isConnected ? "connected" : "disconnected");
-      claim("connection", "hostname", this.hostname);
-      if (this.connectionError) {
-        claim("connection", "error", this.connectionError);
-      }
-    });
+    set("connection", "status", this.isConnected ? "connected" : "disconnected");
+    set("connection", "hostname", this.hostname);
+    if (this.connectionError) {
+      set("connection", "error", this.connectionError);
+    }
   }
 
   disconnectAll(): void {}

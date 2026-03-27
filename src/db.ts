@@ -230,6 +230,13 @@ export class FactDB {
     return current;
   }
 
+  /** Clear all facts, pattern versions, and refs. */
+  clear(): void {
+    this.facts.clear();
+    this.patternVersions.clear();
+    this.refs.clear();
+  }
+
   // --- Refs ---
 
   setRef(key: string, value: unknown): void { this.refs.set(key, value); }

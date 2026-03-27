@@ -6,11 +6,9 @@
     "moduleResolution": "bundler",
     "noEmit": true,
     "skipLibCheck": true,
-    "resolveJsonModule": true,
     "jsx": "react",
     "jsxFactory": "h",
     "jsxFragmentFactory": "Fragment"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts", "../../src/jsx-types.d.ts"],
-  "exclude": ["src/testing/record.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../../src/jsx-types.d.ts"]
 }

@@ -7,7 +7,7 @@ import { setupServer, type SetupServerApi } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { SandboxAgentClient } from "../networking/client";
 import { SessionManager } from "../networking/session-manager";
-import { db } from "../jam";
+import { db } from "@jam/core";
 
 // --- Cassette types ---
 

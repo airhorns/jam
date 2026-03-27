@@ -9,7 +9,7 @@ import {
   sseMessageChunk, sseThoughtChunk, sseToolCall, sseToolCallUpdate, sseSessionEnd,
   type Cassette,
 } from "./cassette";
-import { db, $ } from "../jam";
+import { db, $ } from "@jam/core";
 import helloCassetteRaw from "./cassettes/hello.json";
 
 const helloCassette = helloCassetteRaw as unknown as Cassette;
@@ -87,8 +87,8 @@ describe("VCR: simple hello conversation", () => {
     vcr.load(cassette);
 
     await vcr.client.createSession(SID, AGENT);
-    db.assertFact("session", SID, "agent", AGENT);
-    db.assertFact("session", SID, "status", "starting");
+    db.assert("session", SID, "agent", AGENT);
+    db.assert("session", SID, "status", "starting");
 
     const done = new Promise<void>((resolve) => {
       vcr.client.startEventStream(SID, (event) => {
@@ -143,8 +143,8 @@ describe("VCR: recorded hello cassette (real server interaction)", () => {
     vcr.load(helloCassette);
 
     await vcr.client.createSession(SID, AGENT);
-    db.assertFact("session", SID, "agent", AGENT);
-    db.assertFact("session", SID, "status", "starting");
+    db.assert("session", SID, "agent", AGENT);
+    db.assert("session", SID, "status", "starting");
 
     const done = new Promise<void>((resolve) => {
       vcr.client.startEventStream(SID, (event) => {
@@ -207,8 +207,8 @@ describe("VCR: tool use conversation", () => {
     vcr.load(cassette);
 
     await vcr.client.createSession(SID, AGENT);
-    db.assertFact("session", SID, "agent", AGENT);
-    db.assertFact("session", SID, "status", "starting");
+    db.assert("session", SID, "agent", AGENT);
+    db.assert("session", SID, "status", "starting");
 
     const done = new Promise<void>((resolve) => {
       vcr.client.startEventStream(SID, (event) => {

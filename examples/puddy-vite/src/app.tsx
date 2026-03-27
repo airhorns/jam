@@ -1,26 +1,20 @@
 // Puddy — reactive chat app built on Jam's fact database.
-// Port of the original puddy.tsx, using Preact + useWhen() for reactivity.
 
+import { h, Fragment } from "@jam/core/jsx";
+import { $, set, when, assert } from "@jam/core";
 import "./app.css";
-import { $, hold, claim, useWhen, or } from "./jam";
 import { SessionManager } from "./networking/session-manager";
 
 // --- Session manager (singleton) ---
 const sessionManager = new SessionManager();
-// Expose for e2e tests
 if (typeof window !== "undefined") {
   (window as any).sessionManager = sessionManager;
 }
 
 // --- Initial state ---
-hold("connection", () => {
-  claim("connection", "status", "checking");
-  claim("connection", "hostname", sessionManager.hostname);
-});
-
-hold("ui", () => {
-  claim("ui", "selectedSession", "");
-});
+set("connection", "status", "checking");
+set("connection", "hostname", sessionManager.hostname);
+set("ui", "selectedSession", "");
 
 // Check connection on startup
 sessionManager.checkConnection();
@@ -28,14 +22,14 @@ sessionManager.checkConnection();
 // --- Components ---
 
 function ConnectionBar() {
-  const matches = useWhen(
+  const matches = when(
     ["connection", "status", $.status],
     ["connection", "hostname", $.host],
   );
 
   return (
-    <>
-      {matches.value.map(({ status, host }) => {
+    <Fragment>
+      {matches.get().map(({ status, host }) => {
         const dotColor =
           status === "connected"
             ? "bg-green"
@@ -55,19 +49,19 @@ function ConnectionBar() {
           </div>
         );
       })}
-    </>
+    </Fragment>
   );
 }
 
 function SessionList() {
-  const sessions = useWhen(
+  const sessions = when(
     ["session", $.sid, "agent", $.agent],
     ["session", $.sid, "status", $.status],
   );
-  const connection = useWhen(["connection", "status", $.status]);
+  const connection = when(["connection", "status", $.status]);
 
   const isConnected =
-    connection.value.length > 0 && connection.value[0].status === "connected";
+    connection.get().length > 0 && connection.get()[0].status === "connected";
 
   return (
     <div class="sidebar vstack" data-testid="sidebar">
@@ -75,7 +69,7 @@ function SessionList() {
       <div class="divider" />
 
       <div class="vstack gap-4 p-8 scroll-area">
-        {sessions.value.map(({ sid, agent, status }) => {
+        {sessions.get().map(({ sid, agent, status }) => {
           const dotColor =
             status === "starting"
               ? "bg-gray"
@@ -88,11 +82,7 @@ function SessionList() {
             <button
               key={sid as string}
               class="session-row hstack gap-8"
-              onClick={() =>
-                hold("ui", () => {
-                  claim("ui", "selectedSession", sid);
-                })
-              }
+              onClick={() => set("ui", "selectedSession", sid)}
             >
               <span class={`circle ${dotColor}`} />
               <span class="font-body">{`${agent} — ${sid}`}</span>
@@ -110,9 +100,7 @@ function SessionList() {
           onClick={() => {
             try {
               const id = sessionManager.createNewSession();
-              hold("ui", () => {
-                claim("ui", "selectedSession", id);
-              });
+              set("ui", "selectedSession", id);
             } catch (err: any) {
               console.error(
                 "Failed to create session:",
@@ -129,11 +117,11 @@ function SessionList() {
 }
 
 function ModeBadge() {
-  const modes = useWhen(["session", $.sid, "currentMode", $.mode]);
+  const modes = when(["session", $.sid, "currentMode", $.mode]);
 
   return (
-    <>
-      {modes.value.map(({ sid, mode }) => (
+    <Fragment>
+      {modes.get().map(({ sid, mode }) => (
         <div
           key={`mode-${sid}`}
           class="mode-badge hstack gap-8"
@@ -142,12 +130,12 @@ function ModeBadge() {
           <span class="font-caption fg-blue">{`[${mode}]`}</span>
         </div>
       ))}
-    </>
+    </Fragment>
   );
 }
 
 function PlanList() {
-  const plans = useWhen([
+  const plans = when([
     "plan",
     $.sid,
     $.entryId,
@@ -156,11 +144,11 @@ function PlanList() {
     $.planPriority,
   ]);
 
-  if (plans.value.length === 0) return null;
+  if (plans.get().length === 0) return null;
 
   return (
     <div class="plan-section vstack gap-4" data-testid="plan-list">
-      {plans.value.map(
+      {plans.get().map(
         ({ sid, entryId, planContent, planStatus, planPriority }) => {
           const statusIcon =
             planStatus === "completed"
@@ -193,7 +181,7 @@ function PlanList() {
 }
 
 function MessageList() {
-  const messages = useWhen([
+  const messages = when([
     "message",
     $.selectedId,
     $.msgId,
@@ -204,8 +192,7 @@ function MessageList() {
 
   return (
     <div class="message-list vstack gap-4" data-testid="message-list">
-      {messages.value.map(({ msgId, sender, kind, content }) => {
-        // Thought messages
+      {messages.get().map(({ msgId, sender, kind, content }) => {
         if (kind === "thought") {
           return (
             <div key={msgId as string} class="message hstack gap-8">
@@ -217,7 +204,6 @@ function MessageList() {
           );
         }
 
-        // Tool use
         if (kind === "toolUse") {
           return (
             <div key={msgId as string} class="message hstack gap-8">
@@ -227,7 +213,6 @@ function MessageList() {
           );
         }
 
-        // Tool result
         if (kind === "toolResult") {
           const statusColor = content === "completed" ? "fg-green" : "fg-red";
           const statusIcon = content === "completed" ? "+" : "x";
@@ -241,7 +226,6 @@ function MessageList() {
           );
         }
 
-        // Mode change
         if (kind === "modeChange") {
           return (
             <div key={msgId as string} class="message hstack gap-8">
@@ -251,7 +235,6 @@ function MessageList() {
           );
         }
 
-        // Text messages (user + assistant)
         const icon =
           sender === "user" ? ">" : sender === "assistant" ? "<" : "#";
         const color =
@@ -273,34 +256,14 @@ function MessageList() {
 }
 
 function StreamingIndicators() {
-  const thinking = useWhen([
-    "session",
-    $.selectedId,
-    "thinking",
-    $.val,
-  ]);
-  const streamingText = useWhen([
-    "session",
-    $.selectedId,
-    "streamingText",
-    $.streaming,
-  ]);
-  const streamingThought = useWhen([
-    "session",
-    $.selectedId,
-    "streamingThought",
-    $.thought,
-  ]);
-  const activeTools = useWhen([
-    "session",
-    $.selectedId,
-    "hasActiveTools",
-    $.hasTools,
-  ]);
+  const thinking = when(["session", $.selectedId, "thinking", $.val]);
+  const streamingText = when(["session", $.selectedId, "streamingText", $.streaming]);
+  const streamingThought = when(["session", $.selectedId, "streamingThought", $.thought]);
+  const activeTools = when(["session", $.selectedId, "hasActiveTools", $.hasTools]);
 
   return (
-    <>
-      {thinking.value.map(
+    <Fragment>
+      {thinking.get().map(
         ({ val }) =>
           val === "true" && (
             <div class="streaming-indicator hstack gap-8" data-testid="thinking">
@@ -310,7 +273,7 @@ function StreamingIndicators() {
           ),
       )}
 
-      {streamingThought.value.map(
+      {streamingThought.get().map(
         ({ thought }) =>
           thought && (
             <div
@@ -325,7 +288,7 @@ function StreamingIndicators() {
           ),
       )}
 
-      {streamingText.value.map(
+      {streamingText.get().map(
         ({ streaming }) =>
           streaming && (
             <div class="streaming-indicator hstack gap-8" data-testid="streaming-text">
@@ -337,7 +300,7 @@ function StreamingIndicators() {
           ),
       )}
 
-      {activeTools.value.map(
+      {activeTools.get().map(
         ({ hasTools }) =>
           hasTools === "true" && (
             <div class="streaming-indicator hstack gap-8" data-testid="active-tools">
@@ -346,14 +309,14 @@ function StreamingIndicators() {
             </div>
           ),
       )}
-    </>
+    </Fragment>
   );
 }
 
 function SessionDetail() {
-  const selection = useWhen(["ui", "selectedSession", $.selectedId]);
+  const selection = when(["ui", "selectedSession", $.selectedId]);
   const selectedId =
-    selection.value.length > 0 ? (selection.value[0].selectedId as string) : "";
+    selection.get().length > 0 ? (selection.get()[0].selectedId as string) : "";
 
   return (
     <div class="detail vstack" data-testid="detail">
@@ -362,7 +325,6 @@ function SessionDetail() {
 
       <ModeBadge />
 
-      {/* Header */}
       <div class="detail-header hstack gap-8">
         <span class="font-headline" data-testid="detail-title">
           {selectedId ? `Session: ${selectedId}` : "Select a session"}
@@ -371,36 +333,32 @@ function SessionDetail() {
 
       <PlanList />
 
-      {/* Messages */}
       <div class="scroll-area">
         <MessageList />
       </div>
 
       <StreamingIndicators />
 
-      {/* Input bar */}
-      {selectedId && (
-        <>
-          <div class="divider" />
-          <div class="input-bar hstack gap-8">
-            <input
-              type="text"
-              placeholder="Type a message..."
-              data-testid="message-input"
-              onKeyDown={(e: KeyboardEvent) => {
-                if (e.key === "Enter") {
-                  const input = e.target as HTMLInputElement;
-                  const text = input.value.trim();
-                  if (text && sessionManager.hasSession(selectedId)) {
-                    sessionManager.sendMessage(selectedId, text);
-                    input.value = "";
-                  }
+      {selectedId ? [
+        <div class="divider" />,
+        <div class="input-bar hstack gap-8">
+          <input
+            type="text"
+            placeholder="Type a message..."
+            data-testid="message-input"
+            onKeyDown={(e: KeyboardEvent) => {
+              if (e.key === "Enter") {
+                const input = e.target as HTMLInputElement;
+                const text = input.value.trim();
+                if (text && sessionManager.hasSession(selectedId)) {
+                  sessionManager.sendMessage(selectedId, text);
+                  input.value = "";
                 }
-              }}
-            />
-          </div>
-        </>
-      )}
+              }
+            }}
+          />
+        </div>,
+      ] : null}
     </div>
   );
 }

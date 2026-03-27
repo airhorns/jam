@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { SessionManager } from "./session-manager";
-import { db } from "../jam";
+import { db } from "@jam/core";
 
 beforeEach(() => {
   db.clear();
