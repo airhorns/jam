@@ -2,8 +2,8 @@
 // Run the actual whenever logic and verify claims appear in the DB.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { db, $, assert, set, retract, _, whenever, claim, select } from "@jam/core";
-import type { Term, Bindings } from "@jam/core";
+import { h } from "@jam/core/jsx";
+import { db, $, assert, set, retract, _, whenever, claim, select, injectVdom } from "@jam/core";
 
 let disposers: (() => void)[] = [];
 
@@ -55,7 +55,9 @@ function startMessageCounts() {
         counts.set(sid as string, (counts.get(sid as string) ?? 0) + 1);
       }
       for (const [sid, count] of counts) {
-        claim(`session-${sid}`, "prop", "title", `${count} messages`);
+        injectVdom(`session-${sid}`, 1000,
+          h("span", { class: "msg-count-badge" }, String(count)),
+        );
       }
     },
   );
@@ -155,30 +157,66 @@ describe("error-tooltips", () => {
 describe("message-counts", () => {
   beforeEach(() => startMessageCounts());
 
-  it("claims message count as title on session row", () => {
+  it("injects a badge element into the session row", () => {
+    // The session button needs to exist as a VDOM entity
+    db.assert("session-s-1", "tag", "button");
+
     assert("message", "s-1", "m1", "user", "text", "hello");
     assert("message", "s-1", "m2", "assistant", "text", "hi");
 
-    const props = db.query(["session-s-1", "prop", "title", $.val]);
-    expect(props).toHaveLength(1);
-    expect(props[0].val).toBe("2 messages");
+    // Should have a child at index 1000
+    const children = db.query(["session-s-1", "child", 1000, $.child]);
+    expect(children).toHaveLength(1);
+
+    // The badge element should have the count as text
+    const badgeId = children[0].child as string;
+    expect(db.query([badgeId, "class", "msg-count-badge"])).toHaveLength(1);
+
+    // Find the text child of the badge
+    const textChildren = db.query([badgeId, "child", $.idx, $.textEl]);
+    expect(textChildren).toHaveLength(1);
+    const textId = textChildren[0].textEl as string;
+    expect(db.query([textId, "text", "2"])).toHaveLength(1);
   });
 
   it("counts per session independently", () => {
+    db.assert("session-s-1", "tag", "button");
+    db.assert("session-s-2", "tag", "button");
+
     assert("message", "s-1", "m1", "user", "text", "hello");
     assert("message", "s-2", "m2", "user", "text", "test");
     assert("message", "s-2", "m3", "assistant", "text", "response");
 
-    expect(db.query(["session-s-1", "prop", "title", $.val])[0]?.val).toBe("1 messages");
-    expect(db.query(["session-s-2", "prop", "title", $.val])[0]?.val).toBe("2 messages");
+    // s-1 badge
+    const s1Children = db.query(["session-s-1", "child", 1000, $.child]);
+    expect(s1Children).toHaveLength(1);
+
+    // s-2 badge
+    const s2Children = db.query(["session-s-2", "child", 1000, $.child]);
+    expect(s2Children).toHaveLength(1);
   });
 
-  it("updates count when new messages arrive", () => {
-    assert("message", "s-1", "m1", "user", "text", "hello");
-    expect(db.query(["session-s-1", "prop", "title", $.val])[0]?.val).toBe("1 messages");
+  it("updates badge when new messages arrive", () => {
+    db.assert("session-s-1", "tag", "button");
 
+    assert("message", "s-1", "m1", "user", "text", "hello");
+
+    // Find badge text
+    let children = db.query(["session-s-1", "child", 1000, $.child]);
+    let badgeId = children[0].child as string;
+    let textChildren = db.query([badgeId, "child", $.idx, $.textEl]);
+    let textId = textChildren[0].textEl as string;
+    expect(db.query([textId, "text", "1"])).toHaveLength(1);
+
+    // Add another message
     assert("message", "s-1", "m2", "assistant", "text", "hi");
-    expect(db.query(["session-s-1", "prop", "title", $.val])[0]?.val).toBe("2 messages");
+
+    // Badge should update — the whenever retracts old and re-injects
+    children = db.query(["session-s-1", "child", 1000, $.child]);
+    badgeId = children[0].child as string;
+    textChildren = db.query([badgeId, "child", $.idx, $.textEl]);
+    textId = textChildren[0].textEl as string;
+    expect(db.query([textId, "text", "2"])).toHaveLength(1);
   });
 });
 

@@ -153,3 +153,24 @@ export function emitVdom(
     emitVdom(flat[i], elId, i);
   }
 }
+
+/**
+ * Inject VDOM nodes into an existing parent element from outside the
+ * component tree. Use this in whenever() bodies or external programs
+ * to add children to rendered elements.
+ *
+ * @param parentId — entity ID of the parent element (e.g. "session-s-1", or from select())
+ * @param startIndex — child index to start at (use a high number like 1000 to avoid
+ *                      conflicts with component-emitted children)
+ * @param nodes — VChild nodes (JSX elements, strings, etc.)
+ */
+export function injectVdom(
+  parentId: string,
+  startIndex: number,
+  ...nodes: VChild[]
+): void {
+  const flat = flattenChildren(nodes);
+  for (let i = 0; i < flat.length; i++) {
+    emitVdom(flat[i], parentId, startIndex + i);
+  }
+}

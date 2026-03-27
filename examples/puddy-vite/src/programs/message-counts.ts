@@ -1,8 +1,11 @@
-// Message Counts — show message count as tooltip on session rows.
+// Message Counts — show message count badges on session rows.
 //
-// Uses id-based addressing: session buttons have id="session-{sid}".
+// Uses id-based addressing and injectVdom to add a badge element
+// as a child of each session button. Demonstrates external programs
+// injecting new DOM nodes into component-rendered elements.
 
-import { $, claim, whenever } from "@jam/core";
+import { h } from "@jam/core/jsx";
+import { $, claim, whenever, injectVdom } from "@jam/core";
 
 export const dispose = whenever(
   [["message", $.sid, $.msgId, $.sender, $.kind, $.content]],
@@ -12,7 +15,10 @@ export const dispose = whenever(
       counts.set(sid as string, (counts.get(sid as string) ?? 0) + 1);
     }
     for (const [sid, count] of counts) {
-      claim(`session-${sid}`, "prop", "title", `${count} messages`);
+      // Inject a badge element as a child of the session button (at high index)
+      injectVdom(`session-${sid}`, 1000,
+        h("span", { class: "msg-count-badge" }, String(count)),
+      );
     }
   },
 );
