@@ -9,6 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:record": "tsx src/testing/record.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -18,6 +19,7 @@
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@preact/preset-vite": "^2.9.0",
+    "msw": "^2.12.14",
     "typescript": "^5.9.0",
     "vite": "^6.0.0",
     "vitest": "^3.0.0"
