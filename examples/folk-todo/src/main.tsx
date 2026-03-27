@@ -1,5 +1,5 @@
-import { h } from "./lib/jsx";
-import { mount, db } from "./lib";
+import { h } from "@jam/core/jsx";
+import { mount, db } from "@jam/core";
 import { TodoApp } from "./app";
 import "./styles.css";
 

@@ -1,14 +1,6 @@
-/target
-/result
-/result-lib
 .direnv
-
 .claude/settings.local.json
 **/node_modules/
-scratch/
-**/.build
 **/dist
-**/Sources/*/Generated
-package-lock.json
+scratch/
 pnpm-lock.yaml
-

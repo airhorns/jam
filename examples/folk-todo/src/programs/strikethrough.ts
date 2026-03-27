@@ -8,7 +8,7 @@
 // It claims an extra CSS class on done todo elements. The renderer merges
 // this with the component's own classes. TodoItem never sees this claim.
 
-import { $, claim, whenever } from "../lib";
+import { $, claim, whenever } from "@jam/core";
 
 export const dispose = whenever(
   [["todo", $.id, "done", true]],

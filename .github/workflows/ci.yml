@@ -6,38 +6,19 @@ on:
   pull_request:
 
 jobs:
-  fmt:
-    name: Formatting
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-test-env
-      - uses: Swatinem/rust-cache@v2
-      - name: Check Rust formatting
-        run: rustfmt --check --edition=2024 **/*.rs
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-test-env
-      - uses: Swatinem/rust-cache@v2
-      - name: Run clippy
-        # Set CC to the gcc-13 wrapper path from buildInputs to avoid mimalloc GCC 15 breakage.
-        # The cc crate uses CC to find the C compiler.
-        run: |
-          GCC13=$(echo $buildInputs | tr ' ' '\n' | grep gcc | head -1)
-          CC="$GCC13/bin/gcc" cargo clippy -- -D warnings
-
   test:
-    name: Tests
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-test-env
-      - uses: Swatinem/rust-cache@v2
-      - name: Run tests
-        run: |
-          GCC13=$(echo $buildInputs | tr ' ' '\n' | grep gcc | head -1)
-          CC="$GCC13/bin/gcc" cargo test
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm -r typecheck
+      - run: pnpm test
+      - run: cd examples/folk-todo && pnpm test
+      - run: npx playwright install --with-deps chromium
+      - run: cd examples/folk-todo && pnpm test:e2e

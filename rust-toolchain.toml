@@ -1,3 +1,0 @@
-[toolchain]
-channel = "1.92.0"
-components = ["rust-analyzer", "rust-src", "rustfmt", "clippy", "llvm-tools-preview"]

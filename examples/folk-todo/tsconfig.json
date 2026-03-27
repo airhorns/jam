@@ -10,5 +10,5 @@
     "jsxFactory": "h",
     "jsxFragmentFactory": "Fragment"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts", "../../src/jsx-types.d.ts"]
 }

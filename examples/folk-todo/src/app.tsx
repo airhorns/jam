@@ -1,5 +1,5 @@
-import { h } from "./lib/jsx";
-import { $, _, assert, retract, set, when } from "./lib";
+import { h } from "@jam/core/jsx";
+import { $, _, assert, retract, set, when } from "@jam/core";
 
 // --- State mutations ---
 

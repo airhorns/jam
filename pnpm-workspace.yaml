@@ -1,4 +1,4 @@
 packages:
-  - "ts"
-  - "examples/*/ts"
+  - "."
+  - "examples/folk-todo"
   - "examples/puddy-vite"

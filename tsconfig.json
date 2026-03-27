@@ -6,8 +6,9 @@
     "moduleResolution": "bundler",
     "noEmit": true,
     "skipLibCheck": true,
-    "declaration": true
+    "jsx": "react",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment"
   },
-  "include": ["*.d.ts", "tests/**/*.ts"],
-  "exclude": ["runtime.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

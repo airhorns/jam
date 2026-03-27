@@ -5,4 +5,7 @@ export default defineConfig({
     jsxFactory: "h",
     jsxFragment: "Fragment",
   },
+  test: {
+    exclude: ["**/e2e/**", "**/node_modules/**"],
+  },
 });
