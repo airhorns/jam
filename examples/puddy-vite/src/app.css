@@ -106,6 +106,24 @@ body {
   background: #161b22;
 }
 
+/* Session highlights — claimed by programs/session-highlights.ts */
+.session-active {
+  border-left: 3px solid #58a6ff;
+  padding-left: 11px;
+}
+
+.session-failed {
+  border-left: 3px solid #f85149;
+  padding-left: 11px;
+  opacity: 0.7;
+}
+
+.session-ended {
+  border-left: 3px solid #484f58;
+  padding-left: 11px;
+  opacity: 0.6;
+}
+
 .session-row .font-body {
   flex: 1;
   overflow: hidden;
