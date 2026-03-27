@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { autorun } from "mobx";
 import { db } from "../db";
-import { $, _, assert, retract, set, when, whenever } from "../primitives";
+import { $, _, assert, retract, set, when, whenever, transaction } from "../primitives";
 
 beforeEach(() => {
   db.facts.clear();
@@ -154,5 +154,41 @@ describe("whenever", () => {
     disposer();
     // Derived facts should have been retracted
     expect(db.query(["derived", $.val])).toEqual([]);
+  });
+});
+
+describe("transaction", () => {
+  it("batches mutations — observers fire once", () => {
+    assert("plan", "s-1", "entry-0", "old task", "completed", "medium");
+    assert("plan", "s-1", "entry-1", "old task 2", "pending", "low");
+
+    const observed: number[] = [];
+    const idx = when(["plan", "s-1", $.entryId, $.content, $.status, $.priority]);
+    const disposer = autorun(() => {
+      observed.push(idx.get().length);
+    });
+
+    // Without transaction: retract + 3 asserts = 4 reactions
+    // With transaction: 1 reaction seeing final state
+    transaction(() => {
+      retract("plan", "s-1", _, _, _, _);
+      assert("plan", "s-1", "entry-0", "new task A", "in_progress", "high");
+      assert("plan", "s-1", "entry-1", "new task B", "pending", "medium");
+      assert("plan", "s-1", "entry-2", "new task C", "pending", "low");
+    });
+
+    // Should see: [2 (initial autorun), 3 (after transaction)]
+    // NOT: [2, 0, 1, 2, 3] which would happen without batching
+    expect(observed).toEqual([2, 3]);
+
+    disposer();
+  });
+
+  it("returns the value from the function", () => {
+    const result = transaction(() => {
+      assert("x", 1);
+      return "done";
+    });
+    expect(result).toBe("done");
   });
 });

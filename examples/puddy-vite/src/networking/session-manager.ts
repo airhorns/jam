@@ -2,7 +2,7 @@
 // All session state lives in the fact database. Only streaming accumulators
 // (which need incremental appending) live in JS.
 
-import { assert, retract, set, _ } from "@jam/core";
+import { assert, retract, set, _, transaction } from "@jam/core";
 import { type AgentEvent } from "../models/events";
 import { isTerminalStatus } from "../models/session";
 import { SandboxAgentClient, SandboxAgentError, type AgentInfo } from "./client";
@@ -175,22 +175,25 @@ export class SessionManager {
       }
 
       case "usageUpdate":
-        if (p.data.costAmount != null) {
-          set("session", sessionId, "costAmount", p.data.costAmount);
-          set("session", sessionId, "costCurrency", p.data.costCurrency ?? "USD");
-        }
-        set("session", sessionId, "contextSize", p.data.size);
-        set("session", sessionId, "contextUsed", p.data.used);
+        transaction(() => {
+          if (p.data.costAmount != null) {
+            set("session", sessionId, "costAmount", p.data.costAmount);
+            set("session", sessionId, "costCurrency", p.data.costCurrency ?? "USD");
+          }
+          set("session", sessionId, "contextSize", p.data.size);
+          set("session", sessionId, "contextUsed", p.data.used);
+        });
         break;
 
       case "plan": {
         this.ensureActive(sessionId);
-        // Retract all old plan entries for this session, then assert new ones
-        retract("plan", sessionId, _, _, _, _);
-        for (let i = 0; i < p.data.entries.length; i++) {
-          const entry = p.data.entries[i];
-          assert("plan", sessionId, `entry-${i}`, entry.content, entry.status, entry.priority);
-        }
+        transaction(() => {
+          retract("plan", sessionId, _, _, _, _);
+          for (let i = 0; i < p.data.entries.length; i++) {
+            const entry = p.data.entries[i];
+            assert("plan", sessionId, `entry-${i}`, entry.content, entry.status, entry.priority);
+          }
+        });
         break;
       }
 
@@ -201,11 +204,12 @@ export class SessionManager {
         break;
 
       case "availableCommandsUpdate":
-        // Retract old commands, assert new
-        retract("command", sessionId, _, _);
-        for (const cmd of p.commands) {
-          assert("command", sessionId, cmd.name, cmd.description);
-        }
+        transaction(() => {
+          retract("command", sessionId, _, _);
+          for (const cmd of p.commands) {
+            assert("command", sessionId, cmd.name, cmd.description);
+          }
+        });
         break;
 
       case "sessionInfoUpdate":
@@ -231,9 +235,10 @@ export class SessionManager {
     this.streamingThought.delete(id);
     this.sessionStatuses.delete(id);
 
-    // Clean up fact groups
-    retract("plan", id, _, _, _, _);
-    retract("command", id, _, _);
+    transaction(() => {
+      retract("plan", id, _, _, _, _);
+      retract("command", id, _, _);
+    });
 
     try {
       await this.client.destroySession(id);
@@ -289,11 +294,13 @@ export class SessionManager {
   }
 
   private syncConnectionState(): void {
-    set("connection", "status", this.isConnected ? "connected" : "disconnected");
-    set("connection", "hostname", this.hostname);
-    if (this.connectionError) {
-      set("connection", "error", this.connectionError);
-    }
+    transaction(() => {
+      set("connection", "status", this.isConnected ? "connected" : "disconnected");
+      set("connection", "hostname", this.hostname);
+      if (this.connectionError) {
+        set("connection", "error", this.connectionError);
+      }
+    });
   }
 
   disconnectAll(): void {}

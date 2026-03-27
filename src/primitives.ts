@@ -37,6 +37,16 @@ export const claim = assert;
 export const retractClaim = retract;
 
 /**
+ * Batch multiple mutations into a single transaction. Reactions only
+ * fire once, after the transaction completes, seeing the final state.
+ * Use this when you need to retract + assert multiple related facts
+ * atomically (e.g. replacing a set of plan entries).
+ */
+export function transaction<T>(fn: () => T): T {
+  return runInAction(fn);
+}
+
+/**
  * Reactive query with fine-grained tracking. Returns a per-pattern
  * computed index with structural equality. Only re-evaluates when a
  * fact that could match these patterns is written or removed.
