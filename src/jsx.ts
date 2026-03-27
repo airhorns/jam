@@ -1,15 +1,18 @@
 // JSX Factory — converts JSX into VNode objects.
-// The renderer calls emitVdom() to write these as VDOM claims into db.vdom.
+// The renderer calls emitVdom() to write these as VDOM claims.
 //
-// Key propagation: when a component has a key (e.g. <TodoItem key={id}>),
-// its root output element inherits that key as its entity ID. This makes
-// elements addressable — external programs can target "k:{id}" to decorate.
+// Entity IDs are path-based and deterministic:
+//   non-keyed: {parentId}:{childIndex}
+//   keyed:     {parentId}:k:{key}
+//   id prop:   the id value directly (global addressing, opt-in)
+//
+// Component key propagation: <Foo key={k}> passes the parent-scoped
+// keyed ID to its root output element.
 
 import { db, type Term } from "./db";
 
 export type VNode = {
   __vnode: true;
-  id: string;
   tag: string | Function;
   props: Record<string, unknown>;
   children: VChild[];
@@ -17,20 +20,13 @@ export type VNode = {
 
 export type VChild = VNode | string | number | boolean | null | undefined | VChild[];
 
-let _nextId = 0;
-function genId(): string {
-  return `e${_nextId++}`;
-}
-
 export function h(
   tag: string | Function,
   props: Record<string, unknown> | null,
   ...children: VChild[]
 ): VNode {
-  const id = (props?.key != null) ? `k:${props.key}` : genId();
   return {
     __vnode: true,
-    id,
     tag,
     props: props ?? {},
     children: children.flat(10) as VChild[],
@@ -40,7 +36,6 @@ export function h(
 export function Fragment(_props: Record<string, unknown> | null, ...children: VChild[]): VNode {
   return {
     __vnode: true,
-    id: genId(),
     tag: "__fragment",
     props: {},
     children: children.flat(10) as VChild[],
@@ -64,9 +59,25 @@ function flattenChildren(children: VChild[]): VChild[] {
 }
 
 /**
+ * Compute the entity ID for an element.
+ * Priority: id prop > inheritId > keyed path > indexed path
+ * The id prop always wins — it's the opt-in global address.
+ */
+function computeEntityId(
+  parentId: string,
+  childIndex: number,
+  props: Record<string, unknown>,
+  inheritId?: string,
+): string {
+  if (props.id != null) return String(props.id);
+  if (inheritId) return inheritId;
+  if (props.key != null) return `${parentId}:k:${props.key}`;
+  return `${parentId}:${childIndex}`;
+}
+
+/**
  * Emit VDOM claims for a VNode tree into the unified fact database.
- * @param inheritId — if set, the root intrinsic element uses this as its entity ID
- *                     (for component key propagation)
+ * @param inheritId — if set, use this as the entity ID (for component key/id propagation)
  */
 export function emitVdom(
   node: VChild,
@@ -77,7 +88,7 @@ export function emitVdom(
   if (node == null || typeof node === "boolean") return;
 
   if (typeof node === "string" || typeof node === "number") {
-    const textId = inheritId ?? genId();
+    const textId = inheritId ?? `${parentId}:${childIndex}`;
     db.assert(textId, "tag", "__text");
     db.assert(textId, "text", String(node));
     db.assert(parentId, "child", childIndex, textId);
@@ -96,12 +107,12 @@ export function emitVdom(
   const vnode = node as VNode;
 
   if (typeof vnode.tag === "function") {
-    // Component: execute it, propagate key to root output element
+    // Component: execute it, propagate key/id to root output element
     const result = (vnode.tag as Function)(vnode.props);
     if (result) {
-      // If this component has a key (id starts with k:), propagate it
-      const propagatedId = vnode.id.startsWith("k:") ? vnode.id : undefined;
-      emitVdom(result, parentId, childIndex, propagatedId);
+      // Compute the ID this component would get, and propagate to its output
+      const componentId = computeEntityId(parentId, childIndex, vnode.props, inheritId);
+      emitVdom(result, parentId, childIndex, componentId);
     }
     return;
   }
@@ -115,12 +126,11 @@ export function emitVdom(
   }
 
   // Intrinsic element: emit claims
-  // Use inheritId if provided (component key propagation), else the vnode's own id
-  const elId = inheritId ?? vnode.id;
+  const elId = computeEntityId(parentId, childIndex, vnode.props, inheritId);
   db.assert(elId, "tag", vnode.tag);
   db.assert(parentId, "child", childIndex, elId);
 
-  // Props — "class" gets its own fact type so external programs can add classes
+  // Props
   for (const [key, value] of Object.entries(vnode.props)) {
     if (key === "key") continue;
     if (key.startsWith("on") && typeof value === "function") {
@@ -129,7 +139,6 @@ export function emitVdom(
       db.setRef(refKey, value);
       db.assert(elId, "handler", eventName, refKey);
     } else if (key === "class" && typeof value === "string") {
-      // Emit each class as a separate claim so external programs can add more
       for (const cls of value.split(/\s+/).filter(Boolean)) {
         db.assert(elId, "class", cls);
       }

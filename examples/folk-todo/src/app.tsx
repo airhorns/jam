@@ -17,19 +17,19 @@ function toggleTodo(id: number, currentDone: boolean) {
 }
 
 function deleteTodo(id: number) {
-  retract("todo", id, _, _); // matches ["todo", id, "title", x] and ["todo", id, "done", x]
+  retract("todo", id, _, _);
 }
 
 // --- Components ---
 
-function TodoItem({ id, title, done }: { key?: unknown; id: number; title: string; done: boolean }) {
+function TodoItem({ todoId, title, done }: { key?: unknown; todoId: number; title: string; done: boolean }) {
   return (
-    <li class={done ? "todo-item done" : "todo-item"}>
-      <button class="toggle" onClick={() => toggleTodo(id, done)}>
+    <li id={`todo-${todoId}`} class={done ? "todo-item done" : "todo-item"}>
+      <button class="toggle" onClick={() => toggleTodo(todoId, done)}>
         {done ? "\u2713" : "\u25CB"}
       </button>
       <span class="title">{title}</span>
-      <button class="delete" onClick={() => deleteTodo(id)}>
+      <button class="delete" onClick={() => deleteTodo(todoId)}>
         {"\u2715"}
       </button>
     </li>
@@ -62,7 +62,7 @@ export function TodoApp() {
         {items.map(({ id, title, done }) => (
           <TodoItem
             key={id}
-            id={id as number}
+            todoId={id as number}
             title={title as string}
             done={done as boolean}
           />

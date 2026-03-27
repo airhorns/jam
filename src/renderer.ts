@@ -60,7 +60,6 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
   const managed = new Map<string, HTMLElement | Text>();
 
   const patchDisposer = autorun(() => {
-    // Read the full facts map — tracks ALL changes
     const allFacts = Array.from(db.facts.values());
 
     const tags = new Map<string, string>();

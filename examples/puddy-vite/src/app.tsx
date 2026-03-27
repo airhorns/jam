@@ -81,6 +81,7 @@ function SessionList() {
           return (
             <button
               key={sid as string}
+              id={`session-${sid}`}
               class="session-row hstack gap-8"
               onClick={() => set("ui", "selectedSession", sid)}
             >
