@@ -1,0 +1,202 @@
+
+> @jam/core@ bench /Users/harry.brundage/jam
+> vitest bench
+
+Benchmarking is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v3.2.4 /Users/harry.brundage/jam
+
+
+ ✓ src/__bench__/db.bench.ts > assert 3121ms
+     name                                        hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · assert single fact (empty db)       814,431.46  0.0010  0.3966  0.0012  0.0012  0.0017  0.0020  0.0035  ±0.66%   407216
+   · assert 1000 unique facts              2,013.10  0.4527  6.5905  0.4967  0.4772  0.9832  0.9870  1.0070  ±2.62%     1007
+   · assert duplicate fact (no-op)       124,677.09  0.0074  0.3740  0.0080  0.0079  0.0105  0.0110  0.0147  ±0.50%    62339
+   · assert with 10 registered patterns   13,972.78  0.0672  0.4617  0.0716  0.0698  0.0892  0.1390  0.4175  ±0.74%     6987
+   · assert with 50 registered patterns   13,447.91  0.0701  0.3713  0.0744  0.0729  0.0902  0.2840  0.3457  ±0.61%     6724
+
+ ✓ src/__bench__/db.bench.ts > retract 1812ms
+     name                                                hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · retract exact fact                            8,610.14  0.1097  0.4493  0.1161  0.1141  0.1491  0.2461  0.2899  ±0.40%     4306
+   · retract with wildcard (small db, 200 facts)   6,241.61  0.1538  0.3753  0.1602  0.1592  0.1967  0.3055  0.3327  ±0.33%     3121
+   · retract with wildcard (large db, 2000 facts)    630.73  1.5205  1.9637  1.5855  1.5850  1.8426  1.8554  1.9637  ±0.47%      316
+
+ ✓ src/__bench__/db.bench.ts > set 1885ms
+     name                                   hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · set on empty db                653,466.50  0.0013  0.3813  0.0015  0.0015  0.0020  0.0021  0.0023  ±0.47%   326734
+   · set upsert (replace existing)    9,205.19  0.1029  0.2768  0.1086  0.1081  0.1347  0.1987  0.2467  ±0.28%     4603
+   · set 100 different keys             995.49  0.9640  1.2942  1.0045  1.0105  1.1657  1.1939  1.2942  ±0.30%      498
+
+ ✓ src/__bench__/db.bench.ts > query — single pattern 3623ms
+     name                                                       hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · query 100-fact db, match all                        11,660.76  0.0810  0.2890  0.0858  0.0851  0.1030  0.1114  0.2608  ±0.33%     5831
+   · query 100-fact db, match none                       15,943.26  0.0597  0.2502  0.0627  0.0625  0.0770  0.0846  0.2269  ±0.35%     7972
+   · query 1000-fact db, selective (match ~33%)           1,221.16  0.7813  1.1013  0.8189  0.8173  1.0316  1.0483  1.1013  ±0.46%      611
+   · query 2000-fact db, match all titles                   580.63  1.6485  2.2615  1.7223  1.7135  2.1428  2.1921  2.2615  ±0.71%      291
+   · query realistic db (~320 facts), app-state pattern   4,384.56  0.2178  0.5483  0.2281  0.2265  0.4145  0.4202  0.4585  ±0.44%     2193
+   · query realistic db (~320 facts), VDOM pattern        4,751.15  0.1984  0.5760  0.2105  0.2090  0.3915  0.4054  0.4282  ±0.45%     2376
+
+ ✓ src/__bench__/db.bench.ts > query — multi-pattern join 2422ms
+     name                                                  hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · 2-pattern join, 100-fact db (50 todos)          8,434.13  0.1127  0.3136  0.1186  0.1179  0.1417  0.1512  0.3003  ±0.32%     4218
+   · 2-pattern join, 2000-fact db (1000 todos)         415.11  2.3041  2.8265  2.4090  2.4290  2.7305  2.7801  2.8265  ±0.50%      208
+   · 2-pattern join, selective (only done=true)        894.60  1.0708  1.5053  1.1178  1.1200  1.3254  1.3366  1.5053  ±0.44%      448
+   · 2-pattern join on realistic db, session+status  4,087.61  0.2335  0.4600  0.2446  0.2439  0.4175  0.4331  0.4510  ±0.40%     2044
+
+ ✓ src/__bench__/db.bench.ts > index 2501ms
+     name                                               hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · create index (first call)                  770,199.04  0.0011  0.4337  0.0013  0.0013  0.0017  0.0018  0.0020  ±0.48%   385100
+   · index.get() on 100-fact db                  11,035.00  0.0848  0.3503  0.0906  0.0909  0.1192  0.1225  0.2898  ±0.40%     5518
+   · index.get() on 2000-fact db                    563.12  1.6933  2.2371  1.7758  1.7818  2.0853  2.1233  2.2371  ±0.54%      282
+   · index.get() repeated (cached, no changes)      168.64  5.7660  6.2976  5.9299  5.9621  6.2976  6.2976  6.2976  ±0.32%       85
+
+ ✓ src/__bench__/db.bench.ts > invalidatePatterns 2412ms
+     name                                                    hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · assert with 0 registered patterns                17,462.47  0.0539  0.2410  0.0573  0.0567  0.0722  0.0771  0.2127  ±0.33%     8732
+   · assert with 10 registered patterns (no match)    15,532.43  0.0598  0.5300  0.0644  0.0635  0.0789  0.0879  0.3858  ±0.70%     7767
+   · assert with 100 registered patterns (no match)    9,289.39  0.1005  0.4339  0.1076  0.1073  0.1275  0.3203  0.3683  ±0.54%     4645
+   · assert with 100 registered patterns (all match)   9,917.52  0.0942  0.4441  0.1008  0.0998  0.1280  0.3710  0.4218  ±0.66%     4959
+
+ ✓ src/__bench__/db.bench.ts > factKey (JSON.stringify) 405842ms
+     name                                                                   hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · short fact [string, number, string, string]                 19,114,921.86  0.0000  0.0288  0.0001  0.0000  0.0001  0.0001  0.0002  ±0.03%  9557462
+   · long fact [string, string, string, string, string, string]   8,237,145.84  0.0000  0.4826  0.0001  0.0001  0.0002  0.0002  0.0004  ±0.39%  4118573
+   · numeric fact [string, number, string, number]               18,943,273.13  0.0000  0.7988  0.0001  0.0001  0.0001  0.0001  0.0002  ±0.32%  9471637
+
+ ✓ src/__bench__/render.bench.ts > emitVdom — JSX to facts 3664ms
+     name                                                               hz     min      max    mean     p75     p99    p995     p999     rme  samples
+   · emit single element                                        284,330.80  0.0030   0.0950  0.0035  0.0035  0.0049  0.0070   0.0297  ±0.25%   142166
+   · emit flat list of 50 items (150 elements)                    1,533.27  0.4811   9.2765  0.6522  0.5709  2.7354  3.2685   9.2765  ±6.00%      767
+   · emit flat list of 200 items (600 elements)                     414.68  1.9673   6.0753  2.4115  2.1806  4.7768  4.8747   6.0753  ±4.48%      208
+   · emit tree depth=3 breadth=4 (85 elements)                    2,317.76  0.3196  11.5038  0.4315  0.3698  2.3194  2.6154   6.6675  ±6.63%     1159
+   · emit tree depth=4 breadth=3 (121 elements)                   1,657.76  0.4480  12.9419  0.6032  0.5249  2.6560  2.9863  12.9419  ±6.75%      829
+   · re-emit 50-item list (clear + emit, simulating re-render)    1,239.25  0.6540   3.6920  0.8069  0.7595  2.5455  2.8402   3.6920  ±3.77%      620
+
+ ✓ src/__bench__/render.bench.ts > buildVdomIndex 1210ms
+     name                                    hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · index 100 elements (~400 facts)   2,403.13  0.3729  2.6883  0.4161  0.4280  0.5917  0.6419  0.7631  ±1.09%     1202
+   · index 500 elements (~2000 facts)    871.70  1.0711  1.6033  1.1472  1.1613  1.5288  1.5764  1.6033  ±0.76%      436
+
+ ✓ src/__bench__/render.bench.ts > select() 4237ms
+     name                                                 hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · select by class (.item) — matches ~200           930.87  1.0137  1.7177  1.0743  1.0849  1.3472  1.3723  1.7177  ±0.52%      466
+   · select by class (.highlighted) — matches ~40     962.50  0.9665  1.5467  1.0390  1.0457  1.3443  1.4251  1.5467  ±0.60%      482
+   · select by tag (div) — matches ~67                896.49  0.9653  1.6770  1.1155  1.1443  1.5111  1.6363  1.6770  ±0.81%      449
+   · select compound (div.highlighted) — matches ~14  905.97  0.9623  1.6153  1.1038  1.1444  1.4184  1.4275  1.6153  ±0.78%      453
+   · select by id (#el-42)                            863.90  0.9692  2.4801  1.1575  1.1652  1.9722  2.2418  2.4801  ±1.32%      432
+   · select descendant (div .item)                    847.67  1.0428  1.8392  1.1797  1.2152  1.6948  1.7922  1.8392  ±1.03%      424
+   · select child (div > span)                        787.11  1.1380  1.8795  1.2705  1.3356  1.7033  1.8050  1.8795  ±0.88%      394
+
+ ✓ src/__bench__/render.bench.ts > full render cycle (component → emit) 1208ms
+     name                                            hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · component with 10 todos: execute + emit   9,895.68  0.0833  2.2353  0.1011  0.0956  0.1462  1.4155  2.0782  ±3.61%     4948
+   · component with 100 todos: execute + emit  2,673.65  0.3486  1.0773  0.3740  0.3835  0.4966  0.5254  0.7329  ±0.49%     1337
+
+ ✓ src/__bench__/reactive.bench.ts > when() — reactive query 2573ms
+     name                                                 hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · when().get() on empty db                   1,284,824.69  0.0006  0.4811  0.0008  0.0008  0.0011  0.0013  0.0021  ±0.71%   642413
+   · when().get() with 100 todos                   20,545.84  0.0456  0.3406  0.0487  0.0494  0.0631  0.0654  0.0864  ±0.28%    10273
+   · when().get() repeated reads (MobX cached)        260.96  3.5951  4.2771  3.8320  3.9010  4.2163  4.2771  4.2771  ±0.56%      131
+   · when() 2-pattern join with 100 todos           6,495.57  0.1427  0.5324  0.1540  0.1574  0.1911  0.2098  0.3487  ±0.34%     3248
+
+ ✓ src/__bench__/reactive.bench.ts > reactive chain: assert → when → autorun 2431ms
+     name                                                  hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · assert triggers autorun (1 index, small db)    26,202.39  0.0347  0.7907  0.0382  0.0390  0.0514  0.0553  0.1560  ±0.50%    13102
+   · set triggers autorun (upsert, 1 index)            223.94  4.0603  6.4380  4.4654  4.5855  5.4996  6.4380  6.4380  ±1.49%      112
+   · assert with 5 active indexes (only 1 matches)  16,857.58  0.0503  0.5098  0.0593  0.0582  0.1769  0.2296  0.3628  ±0.92%     8429
+   · transaction batches 50 asserts into 1 autorun  18,054.43  0.0485  0.5375  0.0554  0.0553  0.1358  0.1611  0.3240  ±0.72%     9028
+
+ ✓ src/__bench__/reactive.bench.ts > whenever 1816ms
+     name                                                   hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · whenever fires on 50 matching facts              9,779.00  0.0856  1.7918  0.1023  0.1018  0.2548  0.3105  1.3293  ±1.61%     4890
+   · whenever with claim() side-effects               6,659.42  0.1270  6.7130  0.1502  0.1448  0.1848  0.2352  3.5099  ±4.27%     3330
+   · whenever cleanup on disposal (50 derived facts)  9,652.31  0.0885  0.9350  0.1036  0.1069  0.1397  0.1815  0.8175  ±1.12%     4827
+
+ ✓ src/__bench__/reactive.bench.ts > transaction overhead 1826ms
+     name                                                      hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · 100 asserts WITHOUT transaction                    93,017.38  0.0092  3.6377  0.0108  0.0109  0.0171  0.0194  0.0472  ±1.46%    46509
+   · 100 asserts WITH transaction                       96,277.00  0.0089  0.2228  0.0104  0.0107  0.0139  0.0146  0.0372  ±0.32%    48139
+   · retract + 100 asserts in transaction (plan-style)   3,937.43  0.2258  0.8768  0.2540  0.2589  0.3553  0.7027  0.8449  ±0.83%     1969
+
+ BENCH  Summary
+
+  assert single fact (empty db) - src/__bench__/db.bench.ts > assert
+    6.53x faster than assert duplicate fact (no-op)
+    58.29x faster than assert with 10 registered patterns
+    60.56x faster than assert with 50 registered patterns
+    404.57x faster than assert 1000 unique facts
+
+  retract exact fact - src/__bench__/db.bench.ts > retract
+    1.38x faster than retract with wildcard (small db, 200 facts)
+    13.65x faster than retract with wildcard (large db, 2000 facts)
+
+  set on empty db - src/__bench__/db.bench.ts > set
+    70.99x faster than set upsert (replace existing)
+    656.43x faster than set 100 different keys
+
+  query 100-fact db, match none - src/__bench__/db.bench.ts > query — single pattern
+    1.37x faster than query 100-fact db, match all
+    3.36x faster than query realistic db (~320 facts), VDOM pattern
+    3.64x faster than query realistic db (~320 facts), app-state pattern
+    13.06x faster than query 1000-fact db, selective (match ~33%)
+    27.46x faster than query 2000-fact db, match all titles
+
+  2-pattern join, 100-fact db (50 todos) - src/__bench__/db.bench.ts > query — multi-pattern join
+    2.06x faster than 2-pattern join on realistic db, session+status
+    9.43x faster than 2-pattern join, selective (only done=true)
+    20.32x faster than 2-pattern join, 2000-fact db (1000 todos)
+
+  create index (first call) - src/__bench__/db.bench.ts > index
+    69.80x faster than index.get() on 100-fact db
+    1367.72x faster than index.get() on 2000-fact db
+    4567.17x faster than index.get() repeated (cached, no changes)
+
+  assert with 0 registered patterns - src/__bench__/db.bench.ts > invalidatePatterns
+    1.12x faster than assert with 10 registered patterns (no match)
+    1.76x faster than assert with 100 registered patterns (all match)
+    1.88x faster than assert with 100 registered patterns (no match)
+
+  short fact [string, number, string, string] - src/__bench__/db.bench.ts > factKey (JSON.stringify)
+    1.01x faster than numeric fact [string, number, string, number]
+    2.32x faster than long fact [string, string, string, string, string, string]
+
+  when().get() on empty db - src/__bench__/reactive.bench.ts > when() — reactive query
+    62.53x faster than when().get() with 100 todos
+    197.80x faster than when() 2-pattern join with 100 todos
+    4923.43x faster than when().get() repeated reads (MobX cached)
+
+  assert triggers autorun (1 index, small db) - src/__bench__/reactive.bench.ts > reactive chain: assert → when → autorun
+    1.45x faster than transaction batches 50 asserts into 1 autorun
+    1.55x faster than assert with 5 active indexes (only 1 matches)
+    117.00x faster than set triggers autorun (upsert, 1 index)
+
+  whenever fires on 50 matching facts - src/__bench__/reactive.bench.ts > whenever
+    1.01x faster than whenever cleanup on disposal (50 derived facts)
+    1.47x faster than whenever with claim() side-effects
+
+  100 asserts WITH transaction - src/__bench__/reactive.bench.ts > transaction overhead
+    1.04x faster than 100 asserts WITHOUT transaction
+    24.45x faster than retract + 100 asserts in transaction (plan-style)
+
+  emit single element - src/__bench__/render.bench.ts > emitVdom — JSX to facts
+    122.67x faster than emit tree depth=3 breadth=4 (85 elements)
+    171.52x faster than emit tree depth=4 breadth=3 (121 elements)
+    185.44x faster than emit flat list of 50 items (150 elements)
+    229.44x faster than re-emit 50-item list (clear + emit, simulating re-render)
+    685.67x faster than emit flat list of 200 items (600 elements)
+
+  index 100 elements (~400 facts) - src/__bench__/render.bench.ts > buildVdomIndex
+    2.76x faster than index 500 elements (~2000 facts)
+
+  select by class (.highlighted) — matches ~40 - src/__bench__/render.bench.ts > select()
+    1.03x faster than select by class (.item) — matches ~200
+    1.06x faster than select compound (div.highlighted) — matches ~14
+    1.07x faster than select by tag (div) — matches ~67
+    1.11x faster than select by id (#el-42)
+    1.14x faster than select descendant (div .item)
+    1.22x faster than select child (div > span)
+
+  component with 10 todos: execute + emit - src/__bench__/render.bench.ts > full render cycle (component → emit)
+    3.70x faster than component with 100 todos: execute + emit
+

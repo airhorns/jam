@@ -123,6 +123,12 @@ export class FactDB {
    */
   private patternVersions = new Map<string, { patterns: Pattern[]; version: { get(): number; set(v: number): void } }>();
 
+  /**
+   * Index of pattern entries by their first literal term (for fast invalidation).
+   * Patterns whose first term is a binding/wildcard go into the null bucket.
+   */
+  private patternsByFirstTerm = new Map<Term | null, Set<string>>();
+
   constructor() {
     makeObservable(this, {
       assert: action,
@@ -137,11 +143,23 @@ export class FactDB {
 
   /** Bump version counters for pattern sets that could match this fact. */
   private invalidatePatterns(fact: Fact): void {
-    for (const entry of this.patternVersions.values()) {
+    const firstTerm = fact[0];
+    // Check patterns indexed by this fact's first term
+    const exact = this.patternsByFirstTerm.get(firstTerm);
+    if (exact) this.invalidateEntries(exact, fact);
+    // Also check patterns with wildcard/binding first term
+    const wild = this.patternsByFirstTerm.get(null);
+    if (wild) this.invalidateEntries(wild, fact);
+  }
+
+  private invalidateEntries(keys: Set<string>, fact: Fact): void {
+    for (const key of keys) {
+      const entry = this.patternVersions.get(key);
+      if (!entry) continue;
       for (const pattern of entry.patterns) {
         if (couldMatch(pattern, fact)) {
           entry.version.set(entry.version.get() + 1);
-          break; // only need to bump once per pattern set
+          break;
         }
       }
     }
@@ -212,6 +230,14 @@ export class FactDB {
     const key = patternsKey(patterns);
     if (!this.patternVersions.has(key)) {
       this.patternVersions.set(key, { patterns, version: observable.box(0) });
+      // Register in first-term index for fast invalidation
+      for (const pattern of patterns) {
+        const first = pattern[0];
+        const indexKey: Term | null = (first !== _ && !isBinding(first)) ? first as Term : null;
+        let bucket = this.patternsByFirstTerm.get(indexKey);
+        if (!bucket) { bucket = new Set(); this.patternsByFirstTerm.set(indexKey, bucket); }
+        bucket.add(key);
+      }
     }
     const entry = this.patternVersions.get(key)!;
 
@@ -312,6 +338,7 @@ export class FactDB {
   clear(): void {
     this.facts.clear();
     this.patternVersions.clear();
+    this.patternsByFirstTerm.clear();
     this.refs.clear();
   }
 
