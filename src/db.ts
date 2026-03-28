@@ -43,20 +43,33 @@ function isBinding(x: unknown): x is BindingMarker {
 // --- Pattern matching ---
 
 export function matchPattern(pattern: Pattern, fact: Fact): Bindings | null {
-  if (pattern.length !== fact.length) return null;
-  const bindings: Bindings = {};
-  for (let i = 0; i < pattern.length; i++) {
+  const len = pattern.length;
+  if (len !== fact.length) return null;
+
+  // Fast path: check all literals FIRST before allocating bindings.
+  // This avoids allocation for the common case where most facts don't match.
+  for (let i = 0; i < len; i++) {
     const p = pattern[i];
+    if (p === _ || (p !== null && typeof p === "object")) continue; // wildcard or binding
+    if (p !== fact[i]) return null;
+  }
+
+  // All literals matched — now do the binding pass
+  let bindings: Bindings | null = null;
+  for (let i = 0; i < len; i++) {
+    const p = pattern[i];
+    if (p === _ || typeof p !== "object" || p === null) continue;
+    // p is a BindingMarker
+    const name = (p as BindingMarker).name;
     const f = fact[i];
-    if (p === _) continue;
-    if (isBinding(p)) {
-      if (p.name in bindings && bindings[p.name] !== f) return null;
-      bindings[p.name] = f;
-    } else if (p !== f) {
-      return null;
+    if (bindings === null) bindings = {};
+    if (name in bindings) {
+      if (bindings[name] !== f) return null;
+    } else {
+      bindings[name] = f;
     }
   }
-  return bindings;
+  return bindings ?? {};
 }
 
 function mergeBindings(a: Bindings, b: Bindings): Bindings | null {
