@@ -215,17 +215,66 @@ export class FactDB {
     let current = this.querySingle(patterns[0]);
     for (let i = 1; i < patterns.length; i++) {
       const pattern = patterns[i];
-      const next: Bindings[] = [];
-      for (const existing of current) {
+
+      // Find shared binding names between current results and this pattern
+      const patternBindingNames: string[] = [];
+      for (const t of pattern) {
+        if (isBinding(t)) patternBindingNames.push(t.name);
+      }
+      const currentBindingNames = current.length > 0 ? Object.keys(current[0]) : [];
+      const sharedVars = patternBindingNames.filter(n => currentBindingNames.includes(n));
+
+      if (sharedVars.length > 0) {
+        // Hash join: index pattern matches by the shared variable(s),
+        // then probe with current bindings. O(n+m) instead of O(n*m).
+        const joinKey = sharedVars[0]; // use first shared var as hash key
+
+        // Find which position in the pattern has this binding
+        let joinPos = -1;
+        for (let p = 0; p < pattern.length; p++) {
+          const t = pattern[p];
+          if (isBinding(t) && t.name === joinKey) { joinPos = p; break; }
+        }
+
+        // Build hash index: joinValue → Bindings[]
+        const index = new Map<Term, Bindings[]>();
         for (const fact of this.facts.values()) {
           const factBindings = matchPattern(pattern, fact);
           if (factBindings) {
-            const merged = mergeBindings(existing, factBindings);
-            if (merged) next.push(merged);
+            const key = factBindings[joinKey];
+            let bucket = index.get(key);
+            if (!bucket) { bucket = []; index.set(key, bucket); }
+            bucket.push(factBindings);
           }
         }
+
+        // Probe: for each current binding, look up matching entries
+        const next: Bindings[] = [];
+        for (const existing of current) {
+          const key = existing[joinKey];
+          const bucket = index.get(key);
+          if (bucket) {
+            for (const factBindings of bucket) {
+              const merged = mergeBindings(existing, factBindings);
+              if (merged) next.push(merged);
+            }
+          }
+        }
+        current = next;
+      } else {
+        // No shared variables — cross product (original O(n*m) behavior)
+        const next: Bindings[] = [];
+        for (const existing of current) {
+          for (const fact of this.facts.values()) {
+            const factBindings = matchPattern(pattern, fact);
+            if (factBindings) {
+              const merged = mergeBindings(existing, factBindings);
+              if (merged) next.push(merged);
+            }
+          }
+        }
+        current = next;
       }
-      current = next;
     }
     return current;
   }
