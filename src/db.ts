@@ -116,6 +116,9 @@ export class FactDB {
   /** Side-channel for non-serializable values (function refs for event handlers). */
   readonly refs = new Map<string, unknown>();
 
+  /** When non-null, assert() collects keys here (for tracking component-emitted facts). */
+  emitCollector: Set<string> | null = null;
+
   /**
    * Per-pattern-set version counters. Each registered pattern set gets
    * its own observable version. When a fact is written/removed, only
@@ -169,6 +172,7 @@ export class FactDB {
     const key = this.factKey(terms);
     if (!this.facts.has(key)) {
       this.facts.set(key, terms);
+      if (this.emitCollector) this.emitCollector.add(key);
       this.invalidatePatterns(terms);
     }
   }

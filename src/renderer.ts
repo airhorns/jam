@@ -41,14 +41,10 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       // because reaction separates tracking from effects.
       runInAction(() => {
         for (const key of componentKeys) db.facts.delete(key);
-        componentKeys = new Set();
-
-        const before = new Set(db.facts.keys());
+        db.emitCollector = new Set();
         emitVdom(vnode, "__root", 0);
-
-        for (const key of db.facts.keys()) {
-          if (!before.has(key)) componentKeys.add(key);
-        }
+        componentKeys = db.emitCollector;
+        db.emitCollector = null;
       });
     },
     // Always fire effect when data function re-runs — VNodes are new objects
