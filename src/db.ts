@@ -182,7 +182,23 @@ export class FactDB {
 
   set(...terms: Term[]): void {
     if (terms.length < 2) throw new Error("set() requires at least 2 terms");
-    this.retract(...terms.slice(0, -1), _);
+    // Inline wildcard retract to avoid array allocation from slice + spread.
+    // Retract any fact matching [terms[0], ..., terms[n-2], _].
+    const prefixLen = terms.length - 1;
+    const toRemove: string[] = [];
+    for (const [key, fact] of this.facts) {
+      if (fact.length !== terms.length) continue;
+      let matches = true;
+      for (let i = 0; i < prefixLen; i++) {
+        if (terms[i] !== fact[i]) { matches = false; break; }
+      }
+      if (matches) toRemove.push(key);
+    }
+    for (const key of toRemove) {
+      const fact = this.facts.get(key)!;
+      this.facts.delete(key);
+      this.invalidatePatterns(fact);
+    }
     this.assert(...terms);
   }
 
