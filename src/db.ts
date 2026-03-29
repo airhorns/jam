@@ -126,6 +126,9 @@ export class FactDB {
   /** Index of fact keys by first term, for fast querySingle when pattern has a literal first term. */
   private factsByFirstTerm = new Map<Term, Set<string>>();
 
+  /** Plain (non-observable) mirror of facts for fast reads in query paths without MobX overhead. */
+  private factsPlain = new Map<string, Fact>();
+
   /**
    * Per-pattern-set version counters. Each registered pattern set gets
    * its own observable version. When a fact is written/removed, only
@@ -179,6 +182,7 @@ export class FactDB {
     const key = this.factKey(terms);
     if (!this.facts.has(key)) {
       this.facts.set(key, terms);
+      this.factsPlain.set(key, terms);
       if (this.emitCollector) this.emitCollector.add(key);
       // Maintain first-term index
       const first = terms[0];
@@ -193,7 +197,7 @@ export class FactDB {
     if (!terms.includes(_)) {
       const key = this.factKey(terms as Term[]);
       if (this.facts.has(key)) {
-        this.facts.delete(key);
+        this.facts.delete(key); this.factsPlain.delete(key);
         this.factsByFirstTerm.get((terms as Term[])[0])?.delete(key);
         this.invalidatePatterns(terms as Term[]);
       }
@@ -210,7 +214,7 @@ export class FactDB {
       if (matches) toRemove.push([key, fact]);
     }
     for (const [key, fact] of toRemove) {
-      this.facts.delete(key);
+      this.facts.delete(key); this.factsPlain.delete(key);
       this.factsByFirstTerm.get(fact[0])?.delete(key);
       this.invalidatePatterns(fact);
     }
@@ -236,8 +240,8 @@ export class FactDB {
         if (matches) toRemove.push(key);
       }
       for (const key of toRemove) {
-        const fact = this.facts.get(key)!;
-        this.facts.delete(key);
+        const fact = this.factsPlain.get(key)!;
+        this.facts.delete(key); this.factsPlain.delete(key);
         bucket.delete(key);
         this.invalidatePatterns(fact);
       }
@@ -280,15 +284,14 @@ export class FactDB {
     if (firstPatternTerm !== _ && !isBinding(firstPatternTerm)) {
       const bucket = this.factsByFirstTerm.get(firstPatternTerm as Term);
       if (!bucket) return [];
-      // Resolve keys to facts, filtering any stale entries
       const facts: Fact[] = [];
       for (const key of bucket) {
-        const fact = this.facts.get(key);
+        const fact = this.factsPlain.get(key);
         if (fact) facts.push(fact);
       }
       return facts;
     }
-    return this.facts.values();
+    return this.factsPlain.values();
   }
 
   /** Query all facts matching patterns (non-reactive, point-in-time). */
@@ -307,14 +310,14 @@ export class FactDB {
       const bucket = this.factsByFirstTerm.get(first as Term);
       if (!bucket) return results;
       for (const key of bucket) {
-        const fact = this.facts.get(key);
+        const fact = this.factsPlain.get(key);
         if (!fact) continue;
         const bindings = matchPattern(pattern, fact);
         if (bindings) results.push(bindings);
       }
     } else {
       // Wildcard/binding first term — must scan all facts
-      for (const fact of this.facts.values()) {
+      for (const fact of this.factsPlain.values()) {
         const bindings = matchPattern(pattern, fact);
         if (bindings) results.push(bindings);
       }
@@ -372,9 +375,7 @@ export class FactDB {
           : this.facts.keys(); // fallback: all keys
 
         for (const keyOrFactKey of facts) {
-          const fact = scanBucket
-            ? this.facts.get(keyOrFactKey)
-            : this.facts.get(keyOrFactKey);
+          const fact = this.factsPlain.get(keyOrFactKey);
           if (!fact || fact.length !== compiled.length) continue;
 
           // Check literals directly (skip position 0 if we used the first-term index)
@@ -449,9 +450,20 @@ export class FactDB {
     return current;
   }
 
+  /** Delete a fact by its serialized key, maintaining all indexes. */
+  deleteByKey(key: string): void {
+    const fact = this.factsPlain.get(key);
+    if (fact) {
+      this.facts.delete(key);
+      this.factsPlain.delete(key);
+      this.factsByFirstTerm.get(fact[0])?.delete(key);
+    }
+  }
+
   /** Clear all facts, pattern versions, and refs. */
   clear(): void {
     this.facts.clear();
+    this.factsPlain.clear();
     this.factsByFirstTerm.clear();
     this.patternVersions.clear();
     this.patternsByFirstTerm.clear();

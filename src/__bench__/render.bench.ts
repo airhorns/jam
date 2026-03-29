@@ -92,7 +92,7 @@ describe("emitVdom — JSX to facts", () => {
     emitVdom(vnode, "__root", 0);
     const keys = new Set(db.facts.keys());
     // Bench the re-emit
-    for (const key of keys) db.facts.delete(key);
+    for (const key of keys) db.deleteByKey(key);
     emitVdom(vnode, "__root", 0);
   });
 });

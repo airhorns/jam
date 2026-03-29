@@ -40,7 +40,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       // This writes to db.facts but doesn't re-trigger the data function
       // because reaction separates tracking from effects.
       runInAction(() => {
-        for (const key of componentKeys) db.facts.delete(key);
+        for (const key of componentKeys) db.deleteByKey(key);
         db.emitCollector = new Set();
         emitVdom(vnode, "__root", 0);
         componentKeys = db.emitCollector;

@@ -4,8 +4,7 @@ import { db } from "../db";
 import { $, _, assert, retract, set, when, whenever, transaction } from "../primitives";
 
 beforeEach(() => {
-  db.facts.clear();
-  db.refs.clear();
+  db.clear();
 });
 
 describe("assert", () => {

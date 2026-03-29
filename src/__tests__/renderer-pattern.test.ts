@@ -4,7 +4,7 @@ import { db, $ } from "../db";
 import { assert, set, when, whenever, claim } from "../primitives";
 
 describe("fine-grained per-pattern reactivity", () => {
-  beforeEach(() => { db.facts.clear(); db.refs.clear(); });
+  beforeEach(() => { db.clear(); });
 
   it("autorun only fires when matching patterns change", () => {
     const observed: number[] = [];

@@ -72,7 +72,7 @@ export function whenever(
     () => idx.get(),
     (matches) => {
       runInAction(() => {
-        for (const key of prevFactKeys) db.facts.delete(key);
+        for (const key of prevFactKeys) db.deleteByKey(key);
         prevFactKeys = [];
 
         const before = new Set(db.facts.keys());
@@ -88,7 +88,7 @@ export function whenever(
 
   return () => {
     runInAction(() => {
-      for (const key of prevFactKeys) db.facts.delete(key);
+      for (const key of prevFactKeys) db.deleteByKey(key);
       prevFactKeys = [];
     });
     disposer();
