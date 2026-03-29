@@ -119,6 +119,9 @@ export class FactDB {
   /** When non-null, assert() collects keys here (for tracking component-emitted facts). */
   emitCollector: Set<string> | null = null;
 
+  /** Index of fact keys by first term, for fast querySingle when pattern has a literal first term. */
+  private factsByFirstTerm = new Map<Term, Set<string>>();
+
   /**
    * Per-pattern-set version counters. Each registered pattern set gets
    * its own observable version. When a fact is written/removed, only
@@ -173,6 +176,11 @@ export class FactDB {
     if (!this.facts.has(key)) {
       this.facts.set(key, terms);
       if (this.emitCollector) this.emitCollector.add(key);
+      // Maintain first-term index
+      const first = terms[0];
+      let bucket = this.factsByFirstTerm.get(first);
+      if (!bucket) { bucket = new Set(); this.factsByFirstTerm.set(first, bucket); }
+      bucket.add(key);
       this.invalidatePatterns(terms);
     }
   }
@@ -182,6 +190,7 @@ export class FactDB {
       const key = this.factKey(terms as Term[]);
       if (this.facts.has(key)) {
         this.facts.delete(key);
+        this.factsByFirstTerm.get((terms as Term[])[0])?.delete(key);
         this.invalidatePatterns(terms as Term[]);
       }
       return;
@@ -198,6 +207,7 @@ export class FactDB {
     }
     for (const [key, fact] of toRemove) {
       this.facts.delete(key);
+      this.factsByFirstTerm.get(fact[0])?.delete(key);
       this.invalidatePatterns(fact);
     }
   }
@@ -219,6 +229,7 @@ export class FactDB {
     for (const key of toRemove) {
       const fact = this.facts.get(key)!;
       this.facts.delete(key);
+      this.factsByFirstTerm.get(fact[0])?.delete(key);
       this.invalidatePatterns(fact);
     }
     this.assert(...terms);
@@ -254,6 +265,22 @@ export class FactDB {
     );
   }
 
+  /** Return facts to scan for a pattern's first term. Uses the index for literals. */
+  private iterFacts(firstPatternTerm: PatternTerm): Iterable<Fact> {
+    if (firstPatternTerm !== _ && !isBinding(firstPatternTerm)) {
+      const bucket = this.factsByFirstTerm.get(firstPatternTerm as Term);
+      if (!bucket) return [];
+      // Resolve keys to facts, filtering any stale entries
+      const facts: Fact[] = [];
+      for (const key of bucket) {
+        const fact = this.facts.get(key);
+        if (fact) facts.push(fact);
+      }
+      return facts;
+    }
+    return this.facts.values();
+  }
+
   /** Query all facts matching patterns (non-reactive, point-in-time). */
   query(...patterns: Pattern[]): Bindings[] {
     if (patterns.length === 0) return [];
@@ -262,10 +289,25 @@ export class FactDB {
   }
 
   private querySingle(pattern: Pattern): Bindings[] {
+    const first = pattern[0];
     const results: Bindings[] = [];
-    for (const fact of this.facts.values()) {
-      const bindings = matchPattern(pattern, fact);
-      if (bindings) results.push(bindings);
+
+    // If the first term is a literal, use the first-term index to skip irrelevant facts
+    if (first !== _ && !isBinding(first)) {
+      const bucket = this.factsByFirstTerm.get(first as Term);
+      if (!bucket) return results;
+      for (const key of bucket) {
+        const fact = this.facts.get(key);
+        if (!fact) continue;
+        const bindings = matchPattern(pattern, fact);
+        if (bindings) results.push(bindings);
+      }
+    } else {
+      // Wildcard/binding first term — must scan all facts
+      for (const fact of this.facts.values()) {
+        const bindings = matchPattern(pattern, fact);
+        if (bindings) results.push(bindings);
+      }
     }
     return results;
   }
@@ -297,7 +339,7 @@ export class FactDB {
 
         // Build hash index: joinValue → Bindings[]
         const index = new Map<Term, Bindings[]>();
-        for (const fact of this.facts.values()) {
+        for (const fact of this.iterFacts(pattern[0])) {
           const factBindings = matchPattern(pattern, fact);
           if (factBindings) {
             const key = factBindings[joinKey];
@@ -321,10 +363,10 @@ export class FactDB {
         }
         current = next;
       } else {
-        // No shared variables — cross product (original O(n*m) behavior)
+        // No shared variables — cross product, first-term filtered
         const next: Bindings[] = [];
         for (const existing of current) {
-          for (const fact of this.facts.values()) {
+          for (const fact of this.iterFacts(pattern[0])) {
             const factBindings = matchPattern(pattern, fact);
             if (factBindings) {
               const merged = mergeBindings(existing, factBindings);
@@ -341,6 +383,7 @@ export class FactDB {
   /** Clear all facts, pattern versions, and refs. */
   clear(): void {
     this.facts.clear();
+    this.factsByFirstTerm.clear();
     this.patternVersions.clear();
     this.patternsByFirstTerm.clear();
     this.refs.clear();
