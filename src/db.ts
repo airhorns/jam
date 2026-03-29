@@ -73,10 +73,14 @@ export function matchPattern(pattern: Pattern, fact: Fact): Bindings | null {
 }
 
 function mergeBindings(a: Bindings, b: Bindings): Bindings | null {
-  const merged = { ...a };
-  for (const [k, v] of Object.entries(b)) {
-    if (k in merged && merged[k] !== v) return null;
-    merged[k] = v;
+  // Fast path: check for conflicts before allocating
+  for (const k in b) {
+    if (k in a && a[k] !== b[k]) return null;
+  }
+  // No conflicts — merge. Use Object.assign to avoid spread overhead.
+  const merged = Object.assign({}, a);
+  for (const k in b) {
+    merged[k] = b[k];
   }
   return merged;
 }
@@ -318,52 +322,111 @@ export class FactDB {
     return results;
   }
 
+  /**
+   * Pre-analyze a pattern into positions of literals, bindings, and wildcards.
+   * Allows the join to skip matchPattern and do direct array access.
+   */
+  private static compilePattern(pattern: Pattern): {
+    literals: [number, Term][]; // [position, value] for literal terms
+    bindings: [number, string][]; // [position, name] for binding terms
+    length: number;
+  } {
+    const literals: [number, Term][] = [];
+    const bindings: [number, string][] = [];
+    for (let i = 0; i < pattern.length; i++) {
+      const t = pattern[i];
+      if (t === _) continue;
+      if (isBinding(t)) bindings.push([i, t.name]);
+      else literals.push([i, t as Term]);
+    }
+    return { literals, bindings, length: pattern.length };
+  }
+
   private queryJoin(patterns: Pattern[]): Bindings[] {
     let current = this.querySingle(patterns[0]);
     for (let i = 1; i < patterns.length; i++) {
       const pattern = patterns[i];
+      const compiled = FactDB.compilePattern(pattern);
 
       // Find shared binding names between current results and this pattern
-      const patternBindingNames: string[] = [];
-      for (const t of pattern) {
-        if (isBinding(t)) patternBindingNames.push(t.name);
-      }
       const currentBindingNames = current.length > 0 ? Object.keys(current[0]) : [];
-      const sharedVars = patternBindingNames.filter(n => currentBindingNames.includes(n));
-
-      if (sharedVars.length > 0) {
-        // Hash join: index pattern matches by the shared variable(s),
-        // then probe with current bindings. O(n+m) instead of O(n*m).
-        const joinKey = sharedVars[0]; // use first shared var as hash key
-
-        // Find which position in the pattern has this binding
-        let joinPos = -1;
-        for (let p = 0; p < pattern.length; p++) {
-          const t = pattern[p];
-          if (isBinding(t) && t.name === joinKey) { joinPos = p; break; }
+      let joinKey: string | null = null;
+      let joinPos = -1;
+      for (const [pos, name] of compiled.bindings) {
+        if (currentBindingNames.includes(name)) {
+          joinKey = name;
+          joinPos = pos;
+          break;
         }
+      }
 
-        // Build hash index: joinValue → Bindings[]
+      if (joinKey !== null) {
+        // Hash join using compiled pattern — direct array access, no matchPattern.
         const index = new Map<Term, Bindings[]>();
-        for (const fact of this.iterFacts(pattern[0])) {
-          const factBindings = matchPattern(pattern, fact);
-          if (factBindings) {
-            const key = factBindings[joinKey];
-            let bucket = index.get(key);
-            if (!bucket) { bucket = []; index.set(key, bucket); }
-            bucket.push(factBindings);
+        const first = pattern[0];
+        const scanBucket = (first !== _ && !isBinding(first))
+          ? this.factsByFirstTerm.get(first as Term)
+          : null;
+        const facts = scanBucket
+          ? scanBucket
+          : this.facts.keys(); // fallback: all keys
+
+        for (const keyOrFactKey of facts) {
+          const fact = scanBucket
+            ? this.facts.get(keyOrFactKey)
+            : this.facts.get(keyOrFactKey);
+          if (!fact || fact.length !== compiled.length) continue;
+
+          // Check literals directly (skip position 0 if we used the first-term index)
+          let matches = true;
+          for (let li = 0; li < compiled.literals.length; li++) {
+            const [pos, val] = compiled.literals[li];
+            if (scanBucket && pos === 0) continue; // already filtered by first-term
+            if (fact[pos] !== val) { matches = false; break; }
           }
+          if (!matches) continue;
+
+          // Extract bindings directly — no object allocation for non-matching facts
+          const joinVal = fact[joinPos];
+          const bindings: Bindings = {};
+          for (const [pos, name] of compiled.bindings) {
+            bindings[name] = fact[pos];
+          }
+
+          let bucket = index.get(joinVal);
+          if (!bucket) { bucket = []; index.set(joinVal, bucket); }
+          bucket.push(bindings);
         }
 
-        // Probe: for each current binding, look up matching entries
+        // Probe: for each current binding, look up and merge.
+        // Pre-compute which binding names are new vs shared (beyond the join key).
+        const newNames: string[] = [];
+        const otherSharedNames: string[] = [];
+        for (const [, name] of compiled.bindings) {
+          if (name === joinKey) continue;
+          if (currentBindingNames.includes(name)) otherSharedNames.push(name);
+          else newNames.push(name);
+        }
+
         const next: Bindings[] = [];
         for (const existing of current) {
-          const key = existing[joinKey];
+          const key = existing[joinKey!];
           const bucket = index.get(key);
           if (bucket) {
             for (const factBindings of bucket) {
-              const merged = mergeBindings(existing, factBindings);
-              if (merged) next.push(merged);
+              // Check other shared vars for conflicts
+              let conflict = false;
+              for (const name of otherSharedNames) {
+                if (existing[name] !== factBindings[name]) { conflict = true; break; }
+              }
+              if (conflict) continue;
+
+              // Fast merge: copy existing + add new keys
+              const merged: Bindings = Object.assign({}, existing);
+              for (const name of newNames) {
+                merged[name] = factBindings[name];
+              }
+              next.push(merged);
             }
           }
         }
