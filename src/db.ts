@@ -214,23 +214,29 @@ export class FactDB {
 
   set(...terms: Term[]): void {
     if (terms.length < 2) throw new Error("set() requires at least 2 terms");
-    // Inline wildcard retract to avoid array allocation from slice + spread.
     // Retract any fact matching [terms[0], ..., terms[n-2], _].
+    // Use the first-term index to narrow the scan.
     const prefixLen = terms.length - 1;
-    const toRemove: string[] = [];
-    for (const [key, fact] of this.facts) {
-      if (fact.length !== terms.length) continue;
-      let matches = true;
-      for (let i = 0; i < prefixLen; i++) {
-        if (terms[i] !== fact[i]) { matches = false; break; }
+    const firstTerm = terms[0];
+    const bucket = this.factsByFirstTerm.get(firstTerm);
+    if (bucket) {
+      // Collect keys to remove (can't mutate Set while iterating)
+      const toRemove: string[] = [];
+      for (const key of bucket) {
+        const fact = this.facts.get(key);
+        if (!fact || fact.length !== terms.length) continue;
+        let matches = true;
+        for (let i = 1; i < prefixLen; i++) {
+          if (terms[i] !== fact[i]) { matches = false; break; }
+        }
+        if (matches) toRemove.push(key);
       }
-      if (matches) toRemove.push(key);
-    }
-    for (const key of toRemove) {
-      const fact = this.facts.get(key)!;
-      this.facts.delete(key);
-      this.factsByFirstTerm.get(fact[0])?.delete(key);
-      this.invalidatePatterns(fact);
+      for (const key of toRemove) {
+        const fact = this.facts.get(key)!;
+        this.facts.delete(key);
+        bucket.delete(key);
+        this.invalidatePatterns(fact);
+      }
     }
     this.assert(...terms);
   }
