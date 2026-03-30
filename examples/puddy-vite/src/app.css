@@ -297,6 +297,34 @@ input[type="text"]:focus {
   padding: 16px 24px;
   background: #0d1117;
   border-bottom: 1px solid #21262d;
+  justify-content: space-between;
+}
+
+/* Permissions toggle — injected by programs/permissions-mode.ts */
+.permissions-toggle {
+  flex-shrink: 0;
+}
+
+.perm-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid #30363d;
+  color: #8b949e;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.perm-btn:hover {
+  border-color: #484f58;
+  color: #c9d1d9;
+}
+
+.perm-btn-active {
+  background: #21262d;
+  border-color: #58a6ff;
+  color: #58a6ff;
 }
 
 .mode-badge {

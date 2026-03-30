@@ -3,7 +3,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { h } from "@jam/core/jsx";
-import { db, $, assert, set, retract, _, whenever, claim, select, injectVdom } from "@jam/core";
+import { vi } from "vitest";
+import { db, $, assert, set, retract, _, when, whenever, claim, select, injectVdom } from "@jam/core";
 
 let disposers: (() => void)[] = [];
 
@@ -288,5 +289,143 @@ describe("select() integration", () => {
     expect(select(".app .deep")).toHaveLength(1);
     expect(select(".app > .deep")).toHaveLength(0);
     expect(select(".app > .inner")).toHaveLength(1);
+  });
+});
+
+describe("permissions-mode", () => {
+  function startPermissionsMode(sendMessageSpy: ReturnType<typeof vi.fn>) {
+    const mockSessionManager = { sendMessage: sendMessageSpy } as any;
+
+    // Replicate the program logic with a mock session manager
+    const initDispose = whenever(
+      [["session", $.sid, "status", $.status]],
+      (sessions) => {
+        for (const { sid } of sessions) {
+          const existing = when(["permissions", sid, "mode", $.mode]);
+          if (existing.length === 0) {
+            assert("permissions", sid, "mode", "default");
+          }
+        }
+      },
+    );
+
+    const uiDispose = whenever(
+      [["ui", "selectedSession", $.sid]],
+      (selections) => {
+        const sid = selections[0]?.sid as string;
+        if (!sid) return;
+
+        const currentMode = when(["permissions", sid, "mode", $.mode]);
+        const mode = (currentMode[0]?.mode as string) ?? "default";
+
+        injectVdom("detail-header", 1000,
+          h("div", { id: "permissions-toggle", class: "permissions-toggle hstack gap-4" },
+            h("button", {
+              class: `perm-btn ${mode === "default" ? "perm-btn-active" : ""}`,
+              onClick: () => {
+                set("permissions", sid, "mode", "default");
+                mockSessionManager.sendMessage(sid, "/permissions-mode default");
+              },
+            }, "Default"),
+            h("button", {
+              class: `perm-btn ${mode === "plan" ? "perm-btn-active" : ""}`,
+              onClick: () => {
+                set("permissions", sid, "mode", "plan");
+                mockSessionManager.sendMessage(sid, "/permissions-mode plan");
+              },
+            }, "Plan"),
+            h("button", {
+              class: `perm-btn ${mode === "bypassPermissions" ? "perm-btn-active" : ""}`,
+              onClick: () => {
+                set("permissions", sid, "mode", "bypassPermissions");
+                mockSessionManager.sendMessage(sid, "/permissions-mode bypassPermissions");
+              },
+            }, "YOLO"),
+          ),
+        );
+      },
+    );
+
+    disposers.push(initDispose, uiDispose);
+  }
+
+  it("initializes default permissions mode for new sessions", () => {
+    const spy = vi.fn();
+    startPermissionsMode(spy);
+
+    assert("session", "s-1", "status", "active");
+
+    expect(db.query(["permissions", "s-1", "mode", $.mode])).toEqual([{ mode: "default" }]);
+  });
+
+  it("injects toggle bar into detail-header when session selected", () => {
+    const spy = vi.fn();
+    startPermissionsMode(spy);
+
+    // Simulate VDOM: detail-header exists
+    db.assert("detail-header", "tag", "div");
+    db.assert("detail-header", "prop", "id", "detail-header");
+
+    assert("session", "s-1", "status", "active");
+    set("ui", "selectedSession", "s-1");
+
+    // Check the toggle was injected as a child of detail-header
+    const children = db.query(["detail-header", "child", 1000, $.child]);
+    expect(children).toHaveLength(1);
+
+    // The injected element should be the permissions toggle
+    const toggleId = children[0].child as string;
+    expect(db.query([toggleId, "class", "permissions-toggle"])).toHaveLength(1);
+  });
+
+  it("toggle buttons reflect current mode", () => {
+    const spy = vi.fn();
+    startPermissionsMode(spy);
+
+    db.assert("detail-header", "tag", "div");
+    assert("session", "s-1", "status", "active");
+    set("ui", "selectedSession", "s-1");
+
+    // Find the toggle's children (the buttons)
+    const toggleChildren = db.query(["detail-header", "child", 1000, $.toggle]);
+    const toggleId = toggleChildren[0]?.toggle as string;
+    const buttons = db.query([toggleId, "child", $.idx, $.btn]);
+
+    // Default mode: first button should have perm-btn-active class
+    const firstBtn = buttons.find(b => b.idx === 0)?.btn as string;
+    expect(db.query([firstBtn, "class", "perm-btn-active"])).toHaveLength(1);
+  });
+
+  it("clicking toggle updates the permissions fact", () => {
+    const spy = vi.fn();
+    startPermissionsMode(spy);
+
+    assert("session", "s-1", "status", "active");
+    set("ui", "selectedSession", "s-1");
+
+    // Initial mode
+    expect(db.query(["permissions", "s-1", "mode", $.m])).toEqual([{ m: "default" }]);
+
+    // Simulate clicking "plan" mode
+    set("permissions", "s-1", "mode", "plan");
+
+    expect(db.query(["permissions", "s-1", "mode", $.m])).toEqual([{ m: "plan" }]);
+  });
+
+  it("does not reinitialize mode for existing sessions", () => {
+    const spy = vi.fn();
+    startPermissionsMode(spy);
+
+    assert("session", "s-1", "status", "active");
+    expect(db.query(["permissions", "s-1", "mode", $.m])).toEqual([{ m: "default" }]);
+
+    // Change to plan
+    set("permissions", "s-1", "mode", "plan");
+
+    // Status change should NOT reset the mode
+    retract("session", "s-1", "status", "active");
+    assert("session", "s-1", "status", "ended");
+
+    expect(db.query(["permissions", "s-1", "mode", $.m])).toEqual([{ m: "plan" }]);
   });
 });

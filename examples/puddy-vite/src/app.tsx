@@ -6,7 +6,7 @@ import "./app.css";
 import { SessionManager } from "./networking/session-manager";
 
 // --- Session manager (singleton) ---
-const sessionManager = new SessionManager();
+export const sessionManager = new SessionManager();
 if (typeof window !== "undefined") {
   (window as any).sessionManager = sessionManager;
 }
@@ -326,7 +326,7 @@ function SessionDetail() {
 
       <ModeBadge />
 
-      <div class="detail-header hstack gap-8">
+      <div id="detail-header" class="detail-header hstack gap-8">
         <span class="font-headline" data-testid="detail-title">
           {selectedId ? `Session: ${selectedId}` : "Select a session"}
         </span>
