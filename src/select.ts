@@ -13,7 +13,7 @@
 //   descendant: .sidebar .session-row
 //   child:      .sidebar > button
 
-import { computed, comparer, type IComputedValue } from "mobx";
+import { computed, comparer } from "mobx";
 import { db, type Term } from "./db";
 
 // --- Public types ---
@@ -255,21 +255,34 @@ function toVdomElement(entityId: string, idx: VdomIndex): VdomElement {
 
 // --- Public API ---
 
+// Cache parsed selectors → MobX computeds (so repeated select() calls reuse the same computed)
+const selectorCache = new Map<string, { get(): VdomElement[] }>();
+
+/** Clear the selector cache (called by db.clear()). */
+export function clearSelectCache(): void {
+  selectorCache.clear();
+}
+
 /**
  * Reactive CSS selector query against VDOM facts.
- * Returns a computed of VdomElement objects matching the selector.
- * Re-evaluates when facts change, only notifies when results change.
+ * Returns VdomElement[] matching the selector. When called inside
+ * a MobX tracking context, establishes dependency on the fact map
+ * so the context re-runs when VDOM facts change.
  */
-export function select(cssSelector: string): IComputedValue<VdomElement[]> {
-  const segments = parseSelector(cssSelector);
-
-  return computed(
-    () => {
-      // Read db.facts.values() — tracks the full map
-      const idx = buildVdomIndex();
-      const entityIds = matchSelector(segments, idx);
-      return entityIds.map(id => toVdomElement(id, idx));
-    },
-    { equals: comparer.structural },
-  );
+export function select(cssSelector: string): VdomElement[] {
+  let cached = selectorCache.get(cssSelector);
+  if (!cached) {
+    const segments = parseSelector(cssSelector);
+    cached = computed(
+      () => {
+        // Read db.facts.values() — tracks the full map
+        const idx = buildVdomIndex();
+        const entityIds = matchSelector(segments, idx);
+        return entityIds.map(id => toVdomElement(id, idx));
+      },
+      { equals: comparer.structural },
+    );
+    selectorCache.set(cssSelector, cached);
+  }
+  return cached.get();
 }

@@ -6,6 +6,7 @@
 // writing VDOM doesn't trigger component re-execution.
 
 import { observable, action, computed, untracked, makeObservable, comparer, type IComputedValue } from "mobx";
+import { clearSelectCache } from "./select";
 
 export type Term = string | number | boolean;
 export type Fact = Term[];
@@ -468,6 +469,7 @@ export class FactDB {
     this.patternVersions.clear();
     this.patternsByFirstTerm.clear();
     this.refs.clear();
+    clearSelectCache();
   }
 
   // --- Refs ---

@@ -126,33 +126,33 @@ describe("select()", () => {
   });
 
   bench("select by class (.item) — matches ~200", () => {
-    select(".item").get();
+    select(".item");
   });
 
   bench("select by class (.highlighted) — matches ~40", () => {
-    select(".highlighted").get();
+    select(".highlighted");
   });
 
   bench("select by tag (div) — matches ~67", () => {
-    select("div").get();
+    select("div");
   });
 
   bench("select compound (div.highlighted) — matches ~14", () => {
-    select("div.highlighted").get();
+    select("div.highlighted");
   });
 
   bench("select by id (#el-42)", () => {
     // Add an id prop to one element
     db.assert("el-42", "prop", "id", "el-42");
-    select("#el-42").get();
+    select("#el-42");
   });
 
   bench("select descendant (div .item)", () => {
-    select("div .item").get();
+    select("div .item");
   });
 
   bench("select child (div > span)", () => {
-    select("div > span").get();
+    select("div > span");
   });
 });
 

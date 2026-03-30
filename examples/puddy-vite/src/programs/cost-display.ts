@@ -6,8 +6,6 @@
 
 import { $, claim, whenever, select } from "@jam/core";
 
-const connectionBars = select(".connection-bar");
-
 export const dispose = whenever(
   [["session", $.sid, "costAmount", $.amount], ["session", $.sid, "costCurrency", $.currency]],
   (sessions) => {
@@ -19,7 +17,7 @@ export const dispose = whenever(
     }
 
     const label = `Total cost: ${currency} ${totalCost.toFixed(4)}`;
-    for (const el of connectionBars.get()) {
+    for (const el of select(".connection-bar")) {
       claim(el.id, "prop", "title", label);
     }
   },

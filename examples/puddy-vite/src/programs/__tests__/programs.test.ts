@@ -65,7 +65,6 @@ function startMessageCounts() {
 }
 
 function startCostDisplay() {
-  const connectionBars = select(".connection-bar");
   const d = whenever(
     [["session", $.sid, "costAmount", $.amount], ["session", $.sid, "costCurrency", $.currency]],
     (sessions) => {
@@ -76,7 +75,7 @@ function startCostDisplay() {
         currency = cur as string;
       }
       const label = `Total cost: ${currency} ${totalCost.toFixed(4)}`;
-      for (const el of connectionBars.get()) {
+      for (const el of select(".connection-bar")) {
         claim(el.id, "prop", "title", label);
       }
     },
@@ -262,7 +261,7 @@ describe("select() integration", () => {
     db.assert("e1", "tag", "div");
     db.assert("e1", "class", "sidebar");
 
-    const sidebars = select(".sidebar").get();
+    const sidebars = select(".sidebar");
     expect(sidebars).toHaveLength(1);
     expect(sidebars[0].id).toBe("e1");
     expect(sidebars[0].classes).toContain("sidebar");
@@ -272,7 +271,7 @@ describe("select() integration", () => {
     db.assert("my-panel", "tag", "div");
     db.assert("my-panel", "prop", "id", "my-panel");
 
-    const panels = select("#my-panel").get();
+    const panels = select("#my-panel");
     expect(panels).toHaveLength(1);
   });
 
@@ -286,8 +285,8 @@ describe("select() integration", () => {
     db.assert("grandchild", "tag", "span");
     db.assert("grandchild", "class", "deep");
 
-    expect(select(".app .deep").get()).toHaveLength(1);
-    expect(select(".app > .deep").get()).toHaveLength(0);
-    expect(select(".app > .inner").get()).toHaveLength(1);
+    expect(select(".app .deep")).toHaveLength(1);
+    expect(select(".app > .deep")).toHaveLength(0);
+    expect(select(".app > .inner")).toHaveLength(1);
   });
 });
