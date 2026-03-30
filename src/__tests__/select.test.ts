@@ -24,7 +24,7 @@ function emitTree() {
   db.assert("app", "tag", "div");
   db.assert("app", "class", "app");
   db.assert("app", "prop", "id", "app");
-  db.assert("__root", "child", 0, "app");
+  db.assert("dom", "child", 0, "app");
 
   db.assert("app:0", "tag", "div");
   db.assert("app:0", "class", "sidebar");

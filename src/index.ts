@@ -5,3 +5,5 @@ export { h, Fragment, injectVdom } from "./jsx";
 export { mount } from "./renderer";
 export { select } from "./select";
 export type { VdomElement } from "./select";
+export { persist } from "./persist";
+export type { PersistOptions } from "./persist";

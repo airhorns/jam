@@ -63,37 +63,37 @@ describe("emitVdom — JSX to facts", () => {
 
   bench("emit single element", () => {
     db.clear();
-    emitVdom(h("div", { class: "app" }, "hello"), "__root", 0);
+    emitVdom(h("div", { class: "app" }, "hello"), "dom", 0);
   });
 
   bench("emit flat list of 50 items (150 elements)", () => {
     db.clear();
-    emitVdom(makeList(50), "__root", 0);
+    emitVdom(makeList(50), "dom", 0);
   });
 
   bench("emit flat list of 200 items (600 elements)", () => {
     db.clear();
-    emitVdom(makeList(200), "__root", 0);
+    emitVdom(makeList(200), "dom", 0);
   });
 
   bench("emit tree depth=3 breadth=4 (85 elements)", () => {
     db.clear();
-    emitVdom(makeTree(3, 4), "__root", 0);
+    emitVdom(makeTree(3, 4), "dom", 0);
   });
 
   bench("emit tree depth=4 breadth=3 (121 elements)", () => {
     db.clear();
-    emitVdom(makeTree(4, 3), "__root", 0);
+    emitVdom(makeTree(4, 3), "dom", 0);
   });
 
   bench("re-emit 50-item list (clear + emit, simulating re-render)", () => {
     const vnode = makeList(50);
     // Initial emit
-    emitVdom(vnode, "__root", 0);
+    emitVdom(vnode, "dom", 0);
     const keys = new Set(db.facts.keys());
     // Bench the re-emit
     for (const key of keys) db.deleteByKey(key);
-    emitVdom(vnode, "__root", 0);
+    emitVdom(vnode, "dom", 0);
   });
 });
 
@@ -191,7 +191,7 @@ describe("full render cycle (component → emit)", () => {
       db.assert("todo", i, "done", i % 3 === 0);
     }
     const vnode = TodoApp();
-    emitVdom(vnode, "__root", 0);
+    emitVdom(vnode, "dom", 0);
   });
 
   bench("component with 100 todos: execute + emit", () => {
@@ -215,6 +215,6 @@ describe("full render cycle (component → emit)", () => {
     }
 
     const vnode = TodoApp();
-    emitVdom(vnode, "__root", 0);
+    emitVdom(vnode, "dom", 0);
   });
 });

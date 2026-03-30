@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "mobx": "^6.13.0"
+    "mobx": "^6.13.0",
+    "wa-sqlite": "^1.0.0"
   },
   "devDependencies": {
     "typescript": "^5.9.0",

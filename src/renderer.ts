@@ -42,7 +42,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       runInAction(() => {
         for (const key of componentKeys) db.deleteByKey(key);
         db.emitCollector = new Set();
-        emitVdom(vnode, "__root", 0);
+        emitVdom(vnode, "dom", 0);
         componentKeys = db.emitCollector;
         db.emitCollector = null;
       });
@@ -175,7 +175,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       return el;
     }
 
-    const rootChildren = children.get("__root") ?? [];
+    const rootChildren = children.get("dom") ?? [];
     const rootNodes: Node[] = [];
     for (const [, childId] of rootChildren) {
       const node = reconcile(childId);
