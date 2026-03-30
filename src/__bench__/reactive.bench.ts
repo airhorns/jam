@@ -1,7 +1,5 @@
 // Benchmarks for the reactive system: when(), whenever(), transaction(),
 // and the full reactive chain from state mutation → index recompute → observer.
-//
-// These measure the overhead of MobX reactivity on top of raw DB operations.
 
 import { bench, describe, beforeEach } from "vitest";
 import { autorun } from "mobx";
@@ -16,27 +14,24 @@ import { db } from "../db";
 describe("when() — reactive query", () => {
   beforeEach(() => db.clear());
 
-  bench("when().get() on empty db", () => {
-    const idx = when(["todo", $.id, "title", $.title]);
-    idx.get();
+  bench("when() on empty db", () => {
+    when(["todo", $.id, "title", $.title]);
   });
 
-  bench("when().get() with 100 todos", () => {
+  bench("when() with 100 todos", () => {
     for (let i = 0; i < 100; i++) {
       db.assert("todo", i, "title", `Task ${i}`);
     }
-    const idx = when(["todo", $.id, "title", $.title]);
-    idx.get();
+    when(["todo", $.id, "title", $.title]);
   });
 
-  bench("when().get() repeated reads (MobX cached)", () => {
+  bench("when() repeated reads (MobX cached)", () => {
     for (let i = 0; i < 50; i++) {
       db.assert("todo", i, "title", `Task ${i}`);
     }
-    const idx = when(["todo", $.id, "title", $.title]);
-    idx.get(); // prime
+    when(["todo", $.id, "title", $.title]); // prime
     for (let i = 0; i < 100; i++) {
-      idx.get();
+      when(["todo", $.id, "title", $.title]);
     }
   });
 
@@ -45,11 +40,10 @@ describe("when() — reactive query", () => {
       db.assert("todo", i, "title", `Task ${i}`);
       db.assert("todo", i, "done", i % 3 === 0);
     }
-    const idx = when(
+    when(
       ["todo", $.id, "title", $.title],
       ["todo", $.id, "done", $.done],
     );
-    idx.get();
   });
 });
 
@@ -61,9 +55,8 @@ describe("reactive chain: assert → when → autorun", () => {
   beforeEach(() => db.clear());
 
   bench("assert triggers autorun (1 index, small db)", () => {
-    const idx = when(["item", $.id, $.val]);
     let count = 0;
-    const disposer = autorun(() => { count = idx.get().length; });
+    const disposer = autorun(() => { count = when(["item", $.id, $.val]).length; });
     for (let i = 0; i < 50; i++) {
       assert("item", i, i * 2);
     }
@@ -71,9 +64,8 @@ describe("reactive chain: assert → when → autorun", () => {
   });
 
   bench("set triggers autorun (upsert, 1 index)", () => {
-    const idx = when(["counter", "value", $.val]);
     let val = 0;
-    const disposer = autorun(() => { val = (idx.get()[0]?.val as number) ?? 0; });
+    const disposer = autorun(() => { val = (when(["counter", "value", $.val])[0]?.val as number) ?? 0; });
     for (let i = 0; i < 100; i++) {
       set("counter", "value", i);
     }
@@ -85,10 +77,9 @@ describe("reactive chain: assert → when → autorun", () => {
     when(["session", $.sid, "status", $.status]);
     when(["connection", "status", $.s]);
     when(["plan", $.sid, $.eid, $.c, $.st, $.p]);
-    const idx = when(["item", $.id, $.val]);
 
     let count = 0;
-    const disposer = autorun(() => { count = idx.get().length; });
+    const disposer = autorun(() => { count = when(["item", $.id, $.val]).length; });
     for (let i = 0; i < 50; i++) {
       assert("item", i, i);
     }
@@ -96,17 +87,15 @@ describe("reactive chain: assert → when → autorun", () => {
   });
 
   bench("transaction batches 50 asserts into 1 autorun", () => {
-    const idx = when(["item", $.id, $.val]);
     let runs = 0;
-    const disposer = autorun(() => { idx.get(); runs++; });
-    runs = 0; // reset after initial run
+    const disposer = autorun(() => { when(["item", $.id, $.val]); runs++; });
+    runs = 0;
 
     transaction(() => {
       for (let i = 0; i < 50; i++) {
         assert("item", i, i);
       }
     });
-    // Should have run exactly once
     disposer();
   });
 });
@@ -157,7 +146,7 @@ describe("whenever", () => {
     for (let i = 0; i < 50; i++) {
       assert("src", i, i * 10);
     }
-    disposer(); // should retract all derived facts
+    disposer();
   });
 });
 
@@ -183,11 +172,9 @@ describe("transaction overhead", () => {
   });
 
   bench("retract + 100 asserts in transaction (plan-style)", () => {
-    // Simulate initial plan
     for (let i = 0; i < 50; i++) {
       assert("plan", "s-1", `e-${i}`, `content ${i}`, "pending", "medium");
     }
-    // Replace all
     transaction(() => {
       retract("plan", "s-1", _, _, _, _);
       for (let i = 0; i < 100; i++) {

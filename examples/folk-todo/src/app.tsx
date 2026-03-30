@@ -37,12 +37,10 @@ function TodoItem({ todoId, title, done }: { key?: unknown; todoId: number; titl
 }
 
 export function TodoApp() {
-  const todos = when(
+  const items = when(
     ["todo", $.id, "title", $.title],
     ["todo", $.id, "done", $.done],
   );
-
-  const items = todos.get();
 
   return (
     <div class="todo-app">

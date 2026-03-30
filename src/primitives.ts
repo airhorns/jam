@@ -6,7 +6,7 @@
 // like ["todo", $.id, "title", $.title] don't match VDOM facts like
 // ["e1", "tag", "div"], so component re-execution doesn't trigger.
 
-import { action, computed, reaction, runInAction, comparer, IComputedValue } from "mobx";
+import { action, reaction, runInAction, comparer } from "mobx";
 import { db, type Term, type Pattern, type Bindings, _ as wildcard } from "./db";
 export { $, _ } from "./db";
 export type { Term, Pattern, Bindings } from "./db";
@@ -47,12 +47,13 @@ export function transaction<T>(fn: () => T): T {
 }
 
 /**
- * Reactive query with fine-grained tracking. Returns a per-pattern
- * computed index with structural equality. Only re-evaluates when a
- * fact that could match these patterns is written or removed.
+ * Reactive query. Returns the current matching Bindings[].
+ * When called inside a MobX tracking context (component render,
+ * autorun, reaction), establishes fine-grained dependency tracking
+ * so the context re-runs when results change.
  */
-export function when(...patterns: Pattern[]): IComputedValue<Bindings[]> {
-  return db.index(...patterns);
+export function when(...patterns: Pattern[]): Bindings[] {
+  return db.index(...patterns).get();
 }
 
 /**

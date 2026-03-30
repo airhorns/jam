@@ -29,7 +29,7 @@ function ConnectionBar() {
 
   return (
     <Fragment>
-      {matches.get().map(({ status, host }) => {
+      {matches.map(({ status, host }) => {
         const dotColor =
           status === "connected"
             ? "bg-green"
@@ -61,7 +61,7 @@ function SessionList() {
   const connection = when(["connection", "status", $.status]);
 
   const isConnected =
-    connection.get().length > 0 && connection.get()[0].status === "connected";
+    connection.length > 0 && connection[0].status === "connected";
 
   return (
     <div class="sidebar vstack" data-testid="sidebar">
@@ -69,7 +69,7 @@ function SessionList() {
       <div class="divider" />
 
       <div class="vstack gap-4 p-8 scroll-area">
-        {sessions.get().map(({ sid, agent, status }) => {
+        {sessions.map(({ sid, agent, status }) => {
           const dotColor =
             status === "starting"
               ? "bg-gray"
@@ -122,7 +122,7 @@ function ModeBadge() {
 
   return (
     <Fragment>
-      {modes.get().map(({ sid, mode }) => (
+      {modes.map(({ sid, mode }) => (
         <div
           key={`mode-${sid}`}
           class="mode-badge hstack gap-8"
@@ -145,11 +145,11 @@ function PlanList() {
     $.planPriority,
   ]);
 
-  if (plans.get().length === 0) return null;
+  if (plans.length === 0) return null;
 
   return (
     <div class="plan-section vstack gap-4" data-testid="plan-list">
-      {plans.get().map(
+      {plans.map(
         ({ sid, entryId, planContent, planStatus, planPriority }) => {
           const statusIcon =
             planStatus === "completed"
@@ -193,7 +193,7 @@ function MessageList() {
 
   return (
     <div class="message-list vstack gap-4" data-testid="message-list">
-      {messages.get().map(({ msgId, sender, kind, content }) => {
+      {messages.map(({ msgId, sender, kind, content }) => {
         if (kind === "thought") {
           return (
             <div key={msgId as string} class="message hstack gap-8">
@@ -264,7 +264,7 @@ function StreamingIndicators() {
 
   return (
     <Fragment>
-      {thinking.get().map(
+      {thinking.map(
         ({ val }) =>
           val === "true" && (
             <div class="streaming-indicator hstack gap-8" data-testid="thinking">
@@ -274,7 +274,7 @@ function StreamingIndicators() {
           ),
       )}
 
-      {streamingThought.get().map(
+      {streamingThought.map(
         ({ thought }) =>
           thought && (
             <div
@@ -289,7 +289,7 @@ function StreamingIndicators() {
           ),
       )}
 
-      {streamingText.get().map(
+      {streamingText.map(
         ({ streaming }) =>
           streaming && (
             <div class="streaming-indicator hstack gap-8" data-testid="streaming-text">
@@ -301,7 +301,7 @@ function StreamingIndicators() {
           ),
       )}
 
-      {activeTools.get().map(
+      {activeTools.map(
         ({ hasTools }) =>
           hasTools === "true" && (
             <div class="streaming-indicator hstack gap-8" data-testid="active-tools">
@@ -317,7 +317,7 @@ function StreamingIndicators() {
 function SessionDetail() {
   const selection = when(["ui", "selectedSession", $.selectedId]);
   const selectedId =
-    selection.get().length > 0 ? (selection.get()[0].selectedId as string) : "";
+    selection.length > 0 ? (selection[0].selectedId as string) : "";
 
   return (
     <div class="detail vstack" data-testid="detail">

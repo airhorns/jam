@@ -35,27 +35,24 @@ describe("set", () => {
     set("counter", "value", 1);
     set("counter", "value", 2);
     expect(db.facts.size).toBe(1);
-    const results = db.query(["counter", "value", $.v]);
+    const results = when(["counter", "value", $.v]);
     expect(results).toEqual([{ v: 2 }]);
   });
 });
 
 describe("when", () => {
-  it("returns a computed that queries the db", () => {
+  it("returns matching bindings", () => {
     assert("x", 1);
     assert("x", 2);
     const result = when(["x", $.val]);
-    expect(result.get()).toContainEqual({ val: 1 });
-    expect(result.get()).toContainEqual({ val: 2 });
+    expect(result).toContainEqual({ val: 1 });
+    expect(result).toContainEqual({ val: 2 });
   });
 
-  it("reacts to new facts", () => {
-    const result = when(["x", $.val]);
-    expect(result.get()).toEqual([]);
-
+  it("reacts to new facts inside autorun", () => {
     const observed: number[] = [];
     const disposer = autorun(() => {
-      observed.push(result.get().length);
+      observed.push(when(["x", $.val]).length);
     });
 
     assert("x", 1);
@@ -65,14 +62,13 @@ describe("when", () => {
     disposer();
   });
 
-  it("reacts to retracted facts", () => {
+  it("reacts to retracted facts inside autorun", () => {
     assert("x", 1);
     assert("x", 2);
-    const result = when(["x", $.val]);
 
     const observed: number[] = [];
     const disposer = autorun(() => {
-      observed.push(result.get().length);
+      observed.push(when(["x", $.val]).length);
     });
 
     retract("x", 1);
@@ -81,13 +77,12 @@ describe("when", () => {
     disposer();
   });
 
-  it("reacts to set (upsert)", () => {
+  it("reacts to set (upsert) inside autorun", () => {
     set("count", 0);
-    const result = when(["count", $.val]);
 
     const observed: unknown[] = [];
     const disposer = autorun(() => {
-      const vals = result.get();
+      const vals = when(["count", $.val]);
       observed.push(vals.length > 0 ? vals[0].val : "empty");
     });
 
@@ -104,12 +99,11 @@ describe("when", () => {
     assert("todo", 2, "title", "B");
     assert("todo", 2, "done", true);
 
-    const result = when(
+    const items = when(
       ["todo", $.id, "title", $.title],
       ["todo", $.id, "done", $.done],
     );
 
-    const items = result.get();
     expect(items).toHaveLength(2);
     expect(items).toContainEqual({ id: 1, title: "A", done: false });
     expect(items).toContainEqual({ id: 2, title: "B", done: true });
@@ -162,13 +156,10 @@ describe("transaction", () => {
     assert("plan", "s-1", "entry-1", "old task 2", "pending", "low");
 
     const observed: number[] = [];
-    const idx = when(["plan", "s-1", $.entryId, $.content, $.status, $.priority]);
     const disposer = autorun(() => {
-      observed.push(idx.get().length);
+      observed.push(when(["plan", "s-1", $.entryId, $.content, $.status, $.priority]).length);
     });
 
-    // Without transaction: retract + 3 asserts = 4 reactions
-    // With transaction: 1 reaction seeing final state
     transaction(() => {
       retract("plan", "s-1", _, _, _, _);
       assert("plan", "s-1", "entry-0", "new task A", "in_progress", "high");
@@ -177,7 +168,6 @@ describe("transaction", () => {
     });
 
     // Should see: [2 (initial autorun), 3 (after transaction)]
-    // NOT: [2, 0, 1, 2, 3] which would happen without batching
     expect(observed).toEqual([2, 3]);
 
     disposer();
