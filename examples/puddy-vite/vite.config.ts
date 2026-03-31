@@ -5,6 +5,12 @@ export default defineConfig({
     jsxFactory: "h",
     jsxFragment: "Fragment",
   },
+  optimizeDeps: {
+    exclude: ["wa-sqlite"],
+  },
+  worker: {
+    format: "es",
+  },
   server: {
     proxy: {
       "/v1": {

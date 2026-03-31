@@ -1,5 +1,5 @@
 import { h } from "@jam/core/jsx";
-import { mount, db } from "@jam/core";
+import { mount, db, persist } from "@jam/core";
 import { App, sessionManager } from "./app";
 
 // Independent programs — each reacts to the shared fact database.
@@ -9,10 +9,15 @@ import "./programs/cost-display";
 import "./programs/message-counts";
 import { startPermissionsMode } from "./programs/permissions-mode";
 
-mount(<App />, document.getElementById("app")!);
+async function start() {
+  // Restore persisted facts (sessions, UI state, permissions, etc.)
+  await persist({ name: "puddy" });
 
-// Start programs that need runtime references
-startPermissionsMode(sessionManager);
+  mount(<App />, document.getElementById("app")!);
+  startPermissionsMode(sessionManager);
+}
+
+start();
 
 if (typeof window !== "undefined") {
   (window as any).__db = db;
