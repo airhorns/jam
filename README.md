@@ -174,30 +174,3 @@ import { h, injectVdom } from "@jam/core";
 // Add a badge as child of session-s-1 at index 1000 (avoiding conflicts)
 injectVdom("session-s-1", 1000, h("span", { class: "badge" }, "3"));
 ```
-
-## Project structure
-
-```
-jam/
-  src/                  # @jam/core library
-    db.ts               # Fact database with MobX reactivity
-    primitives.ts       # assert, retract, set, when, whenever, transaction
-    jsx.ts              # JSX factory, VDOM emission
-    renderer.ts         # Two-phase mount (emit + patch)
-    select.ts           # CSS selector queries on VDOM facts
-  examples/
-    counter/            # Minimal counter
-    folk-todo/          # Todo app with external strikethrough program
-    puddy-vite/         # Chat app with session management + 4 extension programs
-  FOLK.md               # Folk Computer programming model reference
-```
-
-## Running tests
-
-```bash
-pnpm test           # Unit tests (vitest)
-pnpm bench          # Performance benchmarks
-pnpm -r typecheck   # TypeScript checking across all packages
-
-cd examples/folk-todo && pnpm test:e2e   # Playwright e2e tests
-```
