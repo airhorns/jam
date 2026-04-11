@@ -2,7 +2,7 @@ default:
     @just --list
 
 test:
-    pnpm test
+    cd packages/core && pnpm test
     cd examples/folk-todo && pnpm test
 
 test-e2e:

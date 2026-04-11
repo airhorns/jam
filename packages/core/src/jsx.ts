@@ -108,7 +108,11 @@ export function emitVdom(
 
   if (typeof vnode.tag === "function") {
     // Component: execute it, propagate key/id to root output element
-    const result = (vnode.tag as Function)(vnode.props);
+    // Merge children into props so components can access them
+    const propsWithChildren = vnode.children.length > 0
+      ? { ...vnode.props, children: vnode.children.length === 1 ? vnode.children[0] : vnode.children }
+      : vnode.props;
+    const result = (vnode.tag as Function)(propsWithChildren);
     if (result) {
       // Compute the ID this component would get, and propagate to its output
       const componentId = computeEntityId(parentId, childIndex, vnode.props, inheritId);
