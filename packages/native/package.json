@@ -1,0 +1,19 @@
+{
+  "name": "@jam/native",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build && cp dist/jam-runtime.iife.js Sources/JamNative/Resources/jam-runtime.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@jam/core": "workspace:*",
+    "@jam/ui": "workspace:*",
+    "mobx": "^6.13.7"
+  },
+  "devDependencies": {
+    "vite": "^6.4.1",
+    "typescript": "^5.8.3"
+  }
+}

@@ -131,12 +131,26 @@ export function emitVdom(
 
   // Intrinsic element: emit claims
   const elId = computeEntityId(parentId, childIndex, vnode.props, inheritId);
-  db.assert(elId, "tag", vnode.tag);
+
+  // Native mode: use component displayName as tag instead of HTML tag
+  const tagName = vnode.props.__nativeTag ? String(vnode.props.__nativeTag) : vnode.tag;
+  db.assert(elId, "tag", tagName as string);
   db.assert(parentId, "child", childIndex, elId);
+
+  // Native mode: emit resolved style values as individual facts
+  if (vnode.props.__nativeStyles) {
+    for (const [prop, value] of Object.entries(vnode.props.__nativeStyles as Record<string, unknown>)) {
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        db.assert(elId, "style", prop, value as Term);
+      }
+    }
+  }
 
   // Props
   for (const [key, value] of Object.entries(vnode.props)) {
     if (key === "key") continue;
+    // Skip internal native-mode props
+    if (key === "__nativeStyles" || key === "__nativeTag" || key.startsWith("__native_")) continue;
     if (key.startsWith("on") && typeof value === "function") {
       const eventName = key.slice(2).toLowerCase();
       const refKey = `${elId}:handler:${eventName}`;

@@ -18,6 +18,7 @@ import {
   injectStyleRule,
   injectPseudoRule,
 } from "./css";
+import { isNativeMode } from "./native-mode";
 
 export type StyledComponent<P = {}> = {
   (props: P & Partial<AllStyleProps> & { children?: VChild | VChild[]; class?: string; [key: string]: unknown }): VNode;
@@ -177,6 +178,26 @@ export function styled<V extends Record<string, Record<string, Record<string, un
 
     // 4. Resolve all token/theme references in accumulated styles
     const resolvedStyles = processStyles(styleAccum);
+
+    // Native mode: emit resolved styles as props instead of CSS classes
+    if (isNativeMode()) {
+      passthrough.__nativeStyles = resolvedStyles;
+      passthrough.__nativeTag = component.displayName || (typeof base === "string" ? base : "View");
+
+      // Include pseudo styles for native hover/press/focus handling
+      for (const [pseudoKey, pseudoStyles] of Object.entries(pseudoAccum)) {
+        if (pseudoStyles) {
+          passthrough[`__native_${pseudoKey}`] = processStyles(pseudoStyles);
+        }
+      }
+
+      if (typeof base === "string") {
+        return h(base, passthrough, ...children);
+      } else {
+        return base({ ...passthrough, children: children.length === 1 ? children[0] : children }) as VNode;
+      }
+    }
+
     const cssProps = stylesToCSS(resolvedStyles);
 
     // 5. Generate class name and inject CSS

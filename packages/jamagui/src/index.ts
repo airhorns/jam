@@ -1,6 +1,9 @@
 // Config
 export { createJamUI } from "./config";
 
+// Native mode
+export { setNativeMode, isNativeMode } from "./native-mode";
+
 // Token system
 export { createTokens, getToken, resolveTokenValue, isTokenRef, isThemeRef } from "./tokens";
 
