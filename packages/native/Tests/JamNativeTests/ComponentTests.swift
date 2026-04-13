@@ -155,7 +155,7 @@ final class ComponentTests: XCTestCase {
                 padding: "$space.3",
                 backgroundColor: "$color.blue",
                 borderRadius: "$radius.2",
-                onClick: function() { set("test", "clicked", true); }
+                onClick: function() { remember("test", "clicked", true); }
             },
                 h(Text, { color: "$color.text" }, "Click Me")
             )
@@ -174,7 +174,7 @@ final class ComponentTests: XCTestCase {
                 placeholder: "Enter email",
                 fontSize: 14,
                 backgroundColor: "$color.bg",
-                onChange: function(e) { set("form", "email", e.data); }
+                onChange: function(e) { remember("form", "email", e.data); }
             })
         """)
         let facts = runtime.getCurrentFacts()
@@ -189,7 +189,7 @@ final class ComponentTests: XCTestCase {
                 h(Checkbox, {
                     id: "agree",
                     checked: true,
-                    onCheckedChange: function(v) { set("form", "agree", v); }
+                    onCheckedChange: function(v) { remember("form", "agree", v); }
                 },
                     h(Text, {}, "✓")
                 ),
@@ -209,7 +209,7 @@ final class ComponentTests: XCTestCase {
                 h(Text, {}, "Dark Mode"),
                 h(Switch, {
                     id: "dark-mode",
-                    onCheckedChange: function(v) { set("settings", "darkMode", v); }
+                    onCheckedChange: function(v) { remember("settings", "darkMode", v); }
                 })
             )
         """)
@@ -224,7 +224,7 @@ final class ComponentTests: XCTestCase {
             h(Slider, {
                 id: "volume",
                 min: 0, max: 100, step: 1,
-                onValueChange: function(e) { set("settings", "volume", e.data); }
+                onValueChange: function(e) { remember("settings", "volume", e.data); }
             })
         """)
         let facts = runtime.getCurrentFacts()

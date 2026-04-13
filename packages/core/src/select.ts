@@ -2,7 +2,7 @@
 //
 // Returns a reactive computed of VdomElement objects matching the selector.
 // Reads db.facts directly (tracks the map), uses structural comparison
-// so downstream observers only re-run when the matching set changes.
+// so downstream observers only re-run when the matching remember changes.
 //
 // Supported selectors:
 //   tag:        div, button, span
@@ -124,7 +124,7 @@ export interface VdomIndex {
   classes: Map<string, Set<string>>;
   props: Map<string, Map<string, Term>>;
   children: Map<string, string[]>; // parent → ordered child IDs
-  parents: Map<string, string>;    // child → parent
+  parents: Map<string, string>; // child → parent
 }
 
 export function buildVdomIndex(): VdomIndex {
@@ -160,7 +160,10 @@ export function buildVdomIndex(): VdomIndex {
   const children = new Map<string, string[]>();
   for (const [parent, entries] of childEntries) {
     entries.sort((a, b) => a[0] - b[0]);
-    children.set(parent, entries.map(([, id]) => id));
+    children.set(
+      parent,
+      entries.map(([, id]) => id),
+    );
   }
 
   return { tags, classes, props, children, parents };
@@ -168,7 +171,11 @@ export function buildVdomIndex(): VdomIndex {
 
 // --- Matcher ---
 
-function matchesSimple(entityId: string, sel: SimpleSelector, idx: VdomIndex): boolean {
+function matchesSimple(
+  entityId: string,
+  sel: SimpleSelector,
+  idx: VdomIndex,
+): boolean {
   if (sel.tag) {
     const tag = idx.tags.get(entityId);
     if (tag !== sel.tag) return false;
@@ -188,7 +195,11 @@ function matchesSimple(entityId: string, sel: SimpleSelector, idx: VdomIndex): b
   return true;
 }
 
-function isDescendantOf(entityId: string, ancestorId: string, idx: VdomIndex): boolean {
+function isDescendantOf(
+  entityId: string,
+  ancestorId: string,
+  idx: VdomIndex,
+): boolean {
   let current = idx.parents.get(entityId);
   while (current) {
     if (current === ancestorId) return true;
@@ -197,7 +208,11 @@ function isDescendantOf(entityId: string, ancestorId: string, idx: VdomIndex): b
   return false;
 }
 
-function isChildOf(entityId: string, parentId: string, idx: VdomIndex): boolean {
+function isChildOf(
+  entityId: string,
+  parentId: string,
+  idx: VdomIndex,
+): boolean {
   return idx.parents.get(entityId) === parentId;
 }
 
@@ -231,7 +246,10 @@ function matchSelector(segments: SelectorSegment[], idx: VdomIndex): string[] {
         if (combinator === ">" && isChildOf(entityId, ancestor, idx)) {
           next.push(entityId);
           break;
-        } else if (combinator === " " && isDescendantOf(entityId, ancestor, idx)) {
+        } else if (
+          combinator === " " &&
+          isDescendantOf(entityId, ancestor, idx)
+        ) {
           next.push(entityId);
           break;
         }
@@ -278,7 +296,7 @@ export function select(cssSelector: string): VdomElement[] {
         // Read db.facts.values() — tracks the full map
         const idx = buildVdomIndex();
         const entityIds = matchSelector(segments, idx);
-        return entityIds.map(id => toVdomElement(id, idx));
+        return entityIds.map((id) => toVdomElement(id, idx));
       },
       { equals: comparer.structural },
     );

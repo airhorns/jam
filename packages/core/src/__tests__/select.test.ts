@@ -21,48 +21,48 @@ function emitTree() {
   //     </div>
   //   </div>
   // </div>
-  db.assert("app", "tag", "div");
-  db.assert("app", "class", "app");
-  db.assert("app", "prop", "id", "app");
-  db.assert("dom", "child", 0, "app");
+  db.insert("app", "tag", "div");
+  db.insert("app", "class", "app");
+  db.insert("app", "prop", "id", "app");
+  db.insert("dom", "child", 0, "app");
 
-  db.assert("app:0", "tag", "div");
-  db.assert("app:0", "class", "sidebar");
-  db.assert("app", "child", 0, "app:0");
+  db.insert("app:0", "tag", "div");
+  db.insert("app:0", "class", "sidebar");
+  db.insert("app", "child", 0, "app:0");
 
-  db.assert("session-s1", "tag", "button");
-  db.assert("session-s1", "class", "session-row");
-  db.assert("session-s1", "prop", "id", "session-s1");
-  db.assert("app:0", "child", 0, "session-s1");
+  db.insert("session-s1", "tag", "button");
+  db.insert("session-s1", "class", "session-row");
+  db.insert("session-s1", "prop", "id", "session-s1");
+  db.insert("app:0", "child", 0, "session-s1");
 
-  db.assert("session-s2", "tag", "button");
-  db.assert("session-s2", "class", "session-row");
-  db.assert("session-s2", "prop", "id", "session-s2");
-  db.assert("app:0", "child", 1, "session-s2");
+  db.insert("session-s2", "tag", "button");
+  db.insert("session-s2", "class", "session-row");
+  db.insert("session-s2", "prop", "id", "session-s2");
+  db.insert("app:0", "child", 1, "session-s2");
 
-  db.assert("detail", "tag", "div");
-  db.assert("detail", "class", "detail");
-  db.assert("detail", "prop", "id", "detail");
-  db.assert("app", "child", 1, "detail");
+  db.insert("detail", "tag", "div");
+  db.insert("detail", "class", "detail");
+  db.insert("detail", "prop", "id", "detail");
+  db.insert("app", "child", 1, "detail");
 
-  db.assert("detail:0", "tag", "div");
-  db.assert("detail:0", "class", "connection-bar");
-  db.assert("detail:0", "class", "hstack");
-  db.assert("detail", "child", 0, "detail:0");
+  db.insert("detail:0", "tag", "div");
+  db.insert("detail:0", "class", "connection-bar");
+  db.insert("detail:0", "class", "hstack");
+  db.insert("detail", "child", 0, "detail:0");
 
-  db.assert("detail:1", "tag", "div");
-  db.assert("detail:1", "class", "message-list");
-  db.assert("detail", "child", 1, "detail:1");
+  db.insert("detail:1", "tag", "div");
+  db.insert("detail:1", "class", "message-list");
+  db.insert("detail", "child", 1, "detail:1");
 
-  db.assert("detail:1:0", "tag", "div");
-  db.assert("detail:1:0", "class", "message");
-  db.assert("detail:1:0", "class", "fg-blue");
-  db.assert("detail:1", "child", 0, "detail:1:0");
+  db.insert("detail:1:0", "tag", "div");
+  db.insert("detail:1:0", "class", "message");
+  db.insert("detail:1:0", "class", "fg-blue");
+  db.insert("detail:1", "child", 0, "detail:1:0");
 
-  db.assert("detail:1:1", "tag", "div");
-  db.assert("detail:1:1", "class", "message");
-  db.assert("detail:1:1", "class", "fg-purple");
-  db.assert("detail:1", "child", 1, "detail:1:1");
+  db.insert("detail:1:1", "tag", "div");
+  db.insert("detail:1:1", "class", "message");
+  db.insert("detail:1:1", "class", "fg-purple");
+  db.insert("detail:1", "child", 1, "detail:1:1");
 }
 
 describe("select — tag selectors", () => {

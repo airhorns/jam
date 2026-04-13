@@ -52,11 +52,13 @@ Claim the fps is $fps
 - Claims are **scoped to their reactive context**: if a Claim is made inside a `When` block, it is automatically retracted when that `When` stops matching.
 - Best practice: scope claims to `$this` to prevent collisions between program instances.
 
+**Consequence:** multiple programs or matches may support the *same effective statement* at once. Folk keeps that statement alive while any supporting parent remains. This is great for compositional overlays and derived facts, but it is a footgun for singleton “current value” state unless you introduce a separate replacement-oriented API.
+
 **Implementation detail — "Claimization":** When a `When` pattern like `When /x/ is cool` is evaluated, the system also searches for `/someone/ claims /x/ is cool`. This "claimization" is done automatically in C (`claimizeClause()`), transparently bridging the gap between what you write and what's stored.
 
 ### 2.2 Wish — Declare desired states
 
-`Wish` is mechanically identical to `Claim` — it inserts a statement into the database. The difference is purely **conventional**: Claims assert facts about the world, Wishes express desires that some other program should fulfill.
+`Wish` is mechanically identical to `Claim` — it adds a statement into the database. The difference is purely **conventional**: Claims assert facts about the world, Wishes express desires that some other program should fulfill.
 
 ```tcl
 Wish $this is labelled "Hello, world!"

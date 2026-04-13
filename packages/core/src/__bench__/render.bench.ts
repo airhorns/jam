@@ -44,12 +44,12 @@ function makeList(n: number): VChild {
 /** Populate DB with VDOM facts simulating n elements. */
 function populateVdomFacts(n: number): void {
   for (let i = 0; i < n; i++) {
-    db.assert(`el-${i}`, "tag", i % 3 === 0 ? "div" : i % 3 === 1 ? "span" : "li");
-    db.assert(`el-${i}`, "class", "item");
-    if (i % 5 === 0) db.assert(`el-${i}`, "class", "highlighted");
-    db.assert(`el-${i}`, "prop", "data-idx", i);
+    db.insert(`el-${i}`, "tag", i % 3 === 0 ? "div" : i % 3 === 1 ? "span" : "li");
+    db.insert(`el-${i}`, "class", "item");
+    if (i % 5 === 0) db.insert(`el-${i}`, "class", "highlighted");
+    db.insert(`el-${i}`, "prop", "data-idx", i);
     if (i > 0) {
-      db.assert(`el-${Math.floor((i - 1) / 3)}`, "child", i % 3, `el-${i}`);
+      db.insert(`el-${Math.floor((i - 1) / 3)}`, "child", i % 3, `el-${i}`);
     }
   }
 }
@@ -90,9 +90,8 @@ describe("emitVdom — JSX to facts", () => {
     const vnode = makeList(50);
     // Initial emit
     emitVdom(vnode, "dom", 0);
-    const keys = new Set(db.facts.keys());
     // Bench the re-emit
-    for (const key of keys) db.deleteByKey(key);
+    db.clear();
     emitVdom(vnode, "dom", 0);
   });
 });
@@ -143,7 +142,7 @@ describe("select()", () => {
 
   bench("select by id (#el-42)", () => {
     // Add an id prop to one element
-    db.assert("el-42", "prop", "id", "el-42");
+    db.insert("el-42", "prop", "id", "el-42");
     select("#el-42");
   });
 
@@ -166,8 +165,8 @@ describe("full render cycle (component → emit)", () => {
   bench("component with 10 todos: execute + emit", () => {
     // Populate app state
     for (let i = 0; i < 10; i++) {
-      db.assert("todo", i, "title", `Task ${i}`);
-      db.assert("todo", i, "done", i % 3 === 0);
+      db.insert("todo", i, "title", `Task ${i}`);
+      db.insert("todo", i, "done", i % 3 === 0);
     }
 
     // Simulate component execution
@@ -187,8 +186,8 @@ describe("full render cycle (component → emit)", () => {
 
     db.clear();
     for (let i = 0; i < 10; i++) {
-      db.assert("todo", i, "title", `Task ${i}`);
-      db.assert("todo", i, "done", i % 3 === 0);
+      db.insert("todo", i, "title", `Task ${i}`);
+      db.insert("todo", i, "done", i % 3 === 0);
     }
     const vnode = TodoApp();
     emitVdom(vnode, "dom", 0);
@@ -196,8 +195,8 @@ describe("full render cycle (component → emit)", () => {
 
   bench("component with 100 todos: execute + emit", () => {
     for (let i = 0; i < 100; i++) {
-      db.assert("todo", i, "title", `Task ${i}`);
-      db.assert("todo", i, "done", i % 3 === 0);
+      db.insert("todo", i, "title", `Task ${i}`);
+      db.insert("todo", i, "done", i % 3 === 0);
     }
 
     function TodoApp() {

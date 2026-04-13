@@ -1,11 +1,15 @@
-// SessionManager — orchestrates agent sessions using assert/retract/set for state.
+// SessionManager — orchestrates agent sessions using remember/replace/forget for state.
 // All session state lives in the fact database. Only streaming accumulators
 // (which need incremental appending) live in JS.
 
-import { assert, retract, set, _, transaction } from "@jam/core";
+import { remember, replace, forget, _, transaction } from "@jam/core";
 import { type AgentEvent } from "../models/events";
 import { isTerminalStatus } from "../models/session";
-import { SandboxAgentClient, SandboxAgentError, type AgentInfo } from "./client";
+import {
+  SandboxAgentClient,
+  SandboxAgentError,
+  type AgentInfo,
+} from "./client";
 
 let _nextMsgId = 0;
 let _nextUserMsgId = 0;
@@ -16,7 +20,7 @@ export class SessionManager {
   // Minimal JS-only state: streaming accumulators (can't incrementally append to a fact)
   private streamingText: Map<string, string> = new Map();
   private streamingThought: Map<string, string> = new Map();
-  // Track session IDs and their current status for retract-before-assert pattern
+  // Track session IDs and their current status for singleton replacement
   private sessionStatuses: Map<string, string> = new Map();
 
   isConnected = false;
@@ -84,8 +88,8 @@ export class SessionManager {
 
     const sessionId = "s-" + Date.now();
 
-    assert("session", sessionId, "agent", agent);
-    assert("session", sessionId, "status", "starting");
+    remember("session", sessionId, "agent", agent);
+    replace("session", sessionId, "status", "starting");
     this.sessionStatuses.set(sessionId, "starting");
 
     this.connectSession(sessionId, agent, initialPrompt);
@@ -93,7 +97,11 @@ export class SessionManager {
     return sessionId;
   }
 
-  private async connectSession(sessionId: string, agent: string, initialPrompt?: string): Promise<void> {
+  private async connectSession(
+    sessionId: string,
+    agent: string,
+    initialPrompt?: string,
+  ): Promise<void> {
     try {
       await this.client.createSession(sessionId, agent);
 
@@ -113,14 +121,14 @@ export class SessionManager {
       }
     } catch (err: any) {
       this.setStatus(sessionId, "failed");
-      assert("session", sessionId, "statusDetail", err.message ?? String(err));
+      replace("session", sessionId, "statusDetail", err.message ?? String(err));
     }
   }
 
   sendMessage(sessionId: string, message: string): void {
     const msgId = `umsg-${_nextUserMsgId++}`;
-    assert("message", sessionId, msgId, "user", "text", message);
-    assert("session", sessionId, "thinking", "true");
+    remember("message", sessionId, msgId, "user", "text", message);
+    remember("session", sessionId, "thinking", "true");
 
     this.client.sendPrompt(
       sessionId,
@@ -141,8 +149,7 @@ export class SessionManager {
         this.ensureActive(sessionId);
         const oldText = this.streamingText.get(sessionId);
         const newText = (oldText ?? "") + p.text;
-        if (oldText) retract("session", sessionId, "streamingText", oldText);
-        assert("session", sessionId, "streamingText", newText);
+        replace("session", sessionId, "streamingText", newText);
         this.streamingText.set(sessionId, newText);
         break;
       }
@@ -151,25 +158,43 @@ export class SessionManager {
         this.ensureActive(sessionId);
         const oldThought = this.streamingThought.get(sessionId);
         const newThought = (oldThought ?? "") + p.text;
-        if (oldThought) retract("session", sessionId, "streamingThought", oldThought);
-        assert("session", sessionId, "streamingThought", newThought);
+        replace("session", sessionId, "streamingThought", newThought);
         this.streamingThought.set(sessionId, newThought);
         break;
       }
 
       case "toolCall":
         this.finalizeStreaming(sessionId);
-        assert("message", sessionId, p.data.toolCallId, "assistant", "toolUse", p.data.title);
-        assert("message", sessionId, p.data.toolCallId, "toolStatus", p.data.status ?? "pending");
-        assert("session", sessionId, "hasActiveTools", "true");
+        remember(
+          "message",
+          sessionId,
+          p.data.toolCallId,
+          "assistant",
+          "toolUse",
+          p.data.title,
+        );
+        remember(
+          "message",
+          sessionId,
+          p.data.toolCallId,
+          "toolStatus",
+          p.data.status ?? "pending",
+        );
+        remember("session", sessionId, "hasActiveTools", "true");
         break;
 
       case "toolCallUpdate": {
         const status = p.data.status ?? "in_progress";
-        retract("message", sessionId, p.data.toolCallId, "toolStatus", p.data.status ?? "pending");
-        assert("message", sessionId, p.data.toolCallId, "toolStatus", status);
+        replace("message", sessionId, p.data.toolCallId, "toolStatus", status);
         if (status === "completed" || status === "failed") {
-          assert("message", sessionId, p.data.toolCallId + "-result", "tool", "toolResult", status);
+          remember(
+            "message",
+            sessionId,
+            p.data.toolCallId + "-result",
+            "tool",
+            "toolResult",
+            status,
+          );
         }
         break;
       }
@@ -177,52 +202,71 @@ export class SessionManager {
       case "usageUpdate":
         transaction(() => {
           if (p.data.costAmount != null) {
-            set("session", sessionId, "costAmount", p.data.costAmount);
-            set("session", sessionId, "costCurrency", p.data.costCurrency ?? "USD");
+            replace("session", sessionId, "costAmount", p.data.costAmount);
+            replace(
+              "session",
+              sessionId,
+              "costCurrency",
+              p.data.costCurrency ?? "USD",
+            );
           }
-          set("session", sessionId, "contextSize", p.data.size);
-          set("session", sessionId, "contextUsed", p.data.used);
+          replace("session", sessionId, "contextSize", p.data.size);
+          replace("session", sessionId, "contextUsed", p.data.used);
         });
         break;
 
       case "plan": {
         this.ensureActive(sessionId);
         transaction(() => {
-          retract("plan", sessionId, _, _, _, _);
+          forget("plan", sessionId, _, _, _, _);
           for (let i = 0; i < p.data.entries.length; i++) {
             const entry = p.data.entries[i];
-            assert("plan", sessionId, `entry-${i}`, entry.content, entry.status, entry.priority);
+            remember(
+              "plan",
+              sessionId,
+              `entry-${i}`,
+              entry.content,
+              entry.status,
+              entry.priority,
+            );
           }
         });
         break;
       }
 
       case "currentModeUpdate":
-        set("session", sessionId, "currentMode", p.modeId);
+        replace("session", sessionId, "currentMode", p.modeId);
         const modeId = `mode-${_nextMsgId++}`;
-        assert("message", sessionId, modeId, "system", "modeChange", p.modeId);
+        remember(
+          "message",
+          sessionId,
+          modeId,
+          "system",
+          "modeChange",
+          p.modeId,
+        );
         break;
 
       case "availableCommandsUpdate":
         transaction(() => {
-          retract("command", sessionId, _, _);
+          forget("command", sessionId, _, _);
           for (const cmd of p.commands) {
-            assert("command", sessionId, cmd.name, cmd.description);
+            remember("command", sessionId, cmd.name, cmd.description);
           }
         });
         break;
 
       case "sessionInfoUpdate":
         if (p.title) {
-          set("session", sessionId, "title", p.title);
+          replace("session", sessionId, "title", p.title);
         }
         break;
 
       case "sessionEnd":
         this.finalizeStreaming(sessionId);
         this.setStatus(sessionId, "ended");
-        assert("session", sessionId, "statusDetail", p.stopReason);
-        retract("session", sessionId, "hasActiveTools", "true");
+        replace("session", sessionId, "statusDetail", p.stopReason);
+        forget("session", sessionId, "hasActiveTools", "true");
         break;
 
       case "unknown":
@@ -236,8 +280,8 @@ export class SessionManager {
     this.sessionStatuses.delete(id);
 
     transaction(() => {
-      retract("plan", id, _, _, _, _);
-      retract("command", id, _, _);
+      forget("plan", id, _, _, _, _);
+      forget("command", id, _, _);
     });
 
     try {
@@ -251,8 +295,8 @@ export class SessionManager {
 
   private setStatus(sessionId: string, status: string): void {
     const old = this.sessionStatuses.get(sessionId);
-    if (old) retract("session", sessionId, "status", old);
-    assert("session", sessionId, "status", status);
+    if (old === status) return;
+    replace("session", sessionId, "status", status);
     this.sessionStatuses.set(sessionId, status);
   }
 
@@ -260,22 +304,36 @@ export class SessionManager {
     if (this.sessionStatuses.get(sessionId) === "starting") {
       this.setStatus(sessionId, "active");
     }
-    retract("session", sessionId, "thinking", "true");
+    forget("session", sessionId, "thinking", "true");
   }
 
   private finalizeStreaming(sessionId: string): void {
-    retract("session", sessionId, "thinking", "true");
+    forget("session", sessionId, "thinking", "true");
     const text = this.streamingText.get(sessionId);
     if (text) {
-      retract("session", sessionId, "streamingText", text);
-      assert("message", sessionId, `msg-${_nextMsgId++}`, "assistant", "text", text);
+      forget("session", sessionId, "streamingText", text);
+      remember(
+        "message",
+        sessionId,
+        `msg-${_nextMsgId++}`,
+        "assistant",
+        "text",
+        text,
+      );
       this.streamingText.delete(sessionId);
     }
 
     const thought = this.streamingThought.get(sessionId);
     if (thought) {
-      retract("session", sessionId, "streamingThought", thought);
-      assert("message", sessionId, `thought-${_nextMsgId++}`, "assistant", "thought", thought);
+      forget("session", sessionId, "streamingThought", thought);
+      remember(
+        "message",
+        sessionId,
+        `thought-${_nextMsgId++}`,
+        "assistant",
+        "thought",
+        thought,
+      );
       this.streamingThought.delete(sessionId);
     }
   }
@@ -283,22 +341,28 @@ export class SessionManager {
   private clearStreaming(sessionId: string): void {
     const text = this.streamingText.get(sessionId);
     if (text) {
-      retract("session", sessionId, "streamingText", text);
+      forget("session", sessionId, "streamingText", text);
       this.streamingText.delete(sessionId);
     }
     const thought = this.streamingThought.get(sessionId);
     if (thought) {
-      retract("session", sessionId, "streamingThought", thought);
+      forget("session", sessionId, "streamingThought", thought);
       this.streamingThought.delete(sessionId);
     }
   }
 
   private syncConnectionState(): void {
     transaction(() => {
-      set("connection", "status", this.isConnected ? "connected" : "disconnected");
-      set("connection", "hostname", this.hostname);
+      replace(
+        "connection",
+        "status",
+        this.isConnected ? "connected" : "disconnected",
+      );
+      replace("connection", "hostname", this.hostname);
       if (this.connectionError) {
-        set("connection", "error", this.connectionError);
+        replace("connection", "error", this.connectionError);
+      } else {
+        forget("connection", "error", _);
       }
     });
   }

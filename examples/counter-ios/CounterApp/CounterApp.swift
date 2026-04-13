@@ -39,7 +39,7 @@ struct CounterApp: App {
                     // Mount the counter program
                     runtime.mountProgram(id: "counter", source: """
                         // Initialize counter state
-                        set("counter", "count", 0);
+                        replace("counter", "count", 0);
 
                         function Counter() {
                             const matches = when(["counter", "count", $.count]);
@@ -65,14 +65,14 @@ struct CounterApp: App {
 
                                 h(XStack, { gap: 16 },
                                     h(Button, {
-                                        onClick: function() { set("counter", "count", count - 1); },
+                                        onClick: function() { replace("counter", "count", count - 1); },
                                         padding: "$space.3",
                                         backgroundColor: "$color.accent",
                                         borderRadius: "$radius.2",
                                     }, h(Text, { color: "$color.text", fontSize: 18 }, "- Decrement")),
 
                                     h(Button, {
-                                        onClick: function() { set("counter", "count", count + 1); },
+                                        onClick: function() { replace("counter", "count", count + 1); },
                                         padding: "$space.3",
                                         backgroundColor: "$color.highlight",
                                         borderRadius: "$radius.2",
@@ -80,7 +80,7 @@ struct CounterApp: App {
                                 ),
 
                                 h(Button, {
-                                    onClick: function() { set("counter", "count", 0); },
+                                    onClick: function() { replace("counter", "count", 0); },
                                     padding: "$space.2",
                                 },  h(Text, { color: "$color.text", fontSize: 14 }, "Reset"))
                             );

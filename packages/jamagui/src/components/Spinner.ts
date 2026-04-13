@@ -48,6 +48,6 @@ const SpinnerFrame = styled("div", {
     display: "inline-flex",
     borderRadius: 100000,
     borderStyle: "solid",
-    // Animation applied via inline style since we can't easily set animation through the token system
+    // Animation applied via inline style since we can't easily remember animation through the token system
   },
 });

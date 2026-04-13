@@ -9,7 +9,7 @@ beforeEach(() => {
 describe("injectVdom", () => {
   it("injects a text node into a parent", () => {
     // Simulate a parent element already in the DB
-    db.assert("my-el", "tag", "div");
+    db.insert("my-el", "tag", "div");
 
     // Inject a text child at index 1000
     injectVdom("my-el", 1000, "hello world");
@@ -25,7 +25,7 @@ describe("injectVdom", () => {
   });
 
   it("injects a JSX element into a parent", () => {
-    db.assert("my-el", "tag", "div");
+    db.insert("my-el", "tag", "div");
 
     injectVdom("my-el", 1000, h("span", { class: "badge" }, "3"));
 
@@ -38,7 +38,7 @@ describe("injectVdom", () => {
   });
 
   it("injects multiple children", () => {
-    db.assert("my-el", "tag", "div");
+    db.insert("my-el", "tag", "div");
 
     injectVdom("my-el", 100,
       h("span", null, "first"),
@@ -51,10 +51,10 @@ describe("injectVdom", () => {
   });
 
   it("doesn't conflict with existing children at low indices", () => {
-    db.assert("my-el", "tag", "div");
+    db.insert("my-el", "tag", "div");
     // Simulate component children at 0, 1, 2
-    db.assert("my-el", "child", 0, "existing-0");
-    db.assert("my-el", "child", 1, "existing-1");
+    db.insert("my-el", "child", 0, "existing-0");
+    db.insert("my-el", "child", 1, "existing-1");
 
     // Inject at high index
     injectVdom("my-el", 1000, h("span", { class: "injected" }));
@@ -65,7 +65,7 @@ describe("injectVdom", () => {
   });
 
   it("works with id prop for globally addressable injected elements", () => {
-    db.assert("my-el", "tag", "div");
+    db.insert("my-el", "tag", "div");
 
     injectVdom("my-el", 1000, h("span", { id: "my-badge", class: "badge" }, "!"));
 

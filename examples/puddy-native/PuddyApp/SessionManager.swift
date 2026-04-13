@@ -59,17 +59,17 @@ final class SessionManager {
                 let httpResponse = response as? HTTPURLResponse
                 if httpResponse?.statusCode == 200 {
                     runtime.loadProgram(id: "connection-update", source: """
-                        set("connection", "status", "connected");
+                        replace("connection", "status", "connected");
                     """)
                     await fetchAgents()
                 } else {
                     runtime.loadProgram(id: "connection-update", source: """
-                        set("connection", "status", "disconnected");
+                        replace("connection", "status", "disconnected");
                     """)
                 }
             } catch {
                 runtime.loadProgram(id: "connection-update", source: """
-                    set("connection", "status", "disconnected");
+                    replace("connection", "status", "disconnected");
                 """)
             }
         }
@@ -87,7 +87,7 @@ final class SessionManager {
                }),
                let agentId = first["id"] as? String {
                 runtime.loadProgram(id: "agent-update", source: """
-                    set("connection", "agentId", "\(agentId)");
+                    replace("connection", "agentId", "\(agentId)");
                 """)
             }
         } catch {
@@ -103,9 +103,9 @@ final class SessionManager {
         runtime.loadProgram(id: "create-session-\(sessionId)", source: """
             var agentMatches = when(["connection", "agentId", $.id]);
             var agentId = agentMatches.length > 0 ? agentMatches[0].id : "unknown";
-            assert("session", "\(sessionId)", "agent", agentId);
-            assert("session", "\(sessionId)", "status", "starting");
-            set("ui", "selectedSession", "\(sessionId)");
+            remember("session", "\(sessionId)", "agent", agentId);
+            replace("session", "\(sessionId)", "status", "starting");
+            replace("ui", "selectedSession", "\(sessionId)");
         """)
 
         Task { await connectSession(sessionId) }
@@ -146,8 +146,8 @@ final class SessionManager {
         let escaped = escapeJS(text)
 
         runtime.loadProgram(id: "send-msg-\(msgId)", source: """
-            assert("message", "\(sessionId)", "\(msgId)", "user", "text", "\(escaped)");
-            assert("session", "\(sessionId)", "thinking", "true");
+            remember("message", "\(sessionId)", "\(msgId)", "user", "text", "\(escaped)");
+            remember("session", "\(sessionId)", "thinking", "true");
         """)
 
         Task {
@@ -220,8 +220,8 @@ final class SessionManager {
             finalizeStreaming(sessionId)
             setStatus(sessionId, "ended")
             runtime.loadProgram(id: "session-end-\(sessionId)", source: """
-                assert("session", "\(sessionId)", "statusDetail", "\(escapeJS(stopReason))");
-                retract("session", "\(sessionId)", "hasActiveTools", "true");
+                replace("session", "\(sessionId)", "statusDetail", "\(escapeJS(stopReason))");
+                forget("session", "\(sessionId)", "hasActiveTools", "true");
             """)
             return
         }
@@ -238,22 +238,22 @@ final class SessionManager {
             let text = (update["content"] as? [String: Any])?["text"] as? String ?? ""
             let escaped = escapeJS(text)
             runtime.loadProgram(id: "chunk-\(msgId)", source: """
-                retract("session", "\(sessionId)", "thinking", "true");
+                forget("session", "\(sessionId)", "thinking", "true");
                 var old = when(["session", "\(sessionId)", "streamingText", $.t]);
-                if (old.length > 0) retract("session", "\(sessionId)", "streamingText", old[0].t);
+                if (old.length > 0) forget("session", "\(sessionId)", "streamingText", old[0].t);
                 var prev = old.length > 0 ? old[0].t : "";
-                assert("session", "\(sessionId)", "streamingText", prev + "\(escaped)");
+                replace("session", "\(sessionId)", "streamingText", prev + "\(escaped)");
             """)
 
         case "agent_thought_chunk":
             let text = (update["content"] as? [String: Any])?["text"] as? String ?? ""
             let escaped = escapeJS(text)
             runtime.loadProgram(id: "thought-\(msgId)", source: """
-                retract("session", "\(sessionId)", "thinking", "true");
+                forget("session", "\(sessionId)", "thinking", "true");
                 var old = when(["session", "\(sessionId)", "streamingThought", $.t]);
-                if (old.length > 0) retract("session", "\(sessionId)", "streamingThought", old[0].t);
+                if (old.length > 0) forget("session", "\(sessionId)", "streamingThought", old[0].t);
                 var prev = old.length > 0 ? old[0].t : "";
-                assert("session", "\(sessionId)", "streamingThought", prev + "\(escaped)");
+                replace("session", "\(sessionId)", "streamingThought", prev + "\(escaped)");
             """)
 
         case "tool_call":
@@ -261,8 +261,8 @@ final class SessionManager {
             let title = escapeJS(update["title"] as? String ?? "Unknown tool")
             finalizeStreaming(sessionId)
             runtime.loadProgram(id: "tool-\(msgId)", source: """
-                assert("message", "\(sessionId)", "\(toolCallId)", "assistant", "toolUse", "\(title)");
-                assert("session", "\(sessionId)", "hasActiveTools", "true");
+                remember("message", "\(sessionId)", "\(toolCallId)", "assistant", "toolUse", "\(title)");
+                remember("session", "\(sessionId)", "hasActiveTools", "true");
             """)
 
         case "tool_call_update":
@@ -270,19 +270,19 @@ final class SessionManager {
             let status = update["status"] as? String ?? "in_progress"
             if status == "completed" || status == "failed" {
                 runtime.loadProgram(id: "toolresult-\(msgId)", source: """
-                    assert("message", "\(sessionId)", "\(toolCallId)-result", "tool", "toolResult", "\(status)");
+                    remember("message", "\(sessionId)", "\(toolCallId)-result", "tool", "toolResult", "\(status)");
                 """)
             }
 
         case "plan":
             if let entries = update["entries"] as? [[String: Any]] {
                 var source = "transaction(function() {\n"
-                source += "  retract(\"plan\", \"\(sessionId)\", _, _, _, _);\n"
+                source += "  forget(\"plan\", \"\(sessionId)\", _, _, _, _);\n"
                 for (i, entry) in entries.enumerated() {
                     let content = escapeJS(entry["content"] as? String ?? "")
                     let estatus = entry["status"] as? String ?? "pending"
                     let priority = entry["priority"] as? String ?? "medium"
-                    source += "  assert(\"plan\", \"\(sessionId)\", \"entry-\(i)\", \"\(content)\", \"\(estatus)\", \"\(priority)\");\n"
+                    source += "  remember(\"plan\", \"\(sessionId)\", \"entry-\(i)\", \"\(content)\", \"\(estatus)\", \"\(priority)\");\n"
                 }
                 source += "});"
                 runtime.loadProgram(id: "plan-\(msgId)", source: source)
@@ -291,14 +291,14 @@ final class SessionManager {
         case "session_info_update":
             if let title = update["title"] as? String {
                 runtime.loadProgram(id: "info-\(msgId)", source: """
-                    set("session", "\(sessionId)", "title", "\(escapeJS(title))");
+                    replace("session", "\(sessionId)", "title", "\(escapeJS(title))");
                 """)
             }
 
         case "current_mode_update":
             let modeId = update["modeId"] as? String ?? update["currentModeId"] as? String ?? ""
             runtime.loadProgram(id: "mode-\(msgId)", source: """
-                set("session", "\(sessionId)", "currentMode", "\(modeId)");
+                replace("session", "\(sessionId)", "currentMode", "\(modeId)");
             """)
 
         default:
@@ -311,23 +311,23 @@ final class SessionManager {
     private func setStatus(_ sessionId: String, _ status: String) {
         runtime.loadProgram(id: "status-\(sessionId)-\(status)", source: """
             var old = when(["session", "\(sessionId)", "status", $.s]);
-            if (old.length > 0) retract("session", "\(sessionId)", "status", old[0].s);
-            assert("session", "\(sessionId)", "status", "\(status)");
+            if (old.length > 0) forget("session", "\(sessionId)", "status", old[0].s);
+            replace("session", "\(sessionId)", "status", "\(status)");
         """)
     }
 
     private func finalizeStreaming(_ sessionId: String) {
         runtime.loadProgram(id: "finalize-\(sessionId)-\(nextMsgId)", source: """
-            retract("session", "\(sessionId)", "thinking", "true");
+            forget("session", "\(sessionId)", "thinking", "true");
             var streamText = when(["session", "\(sessionId)", "streamingText", $.t]);
             if (streamText.length > 0) {
-                retract("session", "\(sessionId)", "streamingText", streamText[0].t);
-                assert("message", "\(sessionId)", "msg-finalized-\(nextMsgId)", "assistant", "text", streamText[0].t);
+                forget("session", "\(sessionId)", "streamingText", streamText[0].t);
+                remember("message", "\(sessionId)", "msg-finalized-\(nextMsgId)", "assistant", "text", streamText[0].t);
             }
             var streamThought = when(["session", "\(sessionId)", "streamingThought", $.t]);
             if (streamThought.length > 0) {
-                retract("session", "\(sessionId)", "streamingThought", streamThought[0].t);
-                assert("message", "\(sessionId)", "thought-finalized-\(nextMsgId)", "assistant", "thought", streamThought[0].t);
+                forget("session", "\(sessionId)", "streamingThought", streamThought[0].t);
+                remember("message", "\(sessionId)", "thought-finalized-\(nextMsgId)", "assistant", "thought", streamThought[0].t);
             }
         """)
     }

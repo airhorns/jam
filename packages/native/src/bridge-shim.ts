@@ -6,7 +6,20 @@
 
 import "./polyfills";
 
-import { db, $, _, assert, retract, set, when, whenever, transaction } from "@jam/core";
+import {
+  db,
+  $,
+  _,
+  forget,
+  remember,
+  replace,
+  when,
+  whenever,
+  transaction,
+  loadProgramSource,
+  registerProgram,
+  removeProgram,
+} from "@jam/core";
 import { h, Fragment, emitVdom } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import * as ui from "@jam/ui";
@@ -34,15 +47,13 @@ function startObserving() {
 
 // --- Program management ---
 
-const programDisposers = new Map<string, () => void>();
-
 /**
  * Phase 1 only mount — executes the component tree and emits VDOM facts
  * into the database, without DOM reconciliation (Phase 2).
  * This mirrors packages/core/src/renderer.ts mount() but skips the DOM patch.
  */
 function nativeMount(rootVnode: VChild, rootId: string = "dom"): () => void {
-  let componentKeys = new Set<string>();
+  const mountOwner = db.createChildOwner(db.getCurrentOwnerId(), "native-mount");
 
   const emitDisposer = reaction(
     () => {
@@ -62,17 +73,23 @@ function nativeMount(rootVnode: VChild, rootId: string = "dom"): () => void {
     (vnode) => {
       // EFFECT: clear old claims and emit new ones
       runInAction(() => {
-        for (const key of componentKeys) db.deleteByKey(key);
-        db.emitCollector = new Set();
-        emitVdom(vnode, rootId, 0);
-        componentKeys = db.emitCollector;
-        db.emitCollector = null;
+        db.revokeOwner(mountOwner);
+        db.withOwnerScope(mountOwner, () => {
+          db.emitCollector = new Set();
+          emitVdom(vnode, rootId, 0);
+          db.emitCollector = null;
+        });
       });
     },
     { fireImmediately: true, equals: () => false },
   );
 
-  return emitDisposer;
+  return () => {
+    emitDisposer();
+    runInAction(() => {
+      db.revokeOwner(mountOwner);
+    });
+  };
 }
 
 // --- Native action bridge ---
@@ -100,11 +117,7 @@ function callNative(action: string, params?: Record<string, unknown>): unknown {
 
 // --- Jam API for user programs ---
 
-const jamAPI: Record<string, unknown> = {
-  // Core primitives
-  db, $, _, assert, retract, set, when, whenever, transaction,
-  // JSX
-  h, Fragment,
+const nativeProgramApi: Record<string, unknown> = {
   // Native bridge
   callNative,
   // All UI exports (createJamUI, styled, components, etc.)
@@ -126,16 +139,11 @@ const jamAPI: Record<string, unknown> = {
   /**
    * Load and execute a Jam program (imperative style).
    * The program source has access to all Jam APIs via `with(jam)`.
-   * Use this for programs that call assert/whenever directly.
+   * Use this for programs that call remember/whenever directly.
    */
   loadProgram(id: string, source: string): string {
     try {
-      // Dispose previous version if reloading
-      programDisposers.get(id)?.();
-      programDisposers.delete(id);
-
-      const fn = new Function("jam", `with(jam) { ${source} }`);
-      fn(jamAPI);
+      loadProgramSource(id, source, { api: nativeProgramApi });
       return "ok";
     } catch (e: any) {
       return `error: ${e.message}`;
@@ -153,33 +161,29 @@ const jamAPI: Record<string, unknown> = {
    */
   mountProgram(id: string, source: string, rootId?: string): string {
     try {
-      programDisposers.get(id)?.();
-      programDisposers.delete(id);
+      registerProgram(id, (api) => {
+        // Try as an expression first (simple case: just a component/VNode)
+        let result: any;
+        try {
+          const fn = new Function("jam", `with(jam) { return (${source}); }`);
+          result = fn(api);
+        } catch {
+          // If that fails, execute as statements and eval the last line
+          const lines = source.trim().split("\n");
+          const lastLine = lines.pop()!;
+          const setup = lines.join("\n");
+          const fn = new Function("jam", `with(jam) { ${setup}\n return (${lastLine}); }`);
+          result = fn(api);
+        }
 
-      // Try as an expression first (simple case: just a component/VNode)
-      let result: any;
-      try {
-        const fn = new Function("jam", `with(jam) { return (${source}); }`);
-        result = fn(jamAPI);
-      } catch {
-        // If that fails, execute as statements and eval the last line
-        const lines = source.trim().split("\n");
-        const lastLine = lines.pop()!;
-        const setup = lines.join("\n");
-        const fn = new Function("jam", `with(jam) { ${setup}\n return (${lastLine}); }`);
-        result = fn(jamAPI);
-      }
-
-      if (result && typeof result === "object" && "__vnode" in result) {
-        // Result is a VNode — mount it
-        const disposer = nativeMount(result, rootId || "dom");
-        programDisposers.set(id, disposer);
-      } else if (typeof result === "function") {
-        // Result is a component function — wrap in h() and mount
-        const vnode = h(result, {});
-        const disposer = nativeMount(vnode, rootId || "dom");
-        programDisposers.set(id, disposer);
-      }
+        if (result && typeof result === "object" && "__vnode" in result) {
+          return nativeMount(result, rootId || "dom");
+        }
+        if (typeof result === "function") {
+          return nativeMount(h(result, {}), rootId || "dom");
+        }
+        return undefined;
+      }, { api: nativeProgramApi });
       return "ok";
     } catch (e: any) {
       return `error: ${e.message}`;
@@ -187,11 +191,10 @@ const jamAPI: Record<string, unknown> = {
   },
 
   /**
-   * Dispose a loaded program and retract its emitted facts.
+   * Dispose a loaded program and forget its emitted facts.
    */
   disposeProgram(id: string) {
-    programDisposers.get(id)?.();
-    programDisposers.delete(id);
+    removeProgram(id);
   },
 
   /**
@@ -229,22 +232,22 @@ const jamAPI: Record<string, unknown> = {
    */
   assertFact(termsJson: string) {
     const terms = JSON.parse(termsJson);
-    runInAction(() => assert(...terms));
+    runInAction(() => remember(...terms));
   },
 
   /**
    * Retract a fact from Swift side.
    */
-  retractFact(termsJson: string) {
+  removeFact(termsJson: string) {
     const terms = JSON.parse(termsJson);
-    runInAction(() => retract(...terms));
+    runInAction(() => forget(...terms));
   },
 
   /**
-   * Set (upsert) a fact from Swift side.
+   * Replace the durable value for a fact prefix from Swift side.
    */
   setFact(termsJson: string) {
     const terms = JSON.parse(termsJson);
-    runInAction(() => set(...terms));
+    runInAction(() => replace(...terms));
   },
 };

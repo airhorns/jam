@@ -1,44 +1,44 @@
-import { assert, when, $ } from "@jam/core";
+import { remember, when, $ } from "@jam/core";
 import type { FontConfig } from "./types";
 
 /**
- * Create a font configuration and assert it as facts.
+ * Create a font configuration and remember it as facts.
  * Facts: ["font", name, property, sizeKey, value]
  * Family fact: ["font", name, "family", familyString]
  */
 export function createFont(name: string, config: FontConfig): void {
   // Assert family
-  assert("font", name, "family", config.family);
+  remember("font", name, "family", config.family);
 
   // Assert size scale
   for (const [key, value] of Object.entries(config.size)) {
-    assert("font", name, "size", key, value);
+    remember("font", name, "size", key, value);
   }
 
-  // Auto-fill and assert lineHeight
+  // Auto-fill and remember lineHeight
   const lineHeights = autoFill(config.size, config.lineHeight ?? {});
   for (const [key, value] of Object.entries(lineHeights)) {
-    assert("font", name, "lineHeight", key, value);
+    remember("font", name, "lineHeight", key, value);
   }
 
-  // Auto-fill and assert weight
+  // Auto-fill and remember weight
   const weights = autoFillString(config.size, config.weight ?? {});
   for (const [key, value] of Object.entries(weights)) {
-    assert("font", name, "weight", key, value);
+    remember("font", name, "weight", key, value);
   }
 
-  // Auto-fill and assert letterSpacing
+  // Auto-fill and remember letterSpacing
   const letterSpacings = autoFill(config.size, config.letterSpacing ?? {});
   for (const [key, value] of Object.entries(letterSpacings)) {
-    assert("font", name, "letterSpacing", key, value);
+    remember("font", name, "letterSpacing", key, value);
   }
 
   // Assert face mappings if provided
   if (config.face) {
     for (const [weight, faces] of Object.entries(config.face)) {
-      assert("font", name, "face", weight, faces.normal);
+      remember("font", name, "face", weight, faces.normal);
       if (faces.italic) {
-        assert("font", name, "faceItalic", weight, faces.italic);
+        remember("font", name, "faceItalic", weight, faces.italic);
       }
     }
   }

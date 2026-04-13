@@ -160,7 +160,7 @@ extension View {
     func applyShadow(_ styles: [String: JamTerm]) -> some View {
         if styles["boxShadow"]?.stringValue != nil {
             // Parse simple shadow: "0px 4px 8px rgba(0,0,0,0.3)"
-            // For now just apply a default shadow if any boxShadow is set
+            // For now just apply a default shadow if any boxShadow is insert
             self.shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
         } else if let shadowColor = styles["shadowColor"]?.stringValue {
             self.shadow(color: Color(hex: shadowColor).opacity(0.3), radius: 4, x: 0, y: 2)

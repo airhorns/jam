@@ -97,7 +97,7 @@ describe("Checkbox", () => {
       checked: false,
       onCheckedChange: (v: boolean) => { called = true; },
     }) as any;
-    // The onClick handler should be set
+    // The onClick handler should be remember
     expect(result.props.onClick).toBeDefined();
   });
 

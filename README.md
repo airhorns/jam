@@ -18,21 +18,42 @@ cd examples/folk-todo && pnpm dev
 All state is stored as **facts** — tuples of terms (strings, numbers, booleans):
 
 ```typescript
-import { assert, retract, set } from "@jam/core";
+import { claim, remember, replace, forget, _ } from "@jam/core";
 
-// Assert a fact
-assert("todo", 1, "title", "Buy milk");
-assert("todo", 1, "done", false);
+// claim(): scoped, compositional, automatically revoked with its owner/rule
+claim("todo-1", "class", "strikethrough");
 
-// Retract a fact
-retract("todo", 1, "done", false);
+// remember(): durable additive fact
+remember("todo", 1, "title", "Buy milk");
 
-// Retract with wildcards — remove all facts about todo 1
-retract("todo", 1, _, _);
+// replace(): durable singleton-style update for a prefix
+replace("todo", 1, "done", true);
 
-// Set (upsert) — replaces any existing fact with the same prefix
-set("todo", 1, "done", true);  // retracts ["todo", 1, "done", _], then asserts
+// forget(): destructive delete, supports wildcards
+forget("todo", 1, _, _);
 ```
+
+Use these by intent:
+
+- `claim(...)` — scoped contribution; multiple programs can support the same fact
+- `remember(...)` — durable additive fact; use for catalogs, logs, registries, and multi-valued state
+- `replace(...)` — durable singleton update; use for “the current value of X”
+- `forget(...)` — destructive delete from durable state
+
+### Choosing the right write primitive
+
+| You mean... | Use |
+|---|---|
+| "this program contributes X while it is alive" | `claim(...)` |
+| "the world durably knows many X values" | `remember(...)` |
+| "there should be one current X value here" | `replace(...)` |
+| "delete this durable value / clear this slot" | `forget(...)` |
+
+Quick rule of thumb:
+
+- If multiple producers saying the same thing is **good**, use `claim`.
+- If multiple durable values coexisting is **good**, use `remember`.
+- If multiple values would be a **bug**, use `replace`.
 
 ### Querying with `when`
 
@@ -61,16 +82,16 @@ Components are plain functions that return JSX. Use `when` to read state:
 
 ```tsx
 import { h } from "@jam/core/jsx";
-import { $, set, when, mount } from "@jam/core";
+import { $, remember, replace, when, mount } from "@jam/core";
 
-set("counter", "count", 0);
+remember("counter", "count", 0);
 
 function Counter() {
   const value = (when(["counter", "count", $.v])[0]?.v as number) ?? 0;
   return (
     <div>
       <h1>{value}</h1>
-      <button onClick={() => set("counter", "count", value + 1)}>+</button>
+      <button onClick={() => replace("counter", "count", value + 1)}>+</button>
     </div>
   );
 }
@@ -99,22 +120,22 @@ const dispose = whenever(
   },
 );
 
-// Later: dispose() to stop the rule and retract its derived facts
+// Later: dispose() to stop the rule and revoke its derived claims
 ```
 
-The body re-runs when the query results change. Facts claimed by the body are automatically retracted when the rule re-runs or is disposed.
+The body re-runs when the query results change. Facts claimed by the body are automatically removed when the rule re-runs or is disposed.
 
 ### Transactions
 
 Batch multiple mutations so observers only fire once:
 
 ```typescript
-import { transaction, assert, retract, _ } from "@jam/core";
+import { transaction, remember, forget, _ } from "@jam/core";
 
 transaction(() => {
-  retract("plan", sessionId, _, _, _, _);
+  forget("plan", sessionId, _, _, _, _);
   for (const entry of newEntries) {
-    assert("plan", sessionId, entry.id, entry.content, entry.status, entry.priority);
+    remember("plan", sessionId, entry.id, entry.content, entry.status, entry.priority);
   }
 });
 // Observers see the final state, not intermediate empty state

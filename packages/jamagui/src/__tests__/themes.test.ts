@@ -50,7 +50,7 @@ describe("setTheme / getActiveThemeName", () => {
 });
 
 describe("useTheme", () => {
-  it("returns empty object when no theme is set", () => {
+  it("returns empty object when no theme is remember", () => {
     expect(useTheme()).toEqual({});
   });
 
@@ -121,7 +121,7 @@ describe("resolveThemeValue", () => {
     expect(resolveThemeValue("$nonexistent")).toBeUndefined();
   });
 
-  it("returns undefined when no theme is set", () => {
+  it("returns undefined when no theme is remember", () => {
     createThemes({ light: { background: "#fff" } });
     expect(resolveThemeValue("$background")).toBeUndefined();
   });

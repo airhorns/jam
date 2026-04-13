@@ -2,13 +2,14 @@
 //
 // Uses id-based addressing: session buttons have id="session-{sid}".
 
-import { $, claim, whenever } from "@jam/core";
+import { program } from "@jam/core";
 
-export const dispose = whenever(
-  [["session", $.sid, "status", "failed"], ["session", $.sid, "statusDetail", $.reason]],
-  (failed) => {
-    for (const { sid, reason } of failed) {
-      claim(`session-${sid}`, "prop", "title", `Error: ${reason}`);
-    }
-  },
-);
+export const dispose = program("puddy-ui/error-tooltips", ({ $, claim, whenever }) =>
+  whenever(
+    [["session", $.sid, "status", "failed"], ["session", $.sid, "statusDetail", $.reason]],
+    (failed) => {
+      for (const { sid, reason } of failed) {
+        claim(`session-${sid}`, "prop", "title", `Error: ${reason}`);
+      }
+    },
+  ));

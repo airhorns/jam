@@ -16,7 +16,7 @@ import { type VNode, type VChild, emitVdom } from "./jsx";
  * Returns a disposer to unmount.
  */
 export function mount(rootVnode: VChild, container: HTMLElement): () => void {
-  let componentKeys = new Set<string>();
+  const mountOwner = db.createChildOwner(db.getCurrentOwnerId(), "mount");
 
   // --- Phase 1: Emit VDOM claims from component tree ---
   // Use reaction: the data function executes the component tree (tracking
@@ -40,11 +40,12 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       // This writes to db.facts but doesn't re-trigger the data function
       // because reaction separates tracking from effects.
       runInAction(() => {
-        for (const key of componentKeys) db.deleteByKey(key);
-        db.emitCollector = new Set();
-        emitVdom(vnode, "dom", 0);
-        componentKeys = db.emitCollector;
-        db.emitCollector = null;
+        db.revokeOwner(mountOwner);
+        db.withOwnerScope(mountOwner, () => {
+          db.emitCollector = new Set();
+          emitVdom(vnode, "dom", 0);
+          db.emitCollector = null;
+        });
       });
     },
     // Always fire effect when data function re-runs — VNodes are new objects
@@ -195,5 +196,11 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
     }
   });
 
-  return () => { emitDisposer(); patchDisposer(); };
+  return () => {
+    emitDisposer();
+    runInAction(() => {
+      db.revokeOwner(mountOwner);
+    });
+    patchDisposer();
+  };
 }

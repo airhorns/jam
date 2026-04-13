@@ -29,7 +29,7 @@ Playwright requires browsers installed: `npx playwright install chromium`
 
 The app uses a Jam-style fact database (`src/jam.ts`) as its primary state store instead of conventional Preact state management. All application state lives as tuples in the fact DB, and UI components subscribe to patterns via `useWhen()`.
 
-- `src/jam.ts` — Fact database with `assert`, `retract`, `hold`, `claim`, `useWhen`, `$`, `_`, `or()`
+- `src/jam.ts` — Fact database with scoped `claim`, durable `remember`, singleton `replace`, destructive `forget`, and reactive `useWhen()` queries
 - `src/app.tsx` — Main UI built with `useWhen()` reactive queries
 - `src/models/` — ACP event parser and session helpers
 - `src/networking/` — HTTP/SSE client and session manager

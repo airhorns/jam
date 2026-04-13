@@ -37,9 +37,9 @@ final class PuddyAppTests: XCTestCase {
 
         // Initial state
         runtime.loadProgram(id: "init", source: """
-            set("connection", "status", "disconnected");
-            set("connection", "hostname", "localhost");
-            set("ui", "selectedSession", "");
+            replace("connection", "status", "disconnected");
+            replace("connection", "hostname", "localhost");
+            replace("ui", "selectedSession", "");
         """)
 
         return runtime
@@ -84,7 +84,7 @@ final class PuddyAppTests: XCTestCase {
         XCTAssertTrue(runtime.getCurrentFacts().contains("Disconnected"))
 
         runtime.loadProgram(id: "connect", source: """
-            set("connection", "status", "connected");
+            replace("connection", "status", "connected");
         """)
 
         XCTAssertTrue(runtime.getCurrentFacts().contains("Connected"))
@@ -116,8 +116,8 @@ final class PuddyAppTests: XCTestCase {
 
         // Add a session
         runtime.loadProgram(id: "add-s1", source: """
-            assert("session", "s-1", "agent", "claude");
-            assert("session", "s-1", "status", "active");
+            remember("session", "s-1", "agent", "claude");
+            replace("session", "s-1", "status", "active");
         """)
 
         facts = runtime.getCurrentFacts()
@@ -127,8 +127,8 @@ final class PuddyAppTests: XCTestCase {
 
         // Add another session
         runtime.loadProgram(id: "add-s2", source: """
-            assert("session", "s-2", "agent", "gpt-4");
-            assert("session", "s-2", "status", "starting");
+            remember("session", "s-2", "agent", "gpt-4");
+            replace("session", "s-2", "status", "starting");
         """)
 
         facts = runtime.getCurrentFacts()
@@ -141,7 +141,7 @@ final class PuddyAppTests: XCTestCase {
 
         // Select a session and add messages
         runtime.loadProgram(id: "state", source: """
-            set("ui", "selectedSession", "s-1");
+            replace("ui", "selectedSession", "s-1");
         """)
 
         runtime.mountProgram(id: "msgs", source: """
@@ -165,7 +165,7 @@ final class PuddyAppTests: XCTestCase {
 
         // Add user message
         runtime.loadProgram(id: "msg1", source: """
-            assert("message", "s-1", "m1", "user", "text", "Hello world");
+            remember("message", "s-1", "m1", "user", "text", "Hello world");
         """)
         facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("USER: Hello world"))
@@ -173,7 +173,7 @@ final class PuddyAppTests: XCTestCase {
 
         // Add assistant message
         runtime.loadProgram(id: "msg2", source: """
-            assert("message", "s-1", "m2", "assistant", "text", "Hi! How can I help?");
+            remember("message", "s-1", "m2", "assistant", "text", "Hi! How can I help?");
         """)
         facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("ASST: Hi! How can I help?"))
@@ -187,16 +187,16 @@ final class PuddyAppTests: XCTestCase {
 
         // Create session in starting state
         runtime.loadProgram(id: "create", source: """
-            assert("session", "s-1", "agent", "claude");
-            assert("session", "s-1", "status", "starting");
+            remember("session", "s-1", "agent", "claude");
+            replace("session", "s-1", "status", "starting");
         """)
         var facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("starting"))
 
         // Transition to active
         runtime.loadProgram(id: "activate", source: """
-            retract("session", "s-1", "status", "starting");
-            assert("session", "s-1", "status", "active");
+            forget("session", "s-1", "status", "starting");
+            replace("session", "s-1", "status", "active");
         """)
         facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("active"))
@@ -204,9 +204,9 @@ final class PuddyAppTests: XCTestCase {
 
         // Transition to ended
         runtime.loadProgram(id: "end", source: """
-            retract("session", "s-1", "status", "active");
-            assert("session", "s-1", "status", "ended");
-            assert("session", "s-1", "statusDetail", "end_turn");
+            forget("session", "s-1", "status", "active");
+            replace("session", "s-1", "status", "ended");
+            replace("session", "s-1", "statusDetail", "end_turn");
         """)
         facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("ended"))
@@ -217,9 +217,9 @@ final class PuddyAppTests: XCTestCase {
         let runtime = createPuddyRuntime()
 
         runtime.loadProgram(id: "stream-setup", source: """
-            assert("session", "s-1", "agent", "claude");
-            assert("session", "s-1", "status", "active");
-            set("ui", "selectedSession", "s-1");
+            remember("session", "s-1", "agent", "claude");
+            replace("session", "s-1", "status", "active");
+            replace("ui", "selectedSession", "s-1");
         """)
 
         runtime.mountProgram(id: "stream-ui", source: """
@@ -236,15 +236,15 @@ final class PuddyAppTests: XCTestCase {
 
         // Simulate first chunk
         runtime.loadProgram(id: "chunk1", source: """
-            assert("session", "s-1", "streamingText", "Hello ");
+            replace("session", "s-1", "streamingText", "Hello ");
         """)
         facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("Streaming: Hello "))
 
-        // Simulate second chunk (retract old, assert new)
+        // Simulate second chunk (drop old, insert new)
         runtime.loadProgram(id: "chunk2", source: """
-            retract("session", "s-1", "streamingText", "Hello ");
-            assert("session", "s-1", "streamingText", "Hello world!");
+            forget("session", "s-1", "streamingText", "Hello ");
+            replace("session", "s-1", "streamingText", "Hello world!");
         """)
         facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("Streaming: Hello world!"))
@@ -253,8 +253,8 @@ final class PuddyAppTests: XCTestCase {
         runtime.loadProgram(id: "finalize", source: """
             var st = when(["session", "s-1", "streamingText", $.t]);
             if (st.length > 0) {
-                retract("session", "s-1", "streamingText", st[0].t);
-                assert("message", "s-1", "msg-final", "assistant", "text", st[0].t);
+                forget("session", "s-1", "streamingText", st[0].t);
+                remember("message", "s-1", "msg-final", "assistant", "text", st[0].t);
             }
         """)
         facts = runtime.getCurrentFacts()
@@ -268,15 +268,15 @@ final class PuddyAppTests: XCTestCase {
         let runtime = createPuddyRuntime()
 
         runtime.loadProgram(id: "setup", source: """
-            set("ui", "selectedSession", "s-1");
-            assert("session", "s-1", "agent", "claude");
-            assert("session", "s-1", "status", "active");
+            replace("ui", "selectedSession", "s-1");
+            remember("session", "s-1", "agent", "claude");
+            replace("session", "s-1", "status", "active");
         """)
 
         // Simulate tool call
         runtime.loadProgram(id: "tool1", source: """
-            assert("message", "s-1", "tc-1", "assistant", "toolUse", "Read file: main.swift");
-            assert("session", "s-1", "hasActiveTools", "true");
+            remember("message", "s-1", "tc-1", "assistant", "toolUse", "Read file: main.swift");
+            remember("session", "s-1", "hasActiveTools", "true");
         """)
         var facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("Read file: main.swift"))
@@ -284,8 +284,8 @@ final class PuddyAppTests: XCTestCase {
 
         // Tool completes
         runtime.loadProgram(id: "tool-done", source: """
-            assert("message", "s-1", "tc-1-result", "tool", "toolResult", "completed");
-            retract("session", "s-1", "hasActiveTools", "true");
+            remember("message", "s-1", "tc-1-result", "tool", "toolResult", "completed");
+            forget("session", "s-1", "hasActiveTools", "true");
         """)
         facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("completed"))
@@ -298,9 +298,9 @@ final class PuddyAppTests: XCTestCase {
 
         runtime.loadProgram(id: "plan", source: """
             transaction(function() {
-                assert("plan", "s-1", "entry-0", "Design the API", "completed", "high");
-                assert("plan", "s-1", "entry-1", "Implement tests", "in_progress", "high");
-                assert("plan", "s-1", "entry-2", "Deploy to prod", "pending", "medium");
+                remember("plan", "s-1", "entry-0", "Design the API", "completed", "high");
+                remember("plan", "s-1", "entry-1", "Implement tests", "in_progress", "high");
+                remember("plan", "s-1", "entry-2", "Deploy to prod", "pending", "medium");
             });
         """)
 
@@ -360,12 +360,12 @@ final class PuddyAppTests: XCTestCase {
         let runtime = createPuddyRuntime()
 
         runtime.loadProgram(id: "sessions", source: """
-            assert("session", "s-1", "agent", "claude");
-            assert("session", "s-1", "status", "active");
-            assert("message", "s-1", "m1", "user", "text", "Hello from s-1");
-            assert("session", "s-2", "agent", "gpt-4");
-            assert("session", "s-2", "status", "active");
-            assert("message", "s-2", "m1", "user", "text", "Hello from s-2");
+            remember("session", "s-1", "agent", "claude");
+            replace("session", "s-1", "status", "active");
+            remember("message", "s-1", "m1", "user", "text", "Hello from s-1");
+            remember("session", "s-2", "agent", "gpt-4");
+            replace("session", "s-2", "status", "active");
+            remember("message", "s-2", "m1", "user", "text", "Hello from s-2");
         """)
 
         runtime.mountProgram(id: "detail", source: """
@@ -388,7 +388,7 @@ final class PuddyAppTests: XCTestCase {
 
         // Select s-1
         runtime.loadProgram(id: "select-1", source: """
-            set("ui", "selectedSession", "s-1");
+            replace("ui", "selectedSession", "s-1");
         """)
         facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("Session: s-1"))
@@ -397,13 +397,13 @@ final class PuddyAppTests: XCTestCase {
 
         // Switch to s-2
         runtime.loadProgram(id: "select-2", source: """
-            set("ui", "selectedSession", "s-2");
+            replace("ui", "selectedSession", "s-2");
         """)
         facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("Session: s-2"))
         XCTAssertTrue(facts.contains("Hello from s-2"))
         // Note: "Hello from s-1" still exists as a raw message fact in the DB,
         // but the VDOM no longer renders it. getCurrentFacts() includes all facts,
-        // so we can't assert it's missing. The important thing is s-2's content is present.
+        // so we can't insert it's missing. The important thing is s-2's content is present.
     }
 }

@@ -26,7 +26,7 @@ All application state — including the VDOM — lives in a shared **fact databa
 
 - **@jam/core** (`packages/core/`): The reactive database and rendering engine.
   - `db.ts` — FactDB: MobX-reactive fact store with per-pattern indexing and Datalog-style pattern matching
-  - `primitives.ts` — Public API: `assert`, `retract`, `set`, `claim`, `when`, `whenever`, `transaction`, `$`, `_`
+  - `primitives.ts` — Public API: `claim`, `remember`, `replace`, `forget`, `when`, `whenever`, `transaction`, `$`, `_`
   - `jsx.ts` — Custom JSX factory (`h`/`Fragment`) with deterministic entity ID generation
   - `renderer.ts` — Two-phase rendering: emit VDOM claims into the fact DB, then patch the real DOM
   - `select.ts` — CSS selector queries over VDOM facts

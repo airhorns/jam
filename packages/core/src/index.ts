@@ -1,5 +1,5 @@
 export { db } from "./db";
-export { $, _, assert, retract, set, claim, retractClaim, when, whenever, transaction } from "./primitives";
+export { $, _, claim, remember, replace, forget, when, whenever, transaction } from "./primitives";
 export type { Term, Pattern, Bindings } from "./primitives";
 export { h, Fragment, injectVdom } from "./jsx";
 export { mount } from "./renderer";
@@ -7,3 +7,5 @@ export { select } from "./select";
 export type { VdomElement } from "./select";
 export { persist } from "./persist";
 export type { PersistOptions } from "./persist";
+export { createProgramAPI, listPrograms, loadProgramSource, program, registerProgram, removeProgram } from "./programs";
+export type { ProgramAPI, ProgramRunner } from "./programs";

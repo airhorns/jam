@@ -5,7 +5,15 @@
 // it are invalidated. VDOM facts don't match app-state patterns, so
 // writing VDOM doesn't trigger component re-execution.
 
-import { observable, action, computed, untracked, makeObservable, comparer, type IComputedValue } from "mobx";
+import {
+  observable,
+  action,
+  computed,
+  untracked,
+  makeObservable,
+  comparer,
+  type IComputedValue,
+} from "mobx";
 import { clearSelectCache } from "./select";
 
 export type Term = string | number | boolean;
@@ -101,15 +109,17 @@ function couldMatch(pattern: Pattern, fact: Fact): boolean {
   return true;
 }
 
-/** Serialize a pattern set for use as a cache key. */
+/** Serialize a pattern remember for use as a cache key. */
 function patternsKey(patterns: Pattern[]): string {
-  return JSON.stringify(patterns.map(p =>
-    p.map(t => {
-      if (t === _) return "__WILD__";
-      if (isBinding(t)) return `__BIND__${t.name}`;
-      return t;
-    })
-  ));
+  return JSON.stringify(
+    patterns.map((p) =>
+      p.map((t) => {
+        if (t === _) return "__WILD__";
+        if (isBinding(t)) return `__BIND__${t.name}`;
+        return t;
+      }),
+    ),
+  );
 }
 
 // --- FactDB ---
@@ -121,8 +131,25 @@ export class FactDB {
   /** Side-channel for non-serializable values (function refs for event handlers). */
   readonly refs = new Map<string, unknown>();
 
-  /** When non-null, assert() collects keys here (for tracking component-emitted facts). */
+  /** When non-null, insert() collects keys here (for tracking component-emitted facts). */
   emitCollector: Set<string> | null = null;
+
+  /** Nested write collectors for tracking facts/refs created during scoped execution. */
+  private factCollectorStack: Set<string>[] = [];
+  private refCollectorStack: Set<string>[] = [];
+
+  /** Implicit hierarchical ownership scopes for all writes. */
+  private readonly rootOwner = "__root__";
+  private ownerStack: string[] = [this.rootOwner];
+  private ownerFacts = new Map<string, Set<string>>();
+  private factOwners = new Map<string, Set<string>>();
+  private ownerRefs = new Map<string, Set<string>>();
+  private refOwners = new Map<string, Set<string>>();
+  private ownerParents = new Map<string, string | null>([
+    [this.rootOwner, null],
+  ]);
+  private ownerChildren = new Map<string, Set<string>>();
+  private ownerCounters = new Map<string, number>();
 
   /** Index of fact keys by first term, for fast querySingle when pattern has a literal first term. */
   private factsByFirstTerm = new Map<Term, Set<string>>();
@@ -135,7 +162,10 @@ export class FactDB {
    * its own observable version. When a fact is written/removed, only
    * versions for patterns that could match it are bumped.
    */
-  private patternVersions = new Map<string, { patterns: Pattern[]; version: { get(): number; set(v: number): void } }>();
+  private patternVersions = new Map<
+    string,
+    { patterns: Pattern[]; version: { get(): number; set(v: number): void } }
+  >();
 
   /**
    * Index of pattern entries by their first literal term (for fast invalidation).
@@ -146,13 +176,166 @@ export class FactDB {
   constructor() {
     makeObservable(this, {
       assert: action,
-      retract: action,
-      set: action,
+      insert: action,
+      drop: action,
+      replace: action,
     });
   }
 
   private factKey(fact: Fact): string {
     return JSON.stringify(fact);
+  }
+
+  private currentOwner(): string {
+    return this.ownerStack[this.ownerStack.length - 1] ?? this.rootOwner;
+  }
+
+  getCurrentOwnerId(): string {
+    return this.currentOwner();
+  }
+
+  private ensureOwner(
+    ownerId: string,
+    parentId: string | null = this.currentOwner(),
+  ): void {
+    if (!this.ownerParents.has(ownerId)) {
+      this.ownerParents.set(ownerId, parentId);
+      if (parentId != null) {
+        let children = this.ownerChildren.get(parentId);
+        if (!children) {
+          children = new Set();
+          this.ownerChildren.set(parentId, children);
+        }
+        children.add(ownerId);
+      }
+      return;
+    }
+
+    if (parentId != null) {
+      const existingParent = this.ownerParents.get(ownerId);
+      if (existingParent == null) {
+        this.ownerParents.set(ownerId, parentId);
+        let children = this.ownerChildren.get(parentId);
+        if (!children) {
+          children = new Set();
+          this.ownerChildren.set(parentId, children);
+        }
+        children.add(ownerId);
+      }
+    }
+  }
+
+  createChildOwner(parentId: string, label: string): string {
+    this.ensureOwner(
+      parentId,
+      this.ownerParents.get(parentId) ?? this.rootOwner,
+    );
+    const counterKey = `${parentId}:${label}`;
+    const next = (this.ownerCounters.get(counterKey) ?? 0) + 1;
+    this.ownerCounters.set(counterKey, next);
+    const ownerId = `${parentId}/${label}:${next}`;
+    this.ensureOwner(ownerId, parentId);
+    return ownerId;
+  }
+
+  withOwnerScope<T>(ownerId: string, fn: () => T): T {
+    this.ensureOwner(ownerId);
+    this.ownerStack.push(ownerId);
+    try {
+      return fn();
+    } finally {
+      this.ownerStack.pop();
+    }
+  }
+
+  revokeOwner(ownerId: string): void {
+    const children = Array.from(this.ownerChildren.get(ownerId) ?? []);
+    for (const childId of children) {
+      this.revokeOwner(childId);
+    }
+
+    for (const key of Array.from(this.ownerFacts.get(ownerId) ?? [])) {
+      this.detachFactOwner(key, ownerId);
+    }
+    for (const key of Array.from(this.ownerRefs.get(ownerId) ?? [])) {
+      this.detachRefOwner(key, ownerId);
+    }
+
+    this.ownerFacts.delete(ownerId);
+    this.ownerRefs.delete(ownerId);
+    this.ownerChildren.delete(ownerId);
+
+    const parentId = this.ownerParents.get(ownerId);
+    if (parentId != null) {
+      this.ownerChildren.get(parentId)?.delete(ownerId);
+    }
+    if (ownerId !== this.rootOwner) {
+      this.ownerParents.delete(ownerId);
+    }
+  }
+
+  private attachFactOwner(key: string, ownerId: string): void {
+    let owners = this.factOwners.get(key);
+    if (!owners) {
+      owners = new Set();
+      this.factOwners.set(key, owners);
+    }
+    if (!owners.has(ownerId)) {
+      owners.add(ownerId);
+      let factKeys = this.ownerFacts.get(ownerId);
+      if (!factKeys) {
+        factKeys = new Set();
+        this.ownerFacts.set(ownerId, factKeys);
+      }
+      factKeys.add(key);
+    }
+  }
+
+  private deleteFactRecord(key: string, fact: Fact): void {
+    this.facts.delete(key);
+    this.factsPlain.delete(key);
+    this.factsByFirstTerm.get(fact[0])?.delete(key);
+    this.invalidatePatterns(fact);
+  }
+
+  private detachFactOwner(key: string, ownerId: string): void {
+    this.ownerFacts.get(ownerId)?.delete(key);
+    const owners = this.factOwners.get(key);
+    if (!owners) return;
+    owners.delete(ownerId);
+    if (owners.size === 0) {
+      this.factOwners.delete(key);
+      const fact = this.factsPlain.get(key);
+      if (fact) this.deleteFactRecord(key, fact);
+    }
+  }
+
+  private attachRefOwner(key: string, ownerId: string): void {
+    let owners = this.refOwners.get(key);
+    if (!owners) {
+      owners = new Set();
+      this.refOwners.set(key, owners);
+    }
+    if (!owners.has(ownerId)) {
+      owners.add(ownerId);
+      let refKeys = this.ownerRefs.get(ownerId);
+      if (!refKeys) {
+        refKeys = new Set();
+        this.ownerRefs.set(ownerId, refKeys);
+      }
+      refKeys.add(key);
+    }
+  }
+
+  private detachRefOwner(key: string, ownerId: string): void {
+    this.ownerRefs.get(ownerId)?.delete(key);
+    const owners = this.refOwners.get(key);
+    if (!owners) return;
+    owners.delete(ownerId);
+    if (owners.size === 0) {
+      this.refOwners.delete(key);
+      this.refs.delete(key);
+    }
   }
 
   /** Bump version counters for pattern sets that could match this fact. */
@@ -179,28 +362,47 @@ export class FactDB {
     }
   }
 
-  assert(...terms: Term[]): void {
+  private addFact(terms: Term[], ownerId: string): void {
     const key = this.factKey(terms);
+    this.ensureOwner(
+      ownerId,
+      ownerId === this.rootOwner ? null : this.currentOwner(),
+    );
     if (!this.facts.has(key)) {
       this.facts.set(key, terms);
       this.factsPlain.set(key, terms);
       if (this.emitCollector) this.emitCollector.add(key);
-      // Maintain first-term index
+      for (const collector of this.factCollectorStack) collector.add(key);
       const first = terms[0];
       let bucket = this.factsByFirstTerm.get(first);
-      if (!bucket) { bucket = new Set(); this.factsByFirstTerm.set(first, bucket); }
+      if (!bucket) {
+        bucket = new Set();
+        this.factsByFirstTerm.set(first, bucket);
+      }
       bucket.add(key);
       this.invalidatePatterns(terms);
     }
+    this.attachFactOwner(key, ownerId);
   }
 
-  retract(...terms: (Term | Wildcard)[]): void {
+  assert(...terms: Term[]): void {
+    this.addFact(terms, this.currentOwner());
+  }
+
+  insert(...terms: Term[]): void {
+    this.addFact(terms, this.rootOwner);
+  }
+
+  drop(...terms: (Term | Wildcard)[]): void {
     if (!terms.includes(_)) {
       const key = this.factKey(terms as Term[]);
-      if (this.facts.has(key)) {
-        this.facts.delete(key); this.factsPlain.delete(key);
-        this.factsByFirstTerm.get((terms as Term[])[0])?.delete(key);
-        this.invalidatePatterns(terms as Term[]);
+      const fact = this.factsPlain.get(key);
+      if (fact) {
+        for (const ownerId of Array.from(this.factOwners.get(key) ?? [])) {
+          this.ownerFacts.get(ownerId)?.delete(key);
+        }
+        this.factOwners.delete(key);
+        this.deleteFactRecord(key, fact);
       }
       return;
     }
@@ -210,48 +412,35 @@ export class FactDB {
       let matches = true;
       for (let i = 0; i < terms.length; i++) {
         if (terms[i] === _) continue;
-        if (terms[i] !== fact[i]) { matches = false; break; }
+        if (terms[i] !== fact[i]) {
+          matches = false;
+          break;
+        }
       }
       if (matches) toRemove.push([key, fact]);
     }
     for (const [key, fact] of toRemove) {
-      this.facts.delete(key); this.factsPlain.delete(key);
-      this.factsByFirstTerm.get(fact[0])?.delete(key);
-      this.invalidatePatterns(fact);
+      for (const ownerId of Array.from(this.factOwners.get(key) ?? [])) {
+        this.ownerFacts.get(ownerId)?.delete(key);
+      }
+      this.factOwners.delete(key);
+      this.deleteFactRecord(key, fact);
     }
   }
 
-  set(...terms: Term[]): void {
-    if (terms.length < 2) throw new Error("set() requires at least 2 terms");
-    // Retract any fact matching [terms[0], ..., terms[n-2], _].
-    // Use the first-term index to narrow the scan.
-    const prefixLen = terms.length - 1;
-    const firstTerm = terms[0];
-    const bucket = this.factsByFirstTerm.get(firstTerm);
-    if (bucket) {
-      // Collect keys to remove (can't mutate Set while iterating)
-      const toRemove: string[] = [];
-      for (const key of bucket) {
-        const fact = this.facts.get(key);
-        if (!fact || fact.length !== terms.length) continue;
-        let matches = true;
-        for (let i = 1; i < prefixLen; i++) {
-          if (terms[i] !== fact[i]) { matches = false; break; }
-        }
-        if (matches) toRemove.push(key);
-      }
-      for (const key of toRemove) {
-        const fact = this.factsPlain.get(key)!;
-        this.facts.delete(key); this.factsPlain.delete(key);
-        bucket.delete(key);
-        this.invalidatePatterns(fact);
-      }
-    }
-    this.assert(...terms);
+  replace(...terms: Term[]): void {
+    if (terms.length < 2)
+      throw new Error("replace() requires at least 2 terms");
+    const pattern = [...terms.slice(0, terms.length - 1), _] as (
+      | Term
+      | Wildcard
+    )[];
+    this.drop(...pattern);
+    this.insert(...terms);
   }
 
   /**
-   * Create a per-pattern-set computed index. Returns a computed that:
+   * Create a per-pattern-insert computed index. Returns a computed that:
    * - Tracks only the version counter for these patterns (fine-grained)
    * - Re-evaluates (scans all facts) only when that counter bumps
    * - Uses structural comparison so observers only re-run on actual changes
@@ -263,9 +452,13 @@ export class FactDB {
       // Register in first-term index for fast invalidation
       for (const pattern of patterns) {
         const first = pattern[0];
-        const indexKey: Term | null = (first !== _ && !isBinding(first)) ? first as Term : null;
+        const indexKey: Term | null =
+          first !== _ && !isBinding(first) ? (first as Term) : null;
         let bucket = this.patternsByFirstTerm.get(indexKey);
-        if (!bucket) { bucket = new Set(); this.patternsByFirstTerm.set(indexKey, bucket); }
+        if (!bucket) {
+          bucket = new Set();
+          this.patternsByFirstTerm.set(indexKey, bucket);
+        }
         bucket.add(key);
       }
     }
@@ -273,7 +466,7 @@ export class FactDB {
 
     return computed(
       () => {
-        entry.version.get(); // track ONLY this pattern set's version
+        entry.version.get(); // track ONLY this pattern remember's version
         return untracked(() => this.query(...patterns)); // scan facts WITHOUT tracking the map
       },
       { equals: comparer.structural },
@@ -353,7 +546,8 @@ export class FactDB {
       const compiled = FactDB.compilePattern(pattern);
 
       // Find shared binding names between current results and this pattern
-      const currentBindingNames = current.length > 0 ? Object.keys(current[0]) : [];
+      const currentBindingNames =
+        current.length > 0 ? Object.keys(current[0]) : [];
       let joinKey: string | null = null;
       let joinPos = -1;
       for (const [pos, name] of compiled.bindings) {
@@ -368,12 +562,11 @@ export class FactDB {
         // Hash join using compiled pattern — direct array access, no matchPattern.
         const index = new Map<Term, Bindings[]>();
         const first = pattern[0];
-        const scanBucket = (first !== _ && !isBinding(first))
-          ? this.factsByFirstTerm.get(first as Term)
-          : null;
-        const facts = scanBucket
-          ? scanBucket
-          : this.facts.keys(); // fallback: all keys
+        const scanBucket =
+          first !== _ && !isBinding(first)
+            ? this.factsByFirstTerm.get(first as Term)
+            : null;
+        const facts = scanBucket ? scanBucket : this.facts.keys(); // fallback: all keys
 
         for (const keyOrFactKey of facts) {
           const fact = this.factsPlain.get(keyOrFactKey);
@@ -384,7 +577,10 @@ export class FactDB {
           for (let li = 0; li < compiled.literals.length; li++) {
             const [pos, val] = compiled.literals[li];
             if (scanBucket && pos === 0) continue; // already filtered by first-term
-            if (fact[pos] !== val) { matches = false; break; }
+            if (fact[pos] !== val) {
+              matches = false;
+              break;
+            }
           }
           if (!matches) continue;
 
@@ -396,7 +592,10 @@ export class FactDB {
           }
 
           let bucket = index.get(joinVal);
-          if (!bucket) { bucket = []; index.set(joinVal, bucket); }
+          if (!bucket) {
+            bucket = [];
+            index.set(joinVal, bucket);
+          }
           bucket.push(bindings);
         }
 
@@ -419,7 +618,10 @@ export class FactDB {
               // Check other shared vars for conflicts
               let conflict = false;
               for (const name of otherSharedNames) {
-                if (existing[name] !== factBindings[name]) { conflict = true; break; }
+                if (existing[name] !== factBindings[name]) {
+                  conflict = true;
+                  break;
+                }
               }
               if (conflict) continue;
 
@@ -474,9 +676,15 @@ export class FactDB {
 
   // --- Refs ---
 
-  setRef(key: string, value: unknown): void { this.refs.set(key, value); }
-  getRef(key: string): unknown { return this.refs.get(key); }
-  deleteRef(key: string): void { this.refs.delete(key); }
+  setRef(key: string, value: unknown): void {
+    this.refs.set(key, value);
+  }
+  getRef(key: string): unknown {
+    return this.refs.get(key);
+  }
+  deleteRef(key: string): void {
+    this.refs.delete(key);
+  }
 }
 
 // Global singleton

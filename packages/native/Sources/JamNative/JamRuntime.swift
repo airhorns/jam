@@ -7,10 +7,10 @@ import Foundation
 @Observable
 public final class JamRuntime {
     /// Current parsed entity tree — drives SwiftUI rendering.
-    public private(set) var entities: [String: UIEntity] = [:]
+    public private(insert) var entities: [String: UIEntity] = [:]
 
     /// Root entity IDs (children of the "dom" root).
-    public private(set) var rootChildren: [(index: Int, id: String)] = []
+    public private(insert) var rootChildren: [(index: Int, id: String)] = []
 
     /// Callback for native actions dispatched from JS via `callNative(action, params)`.
     /// Called synchronously on the JS queue — dispatch async work if needed.
@@ -42,7 +42,7 @@ public final class JamRuntime {
     // MARK: - Public API
 
     /// Load and execute a Jam program (imperative style).
-    /// The program source has access to all Jam APIs (assert, when, whenever, h, etc.).
+    /// The program source has access to all Jam APIs (insert, when, whenever, h, etc.).
     @discardableResult
     public func loadProgram(id: String, source: String) -> String {
         jsQueue.sync {
@@ -65,7 +65,7 @@ public final class JamRuntime {
         }
     }
 
-    /// Dispose a program and retract its emitted facts.
+    /// Dispose a program and drop its emitted facts.
     public func disposeProgram(id: String) {
         jsQueue.async {
             let jamNative = self.context.objectForKeyedSubscript("JamNative")!
@@ -110,12 +110,12 @@ public final class JamRuntime {
     }
 
     /// Retract a fact from Swift.
-    public func retractFact(_ terms: [Any]) {
+    public func removeFact(_ terms: [Any]) {
         jsQueue.async {
             guard let json = try? JSONSerialization.data(withJSONObject: terms),
                   let str = String(data: json, encoding: .utf8) else { return }
             let jamNative = self.context.objectForKeyedSubscript("JamNative")!
-            let fn = jamNative.objectForKeyedSubscript("retractFact")!
+            let fn = jamNative.objectForKeyedSubscript("removeFact")!
             fn.call(withArguments: [str])
         }
     }
@@ -275,7 +275,7 @@ public final class JamRuntime {
 
             case "handler":
                 guard fact.count >= 4 else { continue }
-                entities[entityId]!.handlers.insert("\(fact[2])")
+                entities[entityId]!.handlers.set("\(fact[2])")
 
             case "child":
                 guard fact.count >= 4 else { continue }

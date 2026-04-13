@@ -1,49 +1,67 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { autorun } from "mobx";
 import { db } from "../db";
-import { $, _, assert, retract, set, when, whenever, transaction } from "../primitives";
+import {
+  $,
+  _,
+  claim,
+  remember,
+  replace,
+  forget,
+  when,
+  whenever,
+  transaction,
+} from "../primitives";
 
 beforeEach(() => {
   db.clear();
 });
 
-describe("assert", () => {
+describe("claim", () => {
   it("adds a fact to the global db", () => {
-    assert("todo", 1, "title", "Test");
+    claim("todo", 1, "title", "Test");
     expect(db.facts.size).toBe(1);
   });
 });
 
-describe("retract", () => {
+describe("forget", () => {
   it("removes a fact from the global db", () => {
-    assert("todo", 1, "title", "Test");
-    retract("todo", 1, "title", "Test");
+    remember("todo", 1, "title", "Test");
+    forget("todo", 1, "title", "Test");
     expect(db.facts.size).toBe(0);
   });
 
-  it("supports wildcard retraction", () => {
-    assert("todo", 1, "title", "A");
-    assert("todo", 1, "done", false);
-    retract("todo", 1, _, _);
+  it("supports wildcard removal", () => {
+    remember("todo", 1, "title", "A");
+    remember("todo", 1, "done", false);
+    forget("todo", 1, _, _);
     expect(db.facts.size).toBe(0);
   });
 });
 
-describe("set", () => {
-  it("upserts: replaces old value at key path", () => {
-    set("counter", "value", 0);
-    set("counter", "value", 1);
-    set("counter", "value", 2);
-    expect(db.facts.size).toBe(1);
+describe("remember", () => {
+  it("creates durable facts that survive scope revocation", () => {
+    db.withOwnerScope("program:test", () => {
+      remember("counter", "value", 2);
+    });
+    db.revokeOwner("program:test");
     const results = when(["counter", "value", $.v]);
     expect(results).toEqual([{ v: 2 }]);
   });
 });
 
+describe("replace", () => {
+  it("replaces the previous value for a singleton-style prefix", () => {
+    remember("ui", "theme", "light");
+    replace("ui", "theme", "dark");
+    expect(when(["ui", "theme", $.name])).toEqual([{ name: "dark" }]);
+  });
+});
+
 describe("when", () => {
   it("returns matching bindings", () => {
-    assert("x", 1);
-    assert("x", 2);
+    remember("x", 1);
+    remember("x", 2);
     const result = when(["x", $.val]);
     expect(result).toContainEqual({ val: 1 });
     expect(result).toContainEqual({ val: 2 });
@@ -55,30 +73,30 @@ describe("when", () => {
       observed.push(when(["x", $.val]).length);
     });
 
-    assert("x", 1);
-    assert("x", 2);
+    remember("x", 1);
+    remember("x", 2);
 
     expect(observed).toEqual([0, 1, 2]);
     disposer();
   });
 
-  it("reacts to retracted facts inside autorun", () => {
-    assert("x", 1);
-    assert("x", 2);
+  it("reacts to removeed facts inside autorun", () => {
+    remember("x", 1);
+    remember("x", 2);
 
     const observed: number[] = [];
     const disposer = autorun(() => {
       observed.push(when(["x", $.val]).length);
     });
 
-    retract("x", 1);
+    forget("x", 1);
 
     expect(observed).toEqual([2, 1]);
     disposer();
   });
 
-  it("reacts to set (upsert) inside autorun", () => {
-    set("count", 0);
+  it("reacts to durable inserts inside autorun", () => {
+    remember("count", 0);
 
     const observed: unknown[] = [];
     const disposer = autorun(() => {
@@ -86,18 +104,20 @@ describe("when", () => {
       observed.push(vals.length > 0 ? vals[0].val : "empty");
     });
 
-    set("count", 1);
-    set("count", 2);
+    forget("count", 0);
+    remember("count", 1);
+    forget("count", 1);
+    remember("count", 2);
 
-    expect(observed).toEqual([0, 1, 2]);
+    expect(observed).toEqual([0, "empty", 1, "empty", 2]);
     disposer();
   });
 
   it("supports multi-pattern joins", () => {
-    assert("todo", 1, "title", "A");
-    assert("todo", 1, "done", false);
-    assert("todo", 2, "title", "B");
-    assert("todo", 2, "done", true);
+    remember("todo", 1, "title", "A");
+    remember("todo", 1, "done", false);
+    remember("todo", 2, "title", "B");
+    remember("todo", 2, "done", true);
 
     const items = when(
       ["todo", $.id, "title", $.title],
@@ -115,7 +135,7 @@ describe("whenever", () => {
     const spy = vi.fn();
     const disposer = whenever([["x", $.val]], spy);
 
-    assert("x", 1);
+    remember("x", 1);
     expect(spy).toHaveBeenCalledWith([{ val: 1 }]);
 
     disposer();
@@ -127,44 +147,47 @@ describe("whenever", () => {
       calls.push(matches.length);
     });
 
-    assert("x", 1);
-    assert("x", 2);
+    remember("x", 1);
+    remember("x", 2);
 
     expect(calls).toEqual([0, 1, 2]);
     disposer();
   });
 
-  it("cleans up asserted facts on disposal", () => {
+  it("cleans up claimed facts on disposal", () => {
     const disposer = whenever([["source", $.val]], (matches) => {
       for (const { val } of matches) {
-        assert("derived", val);
+        claim("derived", val);
       }
     });
 
-    assert("source", "a");
+    remember("source", "a");
     expect(db.query(["derived", $.val])).toContainEqual({ val: "a" });
 
     disposer();
-    // Derived facts should have been retracted
+    // Derived facts should have been removeed
     expect(db.query(["derived", $.val])).toEqual([]);
   });
 });
 
 describe("transaction", () => {
   it("batches mutations — observers fire once", () => {
-    assert("plan", "s-1", "entry-0", "old task", "completed", "medium");
-    assert("plan", "s-1", "entry-1", "old task 2", "pending", "low");
+    remember("plan", "s-1", "entry-0", "old task", "completed", "medium");
+    remember("plan", "s-1", "entry-1", "old task 2", "pending", "low");
 
     const observed: number[] = [];
     const disposer = autorun(() => {
-      observed.push(when(["plan", "s-1", $.entryId, $.content, $.status, $.priority]).length);
+      observed.push(
+        when(["plan", "s-1", $.entryId, $.content, $.status, $.priority])
+          .length,
+      );
     });
 
     transaction(() => {
-      retract("plan", "s-1", _, _, _, _);
-      assert("plan", "s-1", "entry-0", "new task A", "in_progress", "high");
-      assert("plan", "s-1", "entry-1", "new task B", "pending", "medium");
-      assert("plan", "s-1", "entry-2", "new task C", "pending", "low");
+      forget("plan", "s-1", _, _, _, _);
+      remember("plan", "s-1", "entry-0", "new task A", "in_progress", "high");
+      remember("plan", "s-1", "entry-1", "new task B", "pending", "medium");
+      remember("plan", "s-1", "entry-2", "new task C", "pending", "low");
     });
 
     // Should see: [2 (initial autorun), 3 (after transaction)]
@@ -175,7 +198,7 @@ describe("transaction", () => {
 
   it("returns the value from the function", () => {
     const result = transaction(() => {
-      assert("x", 1);
+      remember("x", 1);
       return "done";
     });
     expect(result).toBe("done");

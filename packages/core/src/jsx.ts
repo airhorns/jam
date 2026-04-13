@@ -18,7 +18,14 @@ export type VNode = {
   children: VChild[];
 };
 
-export type VChild = VNode | string | number | boolean | null | undefined | VChild[];
+export type VChild =
+  | VNode
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | VChild[];
 
 export function h(
   tag: string | Function,
@@ -33,7 +40,10 @@ export function h(
   };
 }
 
-export function Fragment(_props: Record<string, unknown> | null, ...children: VChild[]): VNode {
+export function Fragment(
+  _props: Record<string, unknown> | null,
+  ...children: VChild[]
+): VNode {
   return {
     __vnode: true,
     tag: "__fragment",
@@ -49,7 +59,11 @@ function flattenChildren(children: VChild[]): VChild[] {
     if (child == null || typeof child === "boolean") continue;
     if (Array.isArray(child)) {
       result.push(...flattenChildren(child));
-    } else if (typeof child === "object" && "__vnode" in child && child.tag === "__fragment") {
+    } else if (
+      typeof child === "object" &&
+      "__vnode" in child &&
+      child.tag === "__fragment"
+    ) {
       result.push(...flattenChildren(child.children));
     } else {
       result.push(child);
@@ -77,7 +91,7 @@ function computeEntityId(
 
 /**
  * Emit VDOM claims for a VNode tree into the unified fact database.
- * @param inheritId — if set, use this as the entity ID (for component key/id propagation)
+ * @param inheritId — if remember, use this as the entity ID (for component key/id propagation)
  */
 export function emitVdom(
   node: VChild,
@@ -109,13 +123,23 @@ export function emitVdom(
   if (typeof vnode.tag === "function") {
     // Component: execute it, propagate key/id to root output element
     // Merge children into props so components can access them
-    const propsWithChildren = vnode.children.length > 0
-      ? { ...vnode.props, children: vnode.children.length === 1 ? vnode.children[0] : vnode.children }
-      : vnode.props;
+    const propsWithChildren =
+      vnode.children.length > 0
+        ? {
+            ...vnode.props,
+            children:
+              vnode.children.length === 1 ? vnode.children[0] : vnode.children,
+          }
+        : vnode.props;
     const result = (vnode.tag as Function)(propsWithChildren);
     if (result) {
       // Compute the ID this component would get, and propagate to its output
-      const componentId = computeEntityId(parentId, childIndex, vnode.props, inheritId);
+      const componentId = computeEntityId(
+        parentId,
+        childIndex,
+        vnode.props,
+        inheritId,
+      );
       emitVdom(result, parentId, childIndex, componentId);
     }
     return;
@@ -133,14 +157,22 @@ export function emitVdom(
   const elId = computeEntityId(parentId, childIndex, vnode.props, inheritId);
 
   // Native mode: use component displayName as tag instead of HTML tag
-  const tagName = vnode.props.__nativeTag ? String(vnode.props.__nativeTag) : vnode.tag;
+  const tagName = vnode.props.__nativeTag
+    ? String(vnode.props.__nativeTag)
+    : vnode.tag;
   db.assert(elId, "tag", tagName as string);
   db.assert(parentId, "child", childIndex, elId);
 
   // Native mode: emit resolved style values as individual facts
   if (vnode.props.__nativeStyles) {
-    for (const [prop, value] of Object.entries(vnode.props.__nativeStyles as Record<string, unknown>)) {
-      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    for (const [prop, value] of Object.entries(
+      vnode.props.__nativeStyles as Record<string, unknown>,
+    )) {
+      if (
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean"
+      ) {
         db.assert(elId, "style", prop, value as Term);
       }
     }
@@ -150,7 +182,12 @@ export function emitVdom(
   for (const [key, value] of Object.entries(vnode.props)) {
     if (key === "key") continue;
     // Skip internal native-mode props
-    if (key === "__nativeStyles" || key === "__nativeTag" || key.startsWith("__native_")) continue;
+    if (
+      key === "__nativeStyles" ||
+      key === "__nativeTag" ||
+      key.startsWith("__native_")
+    )
+      continue;
     if (key.startsWith("on") && typeof value === "function") {
       const eventName = key.slice(2).toLowerCase();
       const refKey = `${elId}:handler:${eventName}`;
@@ -160,7 +197,11 @@ export function emitVdom(
       for (const cls of value.split(/\s+/).filter(Boolean)) {
         db.assert(elId, "class", cls);
       }
-    } else if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    } else if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
       db.assert(elId, "prop", key, value as Term);
     }
   }

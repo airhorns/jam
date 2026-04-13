@@ -1,4 +1,4 @@
-import { assert, when, $, type Term } from "@jam/core";
+import { remember, when, $, type Term } from "@jam/core";
 import type { TokenCategory, TokenConfig } from "./types";
 
 /**
@@ -10,7 +10,7 @@ export function createTokens(config: TokenConfig): void {
     const values = config[category];
     if (!values) continue;
     for (const [key, value] of Object.entries(values)) {
-      assert("token", category, key, value as Term);
+      remember("token", category, key, value as Term);
     }
   }
 }

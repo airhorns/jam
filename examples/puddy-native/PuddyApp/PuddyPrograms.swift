@@ -48,9 +48,9 @@ enum PuddyPrograms {
     """
 
     static let initialState = """
-        set("connection", "status", "checking");
-        set("connection", "hostname", "localhost");
-        set("ui", "selectedSession", "");
+        replace("connection", "status", "checking");
+        replace("connection", "hostname", "localhost");
+        replace("ui", "selectedSession", "");
     """
 
     /// The main component tree — renders the full puddy UI.
@@ -95,7 +95,7 @@ enum PuddyPrograms {
                             key: s.sid,
                             id: "session-" + s.sid,
                             padding: "$space.2",
-                            onClick: function() { set("ui", "selectedSession", s.sid); }
+                            onClick: function() { replace("ui", "selectedSession", s.sid); }
                         },
                             h(XStack, { gap: 8, alignItems: "center" },
                                 h(Text, { color: dotColor, fontSize: 8 }, "●"),

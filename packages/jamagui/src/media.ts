@@ -1,10 +1,10 @@
-import { set, when, $ } from "@jam/core";
+import { remember, replace, when, $ } from "@jam/core";
 import type { MediaConfig, MediaQueryConfig } from "./types";
 
 const listeners: Array<() => void> = [];
 
 /**
- * Set up media query listeners and assert facts for each breakpoint.
+ * Set up media query listeners and remember facts for each breakpoint.
  * Each breakpoint becomes: ["media", name, true/false]
  */
 export function createMedia(config: MediaConfig): void {
@@ -13,9 +13,9 @@ export function createMedia(config: MediaConfig): void {
   listeners.length = 0;
 
   if (typeof window === "undefined" || typeof window.matchMedia === "undefined") {
-    // SSR or test environment: just set all to false
+    // SSR or test environment: just remember all to false
     for (const name of Object.keys(config)) {
-      set("media", name, false);
+      replace("media", name, false);
     }
     return;
   }
@@ -25,11 +25,11 @@ export function createMedia(config: MediaConfig): void {
     const mql = window.matchMedia(mediaQuery);
 
     // Set initial value
-    set("media", name, mql.matches);
+    replace("media", name, mql.matches);
 
     // Listen for changes
     const handler = (e: MediaQueryListEvent) => {
-      set("media", name, e.matches);
+      replace("media", name, e.matches);
     };
     mql.addEventListener("change", handler);
     listeners.push(() => mql.removeEventListener("change", handler));

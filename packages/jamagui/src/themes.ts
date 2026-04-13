@@ -1,4 +1,4 @@
-import { assert, retract, set, when, $, _ } from "@jam/core";
+import { remember, replace, when, $, _ } from "@jam/core";
 import type { ThemeValues } from "./types";
 
 /**
@@ -8,7 +8,7 @@ import type { ThemeValues } from "./types";
 export function createThemes(themes: Record<string, ThemeValues>): void {
   for (const [name, values] of Object.entries(themes)) {
     for (const [key, value] of Object.entries(values)) {
-      assert("theme", name, key, value);
+      remember("theme", name, key, value);
     }
   }
 }
@@ -17,7 +17,7 @@ export function createThemes(themes: Record<string, ThemeValues>): void {
  * Set the active theme by name.
  */
 export function setTheme(name: string): void {
-  set("ui", "theme", name);
+  replace("ui", "theme", name);
 }
 
 /**
@@ -98,7 +98,7 @@ export function resolveThemeValue(ref: string): string | undefined {
  */
 export function addTheme(name: string, values: ThemeValues): void {
   for (const [key, value] of Object.entries(values)) {
-    assert("theme", name, key, value);
+    remember("theme", name, key, value);
   }
 }
 
@@ -108,9 +108,7 @@ export function addTheme(name: string, values: ThemeValues): void {
 export function updateTheme(name: string, values: Partial<ThemeValues>): void {
   for (const [key, value] of Object.entries(values)) {
     if (value == null) continue;
-    // Retract old value for this key if it exists
-    retract("theme", name, key, _);
-    assert("theme", name, key, value);
+    replace("theme", name, key, value);
   }
 }
 

@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { autorun, reaction, runInAction } from "mobx";
 import { db, $ } from "../db";
-import { assert, set, when, whenever, claim } from "../primitives";
+import { claim, remember, when, whenever } from "../primitives";
 
 describe("fine-grained per-pattern reactivity", () => {
-  beforeEach(() => { db.clear(); });
+  beforeEach(() => {
+    db.clear();
+  });
 
   it("autorun only fires when matching patterns change", () => {
     const observed: number[] = [];
@@ -13,13 +15,13 @@ describe("fine-grained per-pattern reactivity", () => {
     });
 
     // VDOM write — should NOT trigger the autorun (different pattern)
-    assert("e1", "tag", "div");
-    assert("e2", "class", "foo");
+    remember("e1", "tag", "div");
+    remember("e2", "class", "foo");
 
     expect(observed).toEqual([0]); // no re-fire
 
     // App-state write — SHOULD trigger
-    set("todo", 1, "title", "Buy milk");
+    remember("todo", 1, "title", "Buy milk");
     expect(observed).toEqual([0, 1]);
 
     disposer();
@@ -35,9 +37,9 @@ describe("fine-grained per-pattern reactivity", () => {
       },
       () => {
         runInAction(() => {
-          db.assert("e1", "tag", "div");
-          db.assert("e2", "tag", "span");
-          db.assert("e3", "text", "hello");
+          db.insert("e1", "tag", "div");
+          db.insert("e2", "tag", "span");
+          db.insert("e3", "text", "hello");
         });
       },
       { fireImmediately: true, equals: () => false },
@@ -45,7 +47,7 @@ describe("fine-grained per-pattern reactivity", () => {
 
     expect(dataRuns).toEqual([0]);
 
-    set("app", 1, "name", "Test");
+    remember("app", 1, "name", "Test");
     expect(dataRuns).toEqual([0, 1]);
 
     disposer();
@@ -53,20 +55,17 @@ describe("fine-grained per-pattern reactivity", () => {
 
   it("whenever on app-state can claim VDOM facts without cycle", () => {
     const bodyRuns: number[] = [];
-    const disposer = whenever(
-      [["todo", $.id, "done", true]],
-      (matches) => {
-        bodyRuns.push(matches.length);
-        for (const { id } of matches) {
-          claim(`k:${id}`, "class", "strikethrough");
-        }
-      },
-    );
+    const disposer = whenever([["todo", $.id, "done", true]], (matches) => {
+      bodyRuns.push(matches.length);
+      for (const { id } of matches) {
+        claim(`k:${id}`, "class", "strikethrough");
+      }
+    });
 
     expect(bodyRuns).toEqual([0]);
 
-    set("todo", 1, "title", "Test");
-    set("todo", 1, "done", true);
+    remember("todo", 1, "title", "Test");
+    remember("todo", 1, "done", true);
     expect(bodyRuns).toEqual([0, 1]);
 
     expect(db.query(["k:1", "class", "strikethrough"])).toHaveLength(1);
@@ -77,22 +76,19 @@ describe("fine-grained per-pattern reactivity", () => {
 
   it("whenever on VDOM facts works too", () => {
     const bodyRuns: string[] = [];
-    const disposer = whenever(
-      [[$.el, "tag", "div"]],
-      (matches) => {
-        bodyRuns.push(matches.map(m => m.el as string).join(","));
-      },
-    );
+    const disposer = whenever([[$.el, "tag", "div"]], (matches) => {
+      bodyRuns.push(matches.map((m) => m.el as string).join(","));
+    });
 
     expect(bodyRuns).toEqual([""]);
 
-    assert("e1", "tag", "div");
+    remember("e1", "tag", "div");
     expect(bodyRuns).toEqual(["", "e1"]);
 
-    assert("e2", "tag", "div");
+    remember("e2", "tag", "div");
     expect(bodyRuns).toEqual(["", "e1", "e1,e2"]);
 
-    set("todo", 1, "title", "Nope");
+    remember("todo", 1, "title", "Nope");
     expect(bodyRuns).toEqual(["", "e1", "e1,e2"]);
 
     disposer();
@@ -101,30 +97,24 @@ describe("fine-grained per-pattern reactivity", () => {
   it("chain: app-state → whenever → VDOM claim → whenever on VDOM", () => {
     const vdomObserved: string[] = [];
 
-    const dispose1 = whenever(
-      [["todo", $.id, "done", true]],
-      (matches) => {
-        for (const { id } of matches) {
-          claim(`todo-el-${id}`, "class", "completed");
-        }
-      },
-    );
+    const dispose1 = whenever([["todo", $.id, "done", true]], (matches) => {
+      for (const { id } of matches) {
+        claim(`todo-el-${id}`, "class", "completed");
+      }
+    });
 
-    const dispose2 = whenever(
-      [[$.el, "class", "completed"]],
-      (matches) => {
-        vdomObserved.push(matches.map(m => m.el as string).join(","));
-      },
-    );
+    const dispose2 = whenever([[$.el, "class", "completed"]], (matches) => {
+      vdomObserved.push(matches.map((m) => m.el as string).join(","));
+    });
 
     expect(vdomObserved).toEqual([""]);
 
-    set("todo", 1, "title", "Test");
-    set("todo", 1, "done", true);
+    remember("todo", 1, "title", "Test");
+    remember("todo", 1, "done", true);
     expect(vdomObserved).toEqual(["", "todo-el-1"]);
 
-    set("todo", 2, "title", "Test 2");
-    set("todo", 2, "done", true);
+    remember("todo", 2, "title", "Test 2");
+    remember("todo", 2, "done", true);
     expect(vdomObserved).toEqual(["", "todo-el-1", "todo-el-1,todo-el-2"]);
 
     dispose1();
@@ -132,7 +122,7 @@ describe("fine-grained per-pattern reactivity", () => {
   });
 
   it("when() returns same results for identical patterns", () => {
-    assert("x", 1);
+    remember("x", 1);
     const a = when(["x", $.val]);
     const b = when(["x", $.val]);
     expect(a).toEqual(b);

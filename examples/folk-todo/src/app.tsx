@@ -1,5 +1,5 @@
 import { h } from "@jam/core/jsx";
-import { $, _, assert, retract, set, when } from "@jam/core";
+import { $, _, remember, replace, forget, when } from "@jam/core";
 
 // --- State mutations ---
 
@@ -8,16 +8,16 @@ let nextId = 1;
 function addTodo(title: string) {
   if (!title.trim()) return;
   const id = nextId++;
-  set("todo", id, "title", title.trim());
-  set("todo", id, "done", false);
+  remember("todo", id, "title", title.trim());
+  remember("todo", id, "done", false);
 }
 
 function toggleTodo(id: number, currentDone: boolean) {
-  set("todo", id, "done", !currentDone);
+  replace("todo", id, "done", !currentDone);
 }
 
 function deleteTodo(id: number) {
-  retract("todo", id, _, _);
+  forget("todo", id, _, _);
 }
 
 // --- Components ---

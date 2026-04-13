@@ -4,21 +4,22 @@
 // since it doesn't have an explicit id. Demonstrates querying VDOM
 // facts with CSS selectors from an external program.
 
-import { $, claim, whenever, select } from "@jam/core";
+import { program } from "@jam/core";
 
-export const dispose = whenever(
-  [["session", $.sid, "costAmount", $.amount], ["session", $.sid, "costCurrency", $.currency]],
-  (sessions) => {
-    let totalCost = 0;
-    let currency = "USD";
-    for (const { amount, currency: cur } of sessions) {
-      totalCost += amount as number;
-      currency = cur as string;
-    }
+export const dispose = program("puddy-vite/cost-display", ({ $, claim, whenever, select }) =>
+  whenever(
+    [["session", $.sid, "costAmount", $.amount], ["session", $.sid, "costCurrency", $.currency]],
+    (sessions) => {
+      let totalCost = 0;
+      let currency = "USD";
+      for (const { amount, currency: cur } of sessions) {
+        totalCost += amount as number;
+        currency = cur as string;
+      }
 
-    const label = `Total cost: ${currency} ${totalCost.toFixed(4)}`;
-    for (const el of select(".connection-bar")) {
-      claim(el.id, "prop", "title", label);
-    }
-  },
-);
+      const label = `Total cost: ${currency} ${totalCost.toFixed(4)}`;
+      for (const el of select(".connection-bar")) {
+        claim(el.id, "prop", "title", label);
+      }
+    },
+  ));

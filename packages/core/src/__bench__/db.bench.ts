@@ -3,7 +3,7 @@
 // Run: pnpm bench
 // These establish a performance baseline for:
 //   - Fact assertion (single, bulk, with pattern invalidation)
-//   - Fact retraction (exact, wildcard)
+//   - Fact removeion (exact, wildcard)
 //   - Set (upsert)
 //   - Query (single pattern, multi-pattern join)
 //   - Pattern invalidation cost as registered patterns scale
@@ -21,8 +21,8 @@ function freshDb(): FactDB {
 /** Populate a DB with N todo-style entities (2 facts each: title + done). */
 function populateTodos(db: FactDB, n: number): void {
   for (let i = 0; i < n; i++) {
-    db.assert("todo", i, "title", `Task ${i}`);
-    db.assert("todo", i, "done", i % 3 === 0);
+    db.insert("todo", i, "title", `Task ${i}`);
+    db.insert("todo", i, "done", i % 3 === 0);
   }
 }
 
@@ -31,22 +31,27 @@ function populateRealistic(db: FactDB): void {
   // 50 todos (100 app-state facts)
   populateTodos(db, 50);
   // UI state
-  db.assert("ui", "selectedSession", "s-1");
-  db.assert("ui", "filter", "all");
+  db.insert("ui", "selectedSession", "s-1");
+  db.insert("ui", "filter", "all");
   // 5 sessions (10 facts)
   for (let i = 0; i < 5; i++) {
-    db.assert("session", `s-${i}`, "agent", "claude");
-    db.assert("session", `s-${i}`, "status", "active");
+    db.insert("session", `s-${i}`, "agent", "claude");
+    db.insert("session", `s-${i}`, "status", "active");
   }
   // Connection
-  db.assert("connection", "status", "connected");
-  db.assert("connection", "hostname", "localhost");
+  db.insert("connection", "status", "connected");
+  db.insert("connection", "hostname", "localhost");
   // VDOM-ish facts (200 element facts simulating a rendered tree)
   for (let i = 0; i < 50; i++) {
-    db.assert(`e${i}`, "tag", i % 3 === 0 ? "div" : i % 3 === 1 ? "span" : "button");
-    db.assert(`e${i}`, "class", "some-class");
-    db.assert(`e${i}`, "prop", "data-idx", i);
-    if (i > 0) db.assert(`e${Math.floor((i - 1) / 3)}`, "child", i % 3, `e${i}`);
+    db.insert(
+      `e${i}`,
+      "tag",
+      i % 3 === 0 ? "div" : i % 3 === 1 ? "span" : "button",
+    );
+    db.insert(`e${i}`, "class", "some-class");
+    db.insert(`e${i}`, "prop", "data-idx", i);
+    if (i > 0)
+      db.insert(`e${Math.floor((i - 1) / 3)}`, "child", i % 3, `e${i}`);
   }
 }
 
@@ -54,29 +59,29 @@ function populateRealistic(db: FactDB): void {
 // ASSERT
 // ============================================================================
 
-describe("assert", () => {
-  bench("assert single fact (empty db)", () => {
+describe("remember", () => {
+  bench("remember single fact (empty db)", () => {
     const db = freshDb();
-    db.assert("todo", 1, "title", "Buy milk");
+    db.insert("todo", 1, "title", "Buy milk");
   });
 
-  bench("assert 1000 unique facts", () => {
+  bench("remember 1000 unique facts", () => {
     const db = freshDb();
     for (let i = 0; i < 1000; i++) {
-      db.assert("item", i, "value", i * 2);
+      db.insert("item", i, "value", i * 2);
     }
   });
 
-  bench("assert duplicate fact (no-op)", () => {
+  bench("remember duplicate fact (no-op)", () => {
     const db = freshDb();
-    db.assert("todo", 1, "title", "Buy milk");
+    db.insert("todo", 1, "title", "Buy milk");
     // Bench the no-op path
     for (let i = 0; i < 100; i++) {
-      db.assert("todo", 1, "title", "Buy milk");
+      db.insert("todo", 1, "title", "Buy milk");
     }
   });
 
-  bench("assert with 10 registered patterns", () => {
+  bench("remember with 10 registered patterns", () => {
     const db = freshDb();
     // Register patterns
     for (let i = 0; i < 10; i++) {
@@ -85,17 +90,17 @@ describe("assert", () => {
       db.index(["item", $.id, `attr${i}`, $.val]);
     }
     for (let i = 0; i < 100; i++) {
-      db.assert("todo", i, "title", `Task ${i}`);
+      db.insert("todo", i, "title", `Task ${i}`);
     }
   });
 
-  bench("assert with 50 registered patterns", () => {
+  bench("remember with 50 registered patterns", () => {
     const db = freshDb();
     for (let i = 0; i < 50; i++) {
       db.index([`type${i}`, $.id, `attr${i}`, $.val]);
     }
     for (let i = 0; i < 100; i++) {
-      db.assert("todo", i, "title", `Task ${i}`);
+      db.insert("todo", i, "title", `Task ${i}`);
     }
   });
 });
@@ -104,24 +109,24 @@ describe("assert", () => {
 // RETRACT
 // ============================================================================
 
-describe("retract", () => {
-  bench("retract exact fact", () => {
+describe("forget", () => {
+  bench("forget exact fact", () => {
     const db = freshDb();
     populateTodos(db, 100);
     // Retract one
-    db.retract("todo", 50, "title", "Task 50");
+    db.drop("todo", 50, "title", "Task 50");
   });
 
-  bench("retract with wildcard (small db, 200 facts)", () => {
+  bench("forget with wildcard (small db, 200 facts)", () => {
     const db = freshDb();
     populateTodos(db, 100);
-    db.retract("todo", 50, _, _);
+    db.drop("todo", 50, _, _);
   });
 
-  bench("retract with wildcard (large db, 2000 facts)", () => {
+  bench("forget with wildcard (large db, 2000 facts)", () => {
     const db = freshDb();
     populateTodos(db, 1000);
-    db.retract("todo", 500, _, _);
+    db.drop("todo", 500, _, _);
   });
 });
 
@@ -129,24 +134,24 @@ describe("retract", () => {
 // SET (upsert)
 // ============================================================================
 
-describe("set", () => {
-  bench("set on empty db", () => {
+describe("remember", () => {
+  bench("remember on empty db", () => {
     const db = freshDb();
-    db.set("counter", "value", 0);
+    db.insert("counter", "value", 0);
   });
 
-  bench("set upsert (replace existing)", () => {
+  bench("remember upsert (replace existing)", () => {
     const db = freshDb();
-    db.set("counter", "value", 0);
+    db.insert("counter", "value", 0);
     for (let i = 1; i <= 100; i++) {
-      db.set("counter", "value", i);
+      db.insert("counter", "value", i);
     }
   });
 
-  bench("set 100 different keys", () => {
+  bench("remember 100 different keys", () => {
     const db = freshDb();
     for (let i = 0; i < 100; i++) {
-      db.set("item", i, "score", Math.random());
+      db.insert("item", i, "score", Math.random());
     }
   });
 });
@@ -201,28 +206,19 @@ describe("query — multi-pattern join", () => {
   bench("2-pattern join, 100-fact db (50 todos)", () => {
     const db = freshDb();
     populateTodos(db, 50);
-    db.query(
-      ["todo", $.id, "title", $.title],
-      ["todo", $.id, "done", $.done],
-    );
+    db.query(["todo", $.id, "title", $.title], ["todo", $.id, "done", $.done]);
   });
 
   bench("2-pattern join, 2000-fact db (1000 todos)", () => {
     const db = freshDb();
     populateTodos(db, 1000);
-    db.query(
-      ["todo", $.id, "title", $.title],
-      ["todo", $.id, "done", $.done],
-    );
+    db.query(["todo", $.id, "title", $.title], ["todo", $.id, "done", $.done]);
   });
 
   bench("2-pattern join, selective (only done=true)", () => {
     const db = freshDb();
     populateTodos(db, 500);
-    db.query(
-      ["todo", $.id, "done", true],
-      ["todo", $.id, "title", $.title],
-    );
+    db.query(["todo", $.id, "done", true], ["todo", $.id, "title", $.title]);
   });
 
   bench("2-pattern join on realistic db, session+status", () => {
@@ -275,40 +271,40 @@ describe("index", () => {
 // ============================================================================
 
 describe("invalidatePatterns", () => {
-  bench("assert with 0 registered patterns", () => {
+  bench("remember with 0 registered patterns", () => {
     const db = freshDb();
     for (let i = 0; i < 100; i++) {
-      db.assert("x", i, "val", i);
+      db.insert("x", i, "val", i);
     }
   });
 
-  bench("assert with 10 registered patterns (no match)", () => {
+  bench("remember with 10 registered patterns (no match)", () => {
     const db = freshDb();
     for (let i = 0; i < 10; i++) {
       db.index([`nomatch${i}`, $.id, $.val]);
     }
     for (let i = 0; i < 100; i++) {
-      db.assert("x", i, "val", i);
+      db.insert("x", i, "val", i);
     }
   });
 
-  bench("assert with 100 registered patterns (no match)", () => {
+  bench("remember with 100 registered patterns (no match)", () => {
     const db = freshDb();
     for (let i = 0; i < 100; i++) {
       db.index([`nomatch${i}`, $.id, $.val]);
     }
     for (let i = 0; i < 100; i++) {
-      db.assert("x", i, "val", i);
+      db.insert("x", i, "val", i);
     }
   });
 
-  bench("assert with 100 registered patterns (all match)", () => {
+  bench("remember with 100 registered patterns (all match)", () => {
     const db = freshDb();
     for (let i = 0; i < 100; i++) {
       db.index(["x", $.id, "val", $.val]);
     }
     for (let i = 0; i < 100; i++) {
-      db.assert("x", i, "val", i);
+      db.insert("x", i, "val", i);
     }
   });
 });
@@ -323,7 +319,14 @@ describe("factKey (JSON.stringify)", () => {
   });
 
   bench("long fact [string, string, string, string, string, string]", () => {
-    JSON.stringify(["message", "s-123", "msg-456", "assistant", "text", "Hello world, this is a longer message content"]);
+    JSON.stringify([
+      "message",
+      "s-123",
+      "msg-456",
+      "assistant",
+      "text",
+      "Hello world, this is a longer message content",
+    ]);
   });
 
   bench("numeric fact [string, number, string, number]", () => {

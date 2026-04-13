@@ -62,7 +62,7 @@ export async function persist(options: PersistOptions = {}): Promise<() => void>
   // Restore facts into the FactDB
   runInAction(() => {
     for (const [, terms] of restoredFacts) {
-      db.assert(...terms);
+      db.insert(...terms);
     }
   });
 

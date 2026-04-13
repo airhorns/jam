@@ -53,8 +53,8 @@ struct SpatialCounterApp: App {
             });
 
             // App state
-            set("counter", "count", 0);
-            set("app", "label", "Spatial Counter");
+            replace("counter", "count", 0);
+            replace("app", "label", "Spatial Counter");
         """)
 
         // Register native action handler
@@ -114,7 +114,7 @@ struct SpatialCounterApp: App {
                             backgroundColor: "$color.light",
                             borderRadius: "$radius.4",
                             onClick: function() {
-                                set("counter", "count", count - 1);
+                                replace("counter", "count", count - 1);
                                 callNative("haptic", { type: "light" });
                             },
                         }, h(Text, { fontSize: 24, fontWeight: "500", color: "$color.dark" }, "−")),
@@ -128,7 +128,7 @@ struct SpatialCounterApp: App {
                             opacity: count === 0 ? 0.5 : 1,
                             onClick: function() {
                                 if (count !== 0) {
-                                    set("counter", "count", 0);
+                                    replace("counter", "count", 0);
                                     callNative("haptic", { type: "medium" });
                                 }
                             },
@@ -145,7 +145,7 @@ struct SpatialCounterApp: App {
                             backgroundColor: "$color.accent",
                             borderRadius: "$radius.4",
                             onClick: function() {
-                                set("counter", "count", count + 1);
+                                replace("counter", "count", count + 1);
                                 callNative("haptic", { type: "light" });
                             },
                         }, h(Text, { fontSize: 24, fontWeight: "500", color: "$color.white" }, "+"))
@@ -162,7 +162,7 @@ struct SpatialCounterApp: App {
                                 borderRadius: 100000,
                                 backgroundColor: "$color." + c,
                                 onClick: function() {
-                                    set("app", "label", c.charAt(0).toUpperCase() + c.slice(1) + " Counter");
+                                    replace("app", "label", c.charAt(0).toUpperCase() + c.slice(1) + " Counter");
                                 },
                             });
                         })

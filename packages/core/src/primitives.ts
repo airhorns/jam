@@ -11,36 +11,31 @@ import { db, type Term, type Pattern, type Bindings, _ as wildcard } from "./db"
 export { $, _ } from "./db";
 export type { Term, Pattern, Bindings } from "./db";
 
-/** Assert a fact into the database. */
-export const assert: (...terms: Term[]) => void = action((...terms: Term[]) => {
+/** Claim a fact into the current ownership scope. */
+export const claim: (...terms: Term[]) => void = action((...terms: Term[]) => {
   db.assert(...terms);
 });
 
-/** Retract a fact. Supports _ wildcard for bulk retraction. */
-export const retract: (...terms: (Term | typeof wildcard)[]) => void = action((...terms: (Term | typeof wildcard)[]) => {
-  db.retract(...terms);
+/** Remember a durable fact not bound to the current ownership scope. */
+export const remember: (...terms: Term[]) => void = action((...terms: Term[]) => {
+  db.insert(...terms);
 });
 
-/** Set (upsert): retract any fact matching [...keyTerms, _], then assert [...keyTerms, value]. */
-export const set: (...terms: Term[]) => void = action((...terms: Term[]) => {
-  db.set(...terms);
+/** Forget matching facts immediately from shared state. Supports _ wildcard for bulk removal. */
+export const forget: (...terms: (Term | typeof wildcard)[]) => void = action((...terms: (Term | typeof wildcard)[]) => {
+  db.drop(...terms);
 });
 
-/**
- * Claim a fact — semantic alias for assert.
- * Convention: use claim() for VDOM / decoration facts,
- * assert() for app-state facts. Same underlying operation.
- */
-export const claim = assert;
-
-/** Retract a claim — semantic alias for retract. */
-export const retractClaim = retract;
+/** Replace the current durable value for a prefix by forgetting prior matches and remembering the new fact. */
+export const replace: (...terms: Term[]) => void = action((...terms: Term[]) => {
+  db.replace(...terms);
+});
 
 /**
  * Batch multiple mutations into a single transaction. Reactions only
  * fire once, after the transaction completes, seeing the final state.
- * Use this when you need to retract + assert multiple related facts
- * atomically (e.g. replacing a set of plan entries).
+ * Use this when you need to forget + remember multiple related facts
+ * atomically (e.g. replacing a batch of plan entries).
  */
 export function transaction<T>(fn: () => T): T {
   return runInAction(fn);
@@ -58,40 +53,36 @@ export function when(...patterns: Pattern[]): Bindings[] {
 
 /**
  * Reactive rule: when patterns match, run body.
- * Body can assert/claim facts freely.
+ * Body can claim facts freely.
  * Returns a disposer.
  */
 export function whenever(
   patterns: Pattern[],
   body: (matches: Bindings[]) => void,
 ): () => void {
-  let prevFactKeys: string[] = [];
-
   const idx = db.index(...patterns);
+  const parentOwner = db.createChildOwner(db.getCurrentOwnerId(), "rule-parent");
+  let currentRunOwner: string | null = null;
 
   const disposer = reaction(
     () => idx.get(),
     (matches) => {
       runInAction(() => {
-        for (const key of prevFactKeys) db.deleteByKey(key);
-        prevFactKeys = [];
-
-        const before = new Set(db.facts.keys());
-        body(matches);
-
-        for (const key of db.facts.keys()) {
-          if (!before.has(key)) prevFactKeys.push(key);
-        }
+        if (currentRunOwner) db.revokeOwner(currentRunOwner);
+        currentRunOwner = db.createChildOwner(parentOwner, "run");
+        db.withOwnerScope(currentRunOwner, () => {
+          body(matches);
+        });
       });
     },
     { fireImmediately: true, equals: comparer.structural },
   );
 
   return () => {
-    runInAction(() => {
-      for (const key of prevFactKeys) db.deleteByKey(key);
-      prevFactKeys = [];
-    });
     disposer();
+    runInAction(() => {
+      if (currentRunOwner) db.revokeOwner(currentRunOwner);
+      db.revokeOwner(parentOwner);
+    });
   };
 }

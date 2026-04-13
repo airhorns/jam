@@ -26,7 +26,7 @@ final class JamRuntimeTests: XCTestCase {
     func testLoadProgramAssertsFacts() throws {
         let runtime = JamRuntime()
         let result = runtime.loadProgram(id: "test", source: """
-            assert("hello", "world", 42);
+            remember("hello", "world", 42);
         """)
         XCTAssertEqual(result, "ok")
         let factsJson = runtime.getCurrentFacts()
@@ -54,7 +54,7 @@ final class JamRuntimeTests: XCTestCase {
         let _ = runtime.loadProgram(id: "bad", source: "throw new Error('fail');")
         // Runtime should still work after an error
         let result = runtime.loadProgram(id: "good", source: """
-            assert("still", "working", true);
+            remember("still", "working", true);
         """)
         XCTAssertEqual(result, "ok")
         XCTAssertTrue(runtime.getCurrentFacts().contains("still"))
@@ -63,16 +63,58 @@ final class JamRuntimeTests: XCTestCase {
     func testLoadProgramReplacesExisting() throws {
         let runtime = JamRuntime()
         runtime.loadProgram(id: "data", source: """
-            set("counter", "value", 1);
+            remember("counter", "value", 1);
         """)
         XCTAssertTrue(runtime.getCurrentFacts().contains("1"))
 
         // Reload same ID with different logic
         runtime.loadProgram(id: "data", source: """
-            set("counter", "value", 99);
+            remember("counter", "value", 99);
         """)
         let facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("99"), "Should have new value")
+        XCTAssertFalse(facts.contains("1"), "Previous program facts should be removed on reload")
+    }
+
+    func testDisposeProgramRemovesTopLevelFactsAndReactiveClaims() throws {
+        let runtime = JamRuntime()
+        runtime.loadProgram(id: "decorator", source: """
+            remember("program", "decorator", "loaded");
+            whenever([["todo", $.id, "done", true]], function(matches) {
+                for (const match of matches) {
+                    claim("todo-" + match.id, "class", "strikethrough");
+                }
+            });
+        """)
+        runtime.loadProgram(id: "todo-data", source: """
+            remember("todo", "1", "done", true);
+        """)
+
+        var facts = runtime.getCurrentFacts()
+        XCTAssertTrue(facts.contains("decorator"))
+        XCTAssertTrue(facts.contains("strikethrough"))
+
+        runtime.disposeProgram(id: "decorator")
+        facts = runtime.getCurrentFacts()
+        XCTAssertFalse(facts.contains("decorator"), "Top-level facts should be removed")
+        XCTAssertFalse(facts.contains("strikethrough"), "Reactive claims should be removed when disposer runs")
+        XCTAssertTrue(facts.contains("todo"), "Underlying source facts should remain")
+    }
+
+    func testDisposeMountedProgramRemovesRenderedFacts() throws {
+        let runtime = JamRuntime()
+        runtime.mountProgram(id: "ui", source: """
+            h("div", { id: "mounted-root" }, "hello")
+        """)
+
+        var facts = runtime.getCurrentFacts()
+        XCTAssertTrue(facts.contains("mounted-root"))
+        XCTAssertTrue(facts.contains("hello"))
+
+        runtime.disposeProgram(id: "ui")
+        facts = runtime.getCurrentFacts()
+        XCTAssertFalse(facts.contains("mounted-root"), "Mounted VDOM facts should be removed")
+        XCTAssertFalse(facts.contains("hello"), "Mounted text facts should be removed")
     }
 
     // MARK: - Fact Operations from Swift
@@ -82,9 +124,9 @@ final class JamRuntimeTests: XCTestCase {
         // assertFact is async, but we can verify via synchronous getCurrentFacts after a sync boundary
         runtime.loadProgram(id: "noop", source: "")
 
-        // Use loadProgram to assert (synchronous path)
-        runtime.loadProgram(id: "assert-test", source: """
-            assert("swift-fact", "key", "value123");
+        // Use loadProgram to insert (synchronous path)
+        runtime.loadProgram(id: "insert-test", source: """
+            remember("swift-fact", "key", "value123");
         """)
         let facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("swift-fact"))
@@ -94,29 +136,29 @@ final class JamRuntimeTests: XCTestCase {
     func testSetFactUpserts() throws {
         let runtime = JamRuntime()
         runtime.loadProgram(id: "s1", source: """
-            set("item", "name", "first");
+            remember("item", "name", "first");
         """)
         XCTAssertTrue(runtime.getCurrentFacts().contains("first"))
 
         runtime.loadProgram(id: "s2", source: """
-            set("item", "name", "second");
+            remember("item", "name", "second");
         """)
         let facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("second"))
-        XCTAssertFalse(facts.contains("first"), "Old value should be retracted by set()")
+        XCTAssertFalse(facts.contains("first"), "Old value should be removeed by remember()")
     }
 
     func testRetractFact() throws {
         let runtime = JamRuntime()
         runtime.loadProgram(id: "add", source: """
-            assert("temp", "data", "remove-me");
+            remember("temp", "data", "drop-me");
         """)
-        XCTAssertTrue(runtime.getCurrentFacts().contains("remove-me"))
+        XCTAssertTrue(runtime.getCurrentFacts().contains("drop-me"))
 
-        runtime.loadProgram(id: "remove", source: """
-            retract("temp", "data", "remove-me");
+        runtime.loadProgram(id: "drop", source: """
+            forget("temp", "data", "drop-me");
         """)
-        XCTAssertFalse(runtime.getCurrentFacts().contains("remove-me"), "Fact should be retracted")
+        XCTAssertFalse(runtime.getCurrentFacts().contains("drop-me"), "Fact should be removeed")
     }
 
     // MARK: - Reactive Queries (when/whenever)
@@ -124,10 +166,10 @@ final class JamRuntimeTests: XCTestCase {
     func testWhenQueryReturnsMatches() throws {
         let runtime = JamRuntime()
         runtime.loadProgram(id: "setup", source: """
-            assert("todo", "1", "title", "Buy milk");
-            assert("todo", "2", "title", "Write tests");
+            remember("todo", "1", "title", "Buy milk");
+            remember("todo", "2", "title", "Write tests");
             var matches = when(["todo", $.id, "title", $.title]);
-            set("test", "matchCount", matches.length);
+            remember("test", "matchCount", matches.length);
         """)
         let facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("2"), "Should find 2 matches")
@@ -136,10 +178,10 @@ final class JamRuntimeTests: XCTestCase {
     func testWheneverReactiveRule() throws {
         let runtime = JamRuntime()
         runtime.loadProgram(id: "rule", source: """
-            set("counter", "value", 0);
+            remember("counter", "value", 0);
             whenever([["counter", "value", $.v]], function(matches) {
                 if (matches.length > 0) {
-                    set("display", "text", "Count is " + matches[0].v);
+                    remember("display", "text", "Count is " + matches[0].v);
                 }
             });
         """)
@@ -147,7 +189,7 @@ final class JamRuntimeTests: XCTestCase {
         XCTAssertTrue(facts.contains("Count is 0"), "Initial whenever fire")
 
         runtime.loadProgram(id: "update", source: """
-            set("counter", "value", 5);
+            remember("counter", "value", 5);
         """)
         facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("Count is 5"), "whenever should react to change")
@@ -157,9 +199,9 @@ final class JamRuntimeTests: XCTestCase {
         let runtime = JamRuntime()
         runtime.loadProgram(id: "tx", source: """
             transaction(function() {
-                assert("batch", "a", 1);
-                assert("batch", "b", 2);
-                assert("batch", "c", 3);
+                remember("batch", "a", 1);
+                remember("batch", "b", 2);
+                remember("batch", "c", 3);
             });
         """)
         let facts = runtime.getCurrentFacts()
@@ -181,7 +223,7 @@ final class JamRuntimeTests: XCTestCase {
         """)
 
         let mountResult = runtime.mountProgram(id: "ui", source: """
-            set("test", "value", 42);
+            remember("test", "value", 42);
             function TestComponent() {
                 var matches = when(["test", "value", $.v]);
                 var val = matches.length > 0 ? matches[0].v : 0;
@@ -240,7 +282,7 @@ final class JamRuntimeTests: XCTestCase {
                 themes: { dark: { background: "#000", color: "#fff" } },
                 defaultTheme: "dark",
             });
-            set("name", "value", "Alice");
+            remember("name", "value", "Alice");
         """)
 
         runtime.mountProgram(id: "greeting", source: """
@@ -257,7 +299,7 @@ final class JamRuntimeTests: XCTestCase {
 
         // Change the name fact — component should re-render
         runtime.loadProgram(id: "change-name", source: """
-            set("name", "value", "Bob");
+            remember("name", "value", "Bob");
         """)
 
         facts = runtime.getCurrentFacts()
@@ -275,7 +317,7 @@ final class JamRuntimeTests: XCTestCase {
                 themes: { dark: { background: "#000", color: "#fff" } },
                 defaultTheme: "dark",
             });
-            set("counter", "count", 0);
+            replace("counter", "count", 0);
         """)
 
         runtime.mountProgram(id: "counter-ui", source: """
@@ -286,7 +328,7 @@ final class JamRuntimeTests: XCTestCase {
                     h(Text, { id: "count-display" }, "Count: " + count),
                     h(Button, {
                         id: "inc-btn",
-                        onClick: function() { set("counter", "count", count + 1); }
+                        onClick: function() { replace("counter", "count", count + 1); }
                     }, "Increment")
                 );
             }
@@ -323,7 +365,7 @@ final class JamRuntimeTests: XCTestCase {
             function InputTest() {
                 return h(Input, {
                     id: "test-input",
-                    onChange: function(e) { set("input", "value", e.data); }
+                    onChange: function(e) { remember("input", "value", e.data); }
                 });
             }
             h(InputTest, {})
@@ -464,7 +506,7 @@ final class JamRuntimeTests: XCTestCase {
 
         // Switch theme
         runtime.loadProgram(id: "switch", source: """
-            set("ui", "theme", "dark");
+            remember("ui", "theme", "dark");
         """)
         // Need to wait for reactive updates
         let expectation = XCTestExpectation(description: "Theme switch")
@@ -614,8 +656,8 @@ final class JamRuntimeTests: XCTestCase {
                 themes: { dark: { background: "#0d1117", color: "#c9d1d9", borderColor: "#21262d" } },
                 defaultTheme: "dark",
             });
-            set("connection", "status", "checking");
-            set("ui", "selectedSession", "");
+            replace("connection", "status", "checking");
+            replace("ui", "selectedSession", "");
         """)
 
         runtime.mountProgram(id: "app", source: """
@@ -658,22 +700,22 @@ final class JamRuntimeTests: XCTestCase {
         // MobX reactions are synchronous, so by the time loadProgram returns,
         // the nativeMount reaction should have re-fired and re-emitted VDOM.
         //
-        // However, there's a subtlety: loadProgram uses `with(jam) { set(...) }`
-        // The `set` is the MobX-wrapped action from @jam/core, which fires reactions
+        // However, there's a subtlety: loadProgram uses `with(jam) { remember(...) }`
+        // The `insert` is the MobX-wrapped action from @jam/core, which fires reactions
         // synchronously. But the nativeMount reaction's effect does `runInAction()`
         // which may batch with the loadProgram's action.
         //
         // To work around this, we verify the raw fact is present and that
         // subsequent state changes work when done from the same program scope.
         runtime.loadProgram(id: "connect-and-select", source: """
-            set("connection", "status", "connected");
-            set("ui", "selectedSession", "s-1");
-            assert("message", "s-1", "m1", "user", "text", "Hello agent");
-            assert("message", "s-1", "m2", "assistant", "text", "Hi there!");
+            replace("connection", "status", "connected");
+            replace("ui", "selectedSession", "s-1");
+            remember("message", "s-1", "m1", "user", "text", "Hello agent");
+            remember("message", "s-1", "m2", "assistant", "text", "Hi there!");
         """)
         facts = runtime.getCurrentFacts()
         // Verify fact state
-        XCTAssertTrue(facts.contains("connected"), "Connection fact should be set")
+        XCTAssertTrue(facts.contains("connected"), "Connection fact should be insert")
         XCTAssertTrue(facts.contains("Hello agent"), "User message fact should be present")
         XCTAssertTrue(facts.contains("Hi there!"), "Assistant message fact should be present")
         // Verify VDOM re-rendered with new state
@@ -829,7 +871,7 @@ final class JamRuntimeTests: XCTestCase {
 
         runtime.loadProgram(id: "use-return", source: """
             var result = callNative("getSessionId");
-            set("test", "sessionId", result);
+            remember("test", "sessionId", result);
         """)
 
         let facts = runtime.getCurrentFacts()
@@ -838,14 +880,14 @@ final class JamRuntimeTests: XCTestCase {
 
     func testCallNativeWithoutHandler() throws {
         let runtime = JamRuntime()
-        // No onNativeAction set — should not crash
+        // No onNativeAction insert — should not crash
         runtime.loadProgram(id: "call-no-handler", source: """
             var result = callNative("anything");
-            set("test", "result", result === undefined ? "undefined" : "other");
+            remember("test", "result", result === undefined ? "undefined" : "other");
         """)
 
         let facts = runtime.getCurrentFacts()
-        XCTAssertTrue(facts.contains("undefined"), "Should return undefined when no handler set")
+        XCTAssertTrue(facts.contains("undefined"), "Should return undefined when no handler insert")
     }
 
     func testCallNativeFromEventHandler() throws {

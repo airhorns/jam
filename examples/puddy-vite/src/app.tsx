@@ -1,7 +1,7 @@
 // Puddy — reactive chat app built on Jam's fact database.
 
 import { h, Fragment } from "@jam/core/jsx";
-import { $, set, when, assert } from "@jam/core";
+import { $, replace, when } from "@jam/core";
 import "./app.css";
 import { SessionManager } from "./networking/session-manager";
 
@@ -12,9 +12,9 @@ if (typeof window !== "undefined") {
 }
 
 // --- Initial state ---
-set("connection", "status", "checking");
-set("connection", "hostname", sessionManager.hostname);
-set("ui", "selectedSession", "");
+replace("connection", "status", "checking");
+replace("connection", "hostname", sessionManager.hostname);
+replace("ui", "selectedSession", "");
 
 // Check connection on startup
 sessionManager.checkConnection();
@@ -83,7 +83,7 @@ function SessionList() {
               key={sid as string}
               id={`session-${sid}`}
               class="session-row hstack gap-8"
-              onClick={() => set("ui", "selectedSession", sid)}
+              onClick={() => replace("ui", "selectedSession", sid)}
             >
               <span class={`circle ${dotColor}`} />
               <span class="font-body">{`${agent} — ${sid}`}</span>
@@ -101,7 +101,7 @@ function SessionList() {
           onClick={() => {
             try {
               const id = sessionManager.createNewSession();
-              set("ui", "selectedSession", id);
+              replace("ui", "selectedSession", id);
             } catch (err: any) {
               console.error(
                 "Failed to create session:",

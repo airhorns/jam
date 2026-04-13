@@ -911,7 +911,7 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
       var o = asCreateObservableOptions(options);
       return new ObservableMap(initialValues, getEnhancerFromOptions(o), o.name);
     },
-    set: function set2(initialValues, options) {
+    set: function set(initialValues, options) {
       var o = asCreateObservableOptions(options);
       return new ObservableSet(initialValues, getEnhancerFromOptions(o), o.name);
     },
@@ -2615,7 +2615,7 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     clear: function clear() {
       return this.splice(0);
     },
-    replace: function replace(newItems) {
+    replace: function replace2(newItems) {
       var adm = this[$mobx];
       return adm.spliceWithArray_(0, adm.values_.length, newItems);
     },
@@ -4133,9 +4133,193 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
       $mobx
     });
   }
+  function parseSelector(input) {
+    const segments = [];
+    let i = 0;
+    const len = input.length;
+    function skipWs() {
+      while (i < len && input[i] === " ") i++;
+    }
+    function readIdent() {
+      const start = i;
+      while (i < len && /[\w-]/.test(input[i])) i++;
+      return input.slice(start, i);
+    }
+    while (i < len) {
+      skipWs();
+      if (i >= len) break;
+      let combinator;
+      if (segments.length > 0) {
+        if (input[i] === ">") {
+          combinator = ">";
+          i++;
+          skipWs();
+        } else {
+          combinator = " ";
+        }
+      }
+      const simple = { classes: [], attrs: [] };
+      while (i < len && input[i] !== " " && input[i] !== ">") {
+        if (input[i] === ".") {
+          i++;
+          simple.classes.push(readIdent());
+        } else if (input[i] === "#") {
+          i++;
+          simple.id = readIdent();
+        } else if (input[i] === "[") {
+          i++;
+          const name = readIdent();
+          let value = "";
+          if (i < len && input[i] === "=") {
+            i++;
+            if (input[i] === '"' || input[i] === "'") {
+              const quote = input[i];
+              i++;
+              const vstart = i;
+              while (i < len && input[i] !== quote) i++;
+              value = input.slice(vstart, i);
+              i++;
+            } else {
+              value = readIdent();
+            }
+          }
+          if (i < len && input[i] === "]") i++;
+          simple.attrs.push({ name, value });
+        } else if (/[\w-]/.test(input[i])) {
+          simple.tag = readIdent();
+        } else {
+          break;
+        }
+      }
+      segments.push({ simple, combinator });
+    }
+    return segments;
+  }
+  function buildVdomIndex() {
+    const tags = /* @__PURE__ */ new Map();
+    const classes = /* @__PURE__ */ new Map();
+    const props = /* @__PURE__ */ new Map();
+    const childEntries = /* @__PURE__ */ new Map();
+    const parents = /* @__PURE__ */ new Map();
+    for (const fact of db.facts.values()) {
+      const entity = String(fact[0]);
+      const attr = fact[1];
+      if (attr === "tag") {
+        tags.set(entity, String(fact[2]));
+      } else if (attr === "class") {
+        if (!classes.has(entity)) classes.set(entity, /* @__PURE__ */ new Set());
+        classes.get(entity).add(String(fact[2]));
+      } else if (attr === "prop") {
+        if (!props.has(entity)) props.set(entity, /* @__PURE__ */ new Map());
+        props.get(entity).set(String(fact[2]), fact[3]);
+      } else if (attr === "child") {
+        const parent = entity;
+        const index = fact[2];
+        const childId = String(fact[3]);
+        if (!childEntries.has(parent)) childEntries.set(parent, []);
+        childEntries.get(parent).push([index, childId]);
+        parents.set(childId, parent);
+      }
+    }
+    const children = /* @__PURE__ */ new Map();
+    for (const [parent, entries] of childEntries) {
+      entries.sort((a, b) => a[0] - b[0]);
+      children.set(
+        parent,
+        entries.map(([, id]) => id)
+      );
+    }
+    return { tags, classes, props, children, parents };
+  }
+  function matchesSimple(entityId, sel, idx) {
+    if (sel.tag) {
+      const tag = idx.tags.get(entityId);
+      if (tag !== sel.tag) return false;
+    }
+    if (sel.id) {
+      const elProps = idx.props.get(entityId);
+      if (elProps?.get("id") !== sel.id) return false;
+    }
+    for (const cls of sel.classes) {
+      const elClasses = idx.classes.get(entityId);
+      if (!elClasses?.has(cls)) return false;
+    }
+    for (const attr of sel.attrs) {
+      const elProps = idx.props.get(entityId);
+      if (String(elProps?.get(attr.name) ?? "") !== attr.value) return false;
+    }
+    return true;
+  }
+  function isDescendantOf(entityId, ancestorId, idx) {
+    let current = idx.parents.get(entityId);
+    while (current) {
+      if (current === ancestorId) return true;
+      current = idx.parents.get(current);
+    }
+    return false;
+  }
+  function isChildOf(entityId, parentId, idx) {
+    return idx.parents.get(entityId) === parentId;
+  }
+  function matchSelector(segments, idx) {
+    if (segments.length === 0) return [];
+    let candidates = [];
+    for (const entityId of idx.tags.keys()) {
+      if (matchesSimple(entityId, segments[0].simple, idx)) {
+        candidates.push(entityId);
+      }
+    }
+    for (let i = 1; i < segments.length; i++) {
+      const { simple, combinator } = segments[i];
+      const next = [];
+      const matching = [];
+      for (const entityId of idx.tags.keys()) {
+        if (matchesSimple(entityId, simple, idx)) {
+          matching.push(entityId);
+        }
+      }
+      for (const entityId of matching) {
+        for (const ancestor of candidates) {
+          if (combinator === ">" && isChildOf(entityId, ancestor, idx)) {
+            next.push(entityId);
+            break;
+          } else if (combinator === " " && isDescendantOf(entityId, ancestor, idx)) {
+            next.push(entityId);
+            break;
+          }
+        }
+      }
+      candidates = next;
+    }
+    return candidates;
+  }
+  function toVdomElement(entityId, idx) {
+    return {
+      id: entityId,
+      tag: idx.tags.get(entityId) ?? "",
+      classes: Array.from(idx.classes.get(entityId) ?? []).sort(),
+      props: Object.fromEntries(idx.props.get(entityId) ?? [])
+    };
+  }
   const selectorCache = /* @__PURE__ */ new Map();
   function clearSelectCache() {
     selectorCache.clear();
+  }
+  function select(cssSelector) {
+    let cached = selectorCache.get(cssSelector);
+    if (!cached) {
+      const segments = parseSelector(cssSelector);
+      cached = computed(
+        () => {
+          const idx = buildVdomIndex();
+          const entityIds = matchSelector(segments, idx);
+          return entityIds.map((id) => toVdomElement(id, idx));
+        },
+        { equals: comparer.structural }
+      );
+      selectorCache.set(cssSelector, cached);
+    }
+    return cached.get();
   }
   const _ = Symbol("wildcard");
   const $ = new Proxy(
@@ -4193,13 +4377,15 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     return true;
   }
   function patternsKey(patterns) {
-    return JSON.stringify(patterns.map(
-      (p) => p.map((t) => {
-        if (t === _) return "__WILD__";
-        if (isBinding(t)) return `__BIND__${t.name}`;
-        return t;
-      })
-    ));
+    return JSON.stringify(
+      patterns.map(
+        (p) => p.map((t) => {
+          if (t === _) return "__WILD__";
+          if (isBinding(t)) return `__BIND__${t.name}`;
+          return t;
+        })
+      )
+    );
   }
   class FactDB {
     constructor() {
@@ -4207,8 +4393,23 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
       __publicField(this, "facts", observable.map());
       /** Side-channel for non-serializable values (function refs for event handlers). */
       __publicField(this, "refs", /* @__PURE__ */ new Map());
-      /** When non-null, assert() collects keys here (for tracking component-emitted facts). */
+      /** When non-null, insert() collects keys here (for tracking component-emitted facts). */
       __publicField(this, "emitCollector", null);
+      /** Nested write collectors for tracking facts/refs created during scoped execution. */
+      __publicField(this, "factCollectorStack", []);
+      __publicField(this, "refCollectorStack", []);
+      /** Implicit hierarchical ownership scopes for all writes. */
+      __publicField(this, "rootOwner", "__root__");
+      __publicField(this, "ownerStack", [this.rootOwner]);
+      __publicField(this, "ownerFacts", /* @__PURE__ */ new Map());
+      __publicField(this, "factOwners", /* @__PURE__ */ new Map());
+      __publicField(this, "ownerRefs", /* @__PURE__ */ new Map());
+      __publicField(this, "refOwners", /* @__PURE__ */ new Map());
+      __publicField(this, "ownerParents", /* @__PURE__ */ new Map([
+        [this.rootOwner, null]
+      ]));
+      __publicField(this, "ownerChildren", /* @__PURE__ */ new Map());
+      __publicField(this, "ownerCounters", /* @__PURE__ */ new Map());
       /** Index of fact keys by first term, for fast querySingle when pattern has a literal first term. */
       __publicField(this, "factsByFirstTerm", /* @__PURE__ */ new Map());
       /** Plain (non-observable) mirror of facts for fast reads in query paths without MobX overhead. */
@@ -4226,12 +4427,147 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
       __publicField(this, "patternsByFirstTerm", /* @__PURE__ */ new Map());
       makeObservable(this, {
         assert: action,
-        retract: action,
-        set: action
+        insert: action,
+        drop: action,
+        replace: action
       });
     }
     factKey(fact) {
       return JSON.stringify(fact);
+    }
+    currentOwner() {
+      return this.ownerStack[this.ownerStack.length - 1] ?? this.rootOwner;
+    }
+    getCurrentOwnerId() {
+      return this.currentOwner();
+    }
+    ensureOwner(ownerId, parentId = this.currentOwner()) {
+      if (!this.ownerParents.has(ownerId)) {
+        this.ownerParents.set(ownerId, parentId);
+        if (parentId != null) {
+          let children = this.ownerChildren.get(parentId);
+          if (!children) {
+            children = /* @__PURE__ */ new Set();
+            this.ownerChildren.set(parentId, children);
+          }
+          children.add(ownerId);
+        }
+        return;
+      }
+      if (parentId != null) {
+        const existingParent = this.ownerParents.get(ownerId);
+        if (existingParent == null) {
+          this.ownerParents.set(ownerId, parentId);
+          let children = this.ownerChildren.get(parentId);
+          if (!children) {
+            children = /* @__PURE__ */ new Set();
+            this.ownerChildren.set(parentId, children);
+          }
+          children.add(ownerId);
+        }
+      }
+    }
+    createChildOwner(parentId, label) {
+      this.ensureOwner(
+        parentId,
+        this.ownerParents.get(parentId) ?? this.rootOwner
+      );
+      const counterKey = `${parentId}:${label}`;
+      const next = (this.ownerCounters.get(counterKey) ?? 0) + 1;
+      this.ownerCounters.set(counterKey, next);
+      const ownerId = `${parentId}/${label}:${next}`;
+      this.ensureOwner(ownerId, parentId);
+      return ownerId;
+    }
+    withOwnerScope(ownerId, fn) {
+      this.ensureOwner(ownerId);
+      this.ownerStack.push(ownerId);
+      try {
+        return fn();
+      } finally {
+        this.ownerStack.pop();
+      }
+    }
+    revokeOwner(ownerId) {
+      const children = Array.from(this.ownerChildren.get(ownerId) ?? []);
+      for (const childId of children) {
+        this.revokeOwner(childId);
+      }
+      for (const key of Array.from(this.ownerFacts.get(ownerId) ?? [])) {
+        this.detachFactOwner(key, ownerId);
+      }
+      for (const key of Array.from(this.ownerRefs.get(ownerId) ?? [])) {
+        this.detachRefOwner(key, ownerId);
+      }
+      this.ownerFacts.delete(ownerId);
+      this.ownerRefs.delete(ownerId);
+      this.ownerChildren.delete(ownerId);
+      const parentId = this.ownerParents.get(ownerId);
+      if (parentId != null) {
+        this.ownerChildren.get(parentId)?.delete(ownerId);
+      }
+      if (ownerId !== this.rootOwner) {
+        this.ownerParents.delete(ownerId);
+      }
+    }
+    attachFactOwner(key, ownerId) {
+      let owners = this.factOwners.get(key);
+      if (!owners) {
+        owners = /* @__PURE__ */ new Set();
+        this.factOwners.set(key, owners);
+      }
+      if (!owners.has(ownerId)) {
+        owners.add(ownerId);
+        let factKeys = this.ownerFacts.get(ownerId);
+        if (!factKeys) {
+          factKeys = /* @__PURE__ */ new Set();
+          this.ownerFacts.set(ownerId, factKeys);
+        }
+        factKeys.add(key);
+      }
+    }
+    deleteFactRecord(key, fact) {
+      this.facts.delete(key);
+      this.factsPlain.delete(key);
+      this.factsByFirstTerm.get(fact[0])?.delete(key);
+      this.invalidatePatterns(fact);
+    }
+    detachFactOwner(key, ownerId) {
+      this.ownerFacts.get(ownerId)?.delete(key);
+      const owners = this.factOwners.get(key);
+      if (!owners) return;
+      owners.delete(ownerId);
+      if (owners.size === 0) {
+        this.factOwners.delete(key);
+        const fact = this.factsPlain.get(key);
+        if (fact) this.deleteFactRecord(key, fact);
+      }
+    }
+    attachRefOwner(key, ownerId) {
+      let owners = this.refOwners.get(key);
+      if (!owners) {
+        owners = /* @__PURE__ */ new Set();
+        this.refOwners.set(key, owners);
+      }
+      if (!owners.has(ownerId)) {
+        owners.add(ownerId);
+        let refKeys = this.ownerRefs.get(ownerId);
+        if (!refKeys) {
+          refKeys = /* @__PURE__ */ new Set();
+          this.ownerRefs.set(ownerId, refKeys);
+        }
+        refKeys.add(key);
+      }
+    }
+    detachRefOwner(key, ownerId) {
+      this.ownerRefs.get(ownerId)?.delete(key);
+      const owners = this.refOwners.get(key);
+      if (!owners) return;
+      owners.delete(ownerId);
+      if (owners.size === 0) {
+        this.refOwners.delete(key);
+        this.refs.delete(key);
+      }
     }
     /** Bump version counters for pattern sets that could match this fact. */
     invalidatePatterns(fact) {
@@ -4253,12 +4589,17 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
         }
       }
     }
-    assert(...terms) {
+    addFact(terms, ownerId) {
       const key = this.factKey(terms);
+      this.ensureOwner(
+        ownerId,
+        ownerId === this.rootOwner ? null : this.currentOwner()
+      );
       if (!this.facts.has(key)) {
         this.facts.set(key, terms);
         this.factsPlain.set(key, terms);
         if (this.emitCollector) this.emitCollector.add(key);
+        for (const collector of this.factCollectorStack) collector.add(key);
         const first = terms[0];
         let bucket = this.factsByFirstTerm.get(first);
         if (!bucket) {
@@ -4268,15 +4609,24 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
         bucket.add(key);
         this.invalidatePatterns(terms);
       }
+      this.attachFactOwner(key, ownerId);
     }
-    retract(...terms) {
+    assert(...terms) {
+      this.addFact(terms, this.currentOwner());
+    }
+    insert(...terms) {
+      this.addFact(terms, this.rootOwner);
+    }
+    drop(...terms) {
       if (!terms.includes(_)) {
         const key = this.factKey(terms);
-        if (this.facts.has(key)) {
-          this.facts.delete(key);
-          this.factsPlain.delete(key);
-          this.factsByFirstTerm.get(terms[0])?.delete(key);
-          this.invalidatePatterns(terms);
+        const fact = this.factsPlain.get(key);
+        if (fact) {
+          for (const ownerId of Array.from(this.factOwners.get(key) ?? [])) {
+            this.ownerFacts.get(ownerId)?.delete(key);
+          }
+          this.factOwners.delete(key);
+          this.deleteFactRecord(key, fact);
         }
         return;
       }
@@ -4294,43 +4644,22 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
         if (matches) toRemove.push([key, fact]);
       }
       for (const [key, fact] of toRemove) {
-        this.facts.delete(key);
-        this.factsPlain.delete(key);
-        this.factsByFirstTerm.get(fact[0])?.delete(key);
-        this.invalidatePatterns(fact);
+        for (const ownerId of Array.from(this.factOwners.get(key) ?? [])) {
+          this.ownerFacts.get(ownerId)?.delete(key);
+        }
+        this.factOwners.delete(key);
+        this.deleteFactRecord(key, fact);
       }
     }
-    set(...terms) {
-      if (terms.length < 2) throw new Error("set() requires at least 2 terms");
-      const prefixLen = terms.length - 1;
-      const firstTerm = terms[0];
-      const bucket = this.factsByFirstTerm.get(firstTerm);
-      if (bucket) {
-        const toRemove = [];
-        for (const key of bucket) {
-          const fact = this.facts.get(key);
-          if (!fact || fact.length !== terms.length) continue;
-          let matches = true;
-          for (let i = 1; i < prefixLen; i++) {
-            if (terms[i] !== fact[i]) {
-              matches = false;
-              break;
-            }
-          }
-          if (matches) toRemove.push(key);
-        }
-        for (const key of toRemove) {
-          const fact = this.factsPlain.get(key);
-          this.facts.delete(key);
-          this.factsPlain.delete(key);
-          bucket.delete(key);
-          this.invalidatePatterns(fact);
-        }
-      }
-      this.assert(...terms);
+    replace(...terms) {
+      if (terms.length < 2)
+        throw new Error("replace() requires at least 2 terms");
+      const pattern = [...terms.slice(0, terms.length - 1), _];
+      this.drop(...pattern);
+      this.insert(...terms);
     }
     /**
-     * Create a per-pattern-set computed index. Returns a computed that:
+     * Create a per-pattern-insert computed index. Returns a computed that:
      * - Tracks only the version counter for these patterns (fine-grained)
      * - Re-evaluates (scans all facts) only when that counter bumps
      * - Uses structural comparison so observers only re-run on actual changes
@@ -4536,14 +4865,17 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     }
   }
   const db = new FactDB();
-  const assert = action((...terms) => {
+  const claim = action((...terms) => {
     db.assert(...terms);
   });
-  const retract = action((...terms) => {
-    db.retract(...terms);
+  const remember = action((...terms) => {
+    db.insert(...terms);
   });
-  const set = action((...terms) => {
-    db.set(...terms);
+  const forget = action((...terms) => {
+    db.drop(...terms);
+  });
+  const replace = action((...terms) => {
+    db.replace(...terms);
   });
   function transaction(fn) {
     return runInAction(fn);
@@ -4552,32 +4884,31 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     return db.index(...patterns).get();
   }
   function whenever(patterns, body) {
-    let prevFactKeys = [];
     const idx = db.index(...patterns);
+    const parentOwner = db.createChildOwner(db.getCurrentOwnerId(), "rule-parent");
+    let currentRunOwner = null;
     const disposer = reaction(
       () => idx.get(),
       (matches) => {
         runInAction(() => {
-          for (const key of prevFactKeys) db.deleteByKey(key);
-          prevFactKeys = [];
-          const before = new Set(db.facts.keys());
-          body(matches);
-          for (const key of db.facts.keys()) {
-            if (!before.has(key)) prevFactKeys.push(key);
-          }
+          if (currentRunOwner) db.revokeOwner(currentRunOwner);
+          currentRunOwner = db.createChildOwner(parentOwner, "run");
+          db.withOwnerScope(currentRunOwner, () => {
+            body(matches);
+          });
         });
       },
       { fireImmediately: true, equals: comparer.structural }
     );
     return () => {
-      runInAction(() => {
-        for (const key of prevFactKeys) db.deleteByKey(key);
-        prevFactKeys = [];
-      });
       disposer();
+      runInAction(() => {
+        if (currentRunOwner) db.revokeOwner(currentRunOwner);
+        db.revokeOwner(parentOwner);
+      });
     };
   }
-  function h(tag, props, ...children) {
+  function h$1(tag, props, ...children) {
     return {
       __vnode: true,
       tag,
@@ -4590,6 +4921,351 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
       __vnode: true,
       tag: "__fragment",
       props: {},
+      children: children.flat(10)
+    };
+  }
+  function flattenChildren$1(children) {
+    const result = [];
+    for (const child of children) {
+      if (child == null || typeof child === "boolean") continue;
+      if (Array.isArray(child)) {
+        result.push(...flattenChildren$1(child));
+      } else if (typeof child === "object" && "__vnode" in child && child.tag === "__fragment") {
+        result.push(...flattenChildren$1(child.children));
+      } else {
+        result.push(child);
+      }
+    }
+    return result;
+  }
+  function computeEntityId$1(parentId, childIndex, props, inheritId) {
+    if (props.id != null) return String(props.id);
+    if (inheritId) return inheritId;
+    if (props.key != null) return `${parentId}:k:${props.key}`;
+    return `${parentId}:${childIndex}`;
+  }
+  function emitVdom$1(node, parentId, childIndex, inheritId) {
+    if (node == null || typeof node === "boolean") return;
+    if (typeof node === "string" || typeof node === "number") {
+      const textId = inheritId ?? `${parentId}:${childIndex}`;
+      db.assert(textId, "tag", "__text");
+      db.assert(textId, "text", String(node));
+      db.assert(parentId, "child", childIndex, textId);
+      return;
+    }
+    if (Array.isArray(node)) {
+      const flat2 = flattenChildren$1(node);
+      for (let i = 0; i < flat2.length; i++) {
+        emitVdom$1(flat2[i], parentId, childIndex + i);
+      }
+      return;
+    }
+    if (!node.__vnode) return;
+    const vnode = node;
+    if (typeof vnode.tag === "function") {
+      const propsWithChildren = vnode.children.length > 0 ? {
+        ...vnode.props,
+        children: vnode.children.length === 1 ? vnode.children[0] : vnode.children
+      } : vnode.props;
+      const result = vnode.tag(propsWithChildren);
+      if (result) {
+        const componentId = computeEntityId$1(
+          parentId,
+          childIndex,
+          vnode.props,
+          inheritId
+        );
+        emitVdom$1(result, parentId, childIndex, componentId);
+      }
+      return;
+    }
+    if (vnode.tag === "__fragment") {
+      const flat2 = flattenChildren$1(vnode.children);
+      for (let i = 0; i < flat2.length; i++) {
+        emitVdom$1(flat2[i], parentId, childIndex + i);
+      }
+      return;
+    }
+    const elId = computeEntityId$1(parentId, childIndex, vnode.props, inheritId);
+    const tagName = vnode.props.__nativeTag ? String(vnode.props.__nativeTag) : vnode.tag;
+    db.assert(elId, "tag", tagName);
+    db.assert(parentId, "child", childIndex, elId);
+    if (vnode.props.__nativeStyles) {
+      for (const [prop, value] of Object.entries(
+        vnode.props.__nativeStyles
+      )) {
+        if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+          db.assert(elId, "style", prop, value);
+        }
+      }
+    }
+    for (const [key, value] of Object.entries(vnode.props)) {
+      if (key === "key") continue;
+      if (key === "__nativeStyles" || key === "__nativeTag" || key.startsWith("__native_"))
+        continue;
+      if (key.startsWith("on") && typeof value === "function") {
+        const eventName = key.slice(2).toLowerCase();
+        const refKey = `${elId}:handler:${eventName}`;
+        db.setRef(refKey, value);
+        db.assert(elId, "handler", eventName, refKey);
+      } else if (key === "class" && typeof value === "string") {
+        for (const cls of value.split(/\s+/).filter(Boolean)) {
+          db.assert(elId, "class", cls);
+        }
+      } else if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        db.assert(elId, "prop", key, value);
+      }
+    }
+    const flat = flattenChildren$1(vnode.children);
+    for (let i = 0; i < flat.length; i++) {
+      emitVdom$1(flat[i], elId, i);
+    }
+  }
+  function injectVdom(parentId, startIndex, ...nodes) {
+    const flat = flattenChildren$1(nodes);
+    for (let i = 0; i < flat.length; i++) {
+      emitVdom$1(flat[i], parentId, startIndex + i);
+    }
+  }
+  function mount(rootVnode, container) {
+    const mountOwner = db.createChildOwner(db.getCurrentOwnerId(), "mount");
+    const emitDisposer = reaction(
+      () => {
+        let vnode = rootVnode;
+        if (typeof rootVnode === "object" && rootVnode !== null && "__vnode" in rootVnode) {
+          const rn = rootVnode;
+          if (typeof rn.tag === "function") {
+            vnode = rn.tag(rn.props);
+          }
+        }
+        return vnode;
+      },
+      (vnode) => {
+        runInAction(() => {
+          db.revokeOwner(mountOwner);
+          db.withOwnerScope(mountOwner, () => {
+            db.emitCollector = /* @__PURE__ */ new Set();
+            emitVdom$1(vnode, "dom", 0);
+            db.emitCollector = null;
+          });
+        });
+      },
+      // Always fire effect when data function re-runs — VNodes are new objects
+      // each time so reference equality would always trigger anyway.
+      { fireImmediately: true, equals: () => false }
+    );
+    const managed = /* @__PURE__ */ new Map();
+    const patchDisposer = autorun(() => {
+      const allFacts = Array.from(db.facts.values());
+      const tags = /* @__PURE__ */ new Map();
+      const classes = /* @__PURE__ */ new Map();
+      const props = /* @__PURE__ */ new Map();
+      const texts = /* @__PURE__ */ new Map();
+      const handlers = /* @__PURE__ */ new Map();
+      const children = /* @__PURE__ */ new Map();
+      for (const fact of allFacts) {
+        const entity = String(fact[0]);
+        const attr = fact[1];
+        if (attr === "tag") {
+          tags.set(entity, String(fact[2]));
+        } else if (attr === "class") {
+          if (!classes.has(entity)) classes.set(entity, /* @__PURE__ */ new Set());
+          classes.get(entity).add(String(fact[2]));
+        } else if (attr === "prop") {
+          if (!props.has(entity)) props.set(entity, /* @__PURE__ */ new Map());
+          props.get(entity).set(String(fact[2]), fact[3]);
+        } else if (attr === "text") {
+          texts.set(entity, String(fact[2]));
+        } else if (attr === "handler") {
+          if (!handlers.has(entity)) handlers.set(entity, /* @__PURE__ */ new Map());
+          handlers.get(entity).set(String(fact[2]), String(fact[3]));
+        } else if (attr === "child") {
+          if (!children.has(entity)) children.set(entity, []);
+          children.get(entity).push([fact[2], String(fact[3])]);
+        }
+      }
+      for (const [, list] of children) list.sort((a, b) => a[0] - b[0]);
+      const visited = /* @__PURE__ */ new Set();
+      function reconcile(entityId) {
+        const tag = tags.get(entityId);
+        if (!tag || visited.has(entityId)) return null;
+        visited.add(entityId);
+        if (tag === "__text") {
+          const text = texts.get(entityId) ?? "";
+          let node = managed.get(entityId);
+          if (node instanceof Text) {
+            if (node.textContent !== text) node.textContent = text;
+          } else {
+            node = document.createTextNode(text);
+            managed.set(entityId, node);
+          }
+          return node;
+        }
+        let el = managed.get(entityId);
+        if (!(el instanceof HTMLElement) || el.tagName.toLowerCase() !== tag) {
+          el = document.createElement(tag);
+          managed.set(entityId, el);
+        }
+        const clsSet = classes.get(entityId);
+        const clsStr = clsSet ? Array.from(clsSet).sort().join(" ") : "";
+        if (el.getAttribute("class") !== clsStr) {
+          if (clsStr) el.setAttribute("class", clsStr);
+          else el.removeAttribute("class");
+        }
+        const elProps = props.get(entityId);
+        const activeAttrs = /* @__PURE__ */ new Set();
+        if (elProps) {
+          for (const [key, value] of elProps) {
+            activeAttrs.add(key);
+            if (key === "checked" || key === "value" || key === "disabled") {
+              if (el[key] !== value) el[key] = value;
+            } else {
+              const strVal = String(value);
+              if (el.getAttribute(key) !== strVal) el.setAttribute(key, strVal);
+            }
+          }
+        }
+        for (let i = el.attributes.length - 1; i >= 0; i--) {
+          const name = el.attributes[i].name;
+          if (name === "class") continue;
+          if (!activeAttrs.has(name)) el.removeAttribute(name);
+        }
+        const oldHandlers = el.__handlers ?? /* @__PURE__ */ new Map();
+        for (const [event, listener] of oldHandlers) el.removeEventListener(event, listener);
+        const newHandlers = /* @__PURE__ */ new Map();
+        const elHandlers = handlers.get(entityId);
+        if (elHandlers) {
+          for (const [event, refKey] of elHandlers) {
+            const fn = db.getRef(refKey);
+            if (fn) {
+              el.addEventListener(event, fn);
+              newHandlers.set(event, fn);
+            }
+          }
+        }
+        el.__handlers = newHandlers;
+        const childList = children.get(entityId) ?? [];
+        const childNodes = [];
+        for (const [, childId] of childList) {
+          const node = reconcile(childId);
+          if (node) childNodes.push(node);
+        }
+        for (let i = 0; i < childNodes.length; i++) {
+          if (el.childNodes[i] !== childNodes[i]) {
+            el.insertBefore(childNodes[i], el.childNodes[i] || null);
+          }
+        }
+        while (el.childNodes.length > childNodes.length) {
+          el.removeChild(el.lastChild);
+        }
+        return el;
+      }
+      const rootChildren = children.get("dom") ?? [];
+      const rootNodes = [];
+      for (const [, childId] of rootChildren) {
+        const node = reconcile(childId);
+        if (node) rootNodes.push(node);
+      }
+      for (let i = 0; i < rootNodes.length; i++) {
+        if (container.childNodes[i] !== rootNodes[i]) {
+          container.insertBefore(rootNodes[i], container.childNodes[i] || null);
+        }
+      }
+      while (container.childNodes.length > rootNodes.length) {
+        container.removeChild(container.lastChild);
+      }
+      for (const id of managed.keys()) {
+        if (!visited.has(id)) managed.delete(id);
+      }
+    });
+    return () => {
+      emitDisposer();
+      runInAction(() => {
+        db.revokeOwner(mountOwner);
+      });
+      patchDisposer();
+    };
+  }
+  const programRegistry = /* @__PURE__ */ new Map();
+  function addDisposer(target, disposer) {
+    if (typeof disposer === "function") target.add(disposer);
+  }
+  function createProgramAPI(extraApi = {}, disposers) {
+    const autoDisposers = disposers ?? /* @__PURE__ */ new Set();
+    const api = {
+      db,
+      $,
+      _,
+      claim: (...terms) => claim(...terms),
+      remember: (...terms) => remember(...terms),
+      replace: (...terms) => replace(...terms),
+      forget: (...terms) => forget(...terms),
+      when,
+      whenever: (patterns, body) => {
+        const disposer = whenever(patterns, body);
+        autoDisposers.add(disposer);
+        return disposer;
+      },
+      transaction,
+      h: h$1,
+      Fragment,
+      injectVdom,
+      mount: ((rootVnode, container) => {
+        const disposer = mount(rootVnode, container);
+        autoDisposers.add(disposer);
+        return disposer;
+      }),
+      select,
+      ...extraApi
+    };
+    return Object.freeze(api);
+  }
+  function registerProgram(id, runner, options = {}) {
+    removeProgram(id);
+    const disposers = /* @__PURE__ */ new Set();
+    const api = createProgramAPI(options.api ?? {}, disposers);
+    const ownerId = `program:${id}`;
+    let result;
+    try {
+      result = db.withOwnerScope(ownerId, () => runner(api));
+    } catch (error) {
+      for (const disposer of Array.from(disposers).reverse()) {
+        disposer();
+      }
+      db.revokeOwner(ownerId);
+      throw error;
+    }
+    addDisposer(disposers, result);
+    const dispose = () => {
+      for (const disposer of Array.from(disposers).reverse()) {
+        disposer();
+      }
+      db.revokeOwner(ownerId);
+      programRegistry.delete(id);
+    };
+    programRegistry.set(id, { id, dispose });
+    return dispose;
+  }
+  function removeProgram(id) {
+    const record = programRegistry.get(id);
+    if (!record) return;
+    record.dispose();
+  }
+  function loadProgramSource(id, source, options = {}) {
+    return registerProgram(
+      id,
+      (api) => {
+        const fn = new Function("jam", `with(jam) { ${source} }`);
+        return fn(api);
+      },
+      options
+    );
+  }
+  function h(tag, props, ...children) {
+    return {
+      __vnode: true,
+      tag,
+      props: props ?? {},
       children: children.flat(10)
     };
   }
@@ -4632,10 +5308,18 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     if (!node.__vnode) return;
     const vnode = node;
     if (typeof vnode.tag === "function") {
-      const propsWithChildren = vnode.children.length > 0 ? { ...vnode.props, children: vnode.children.length === 1 ? vnode.children[0] : vnode.children } : vnode.props;
+      const propsWithChildren = vnode.children.length > 0 ? {
+        ...vnode.props,
+        children: vnode.children.length === 1 ? vnode.children[0] : vnode.children
+      } : vnode.props;
       const result = vnode.tag(propsWithChildren);
       if (result) {
-        const componentId = computeEntityId(parentId, childIndex, vnode.props, inheritId);
+        const componentId = computeEntityId(
+          parentId,
+          childIndex,
+          vnode.props,
+          inheritId
+        );
         emitVdom(result, parentId, childIndex, componentId);
       }
       return;
@@ -4652,7 +5336,9 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     db.assert(elId, "tag", tagName);
     db.assert(parentId, "child", childIndex, elId);
     if (vnode.props.__nativeStyles) {
-      for (const [prop, value] of Object.entries(vnode.props.__nativeStyles)) {
+      for (const [prop, value] of Object.entries(
+        vnode.props.__nativeStyles
+      )) {
         if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
           db.assert(elId, "style", prop, value);
         }
@@ -4660,7 +5346,8 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     }
     for (const [key, value] of Object.entries(vnode.props)) {
       if (key === "key") continue;
-      if (key === "__nativeStyles" || key === "__nativeTag" || key.startsWith("__native_")) continue;
+      if (key === "__nativeStyles" || key === "__nativeTag" || key.startsWith("__native_"))
+        continue;
       if (key.startsWith("on") && typeof value === "function") {
         const eventName = key.slice(2).toLowerCase();
         const refKey = `${elId}:handler:${eventName}`;
@@ -4684,7 +5371,7 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
       const values = config[category];
       if (!values) continue;
       for (const [key, value] of Object.entries(values)) {
-        assert("token", category, key, value);
+        remember("token", category, key, value);
       }
     }
   }
@@ -4711,12 +5398,12 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
   function createThemes(themes) {
     for (const [name, values] of Object.entries(themes)) {
       for (const [key, value] of Object.entries(values)) {
-        assert("theme", name, key, value);
+        remember("theme", name, key, value);
       }
     }
   }
   function setTheme(name) {
-    set("ui", "theme", name);
+    replace("ui", "theme", name);
   }
   function getActiveThemeName() {
     const results = when(["ui", "theme", $.name]);
@@ -4766,14 +5453,13 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
   }
   function addTheme(name, values) {
     for (const [key, value] of Object.entries(values)) {
-      assert("theme", name, key, value);
+      remember("theme", name, key, value);
     }
   }
   function updateTheme(name, values) {
     for (const [key, value] of Object.entries(values)) {
       if (value == null) continue;
-      retract("theme", name, key, _);
-      assert("theme", name, key, value);
+      replace("theme", name, key, value);
     }
   }
   function injectThemeCSS() {
@@ -4804,16 +5490,16 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     listeners.length = 0;
     if (typeof window === "undefined" || typeof window.matchMedia === "undefined") {
       for (const name of Object.keys(config)) {
-        set("media", name, false);
+        replace("media", name, false);
       }
       return;
     }
     for (const [name, query] of Object.entries(config)) {
       const mediaQuery = buildMediaQuery(query);
       const mql = window.matchMedia(mediaQuery);
-      set("media", name, mql.matches);
+      replace("media", name, mql.matches);
       const handler = (e) => {
-        set("media", name, e.matches);
+        replace("media", name, e.matches);
       };
       mql.addEventListener("change", handler);
       listeners.push(() => mql.removeEventListener("change", handler));
@@ -4852,27 +5538,27 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     listeners.length = 0;
   }
   function createFont(name, config) {
-    assert("font", name, "family", config.family);
+    remember("font", name, "family", config.family);
     for (const [key, value] of Object.entries(config.size)) {
-      assert("font", name, "size", key, value);
+      remember("font", name, "size", key, value);
     }
     const lineHeights = autoFill(config.size, config.lineHeight ?? {});
     for (const [key, value] of Object.entries(lineHeights)) {
-      assert("font", name, "lineHeight", key, value);
+      remember("font", name, "lineHeight", key, value);
     }
     const weights = autoFillString(config.size, config.weight ?? {});
     for (const [key, value] of Object.entries(weights)) {
-      assert("font", name, "weight", key, value);
+      remember("font", name, "weight", key, value);
     }
     const letterSpacings = autoFill(config.size, config.letterSpacing ?? {});
     for (const [key, value] of Object.entries(letterSpacings)) {
-      assert("font", name, "letterSpacing", key, value);
+      remember("font", name, "letterSpacing", key, value);
     }
     if (config.face) {
       for (const [weight, faces] of Object.entries(config.face)) {
-        assert("font", name, "face", weight, faces.normal);
+        remember("font", name, "face", weight, faces.normal);
         if (faces.italic) {
-          assert("font", name, "faceItalic", weight, faces.italic);
+          remember("font", name, "faceItalic", weight, faces.italic);
         }
       }
     }
@@ -5496,7 +6182,7 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
       overflow: "hidden"
     }
   });
-  const Text = styled("span", {
+  const Text$1 = styled("span", {
     name: "Text"
   });
   function SizableText(props) {
@@ -5515,7 +6201,7 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     if (props.lineHeight != null) mergedProps.lineHeight = props.lineHeight;
     if (props.letterSpacing != null) mergedProps.letterSpacing = props.letterSpacing;
     mergedProps.children = children;
-    return Text(mergedProps);
+    return Text$1(mergedProps);
   }
   SizableText.displayName = "SizableText";
   const Paragraph = styled("p", {
@@ -6918,7 +7604,7 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
       display: "inline-flex",
       borderRadius: 1e5,
       borderStyle: "solid"
-      // Animation applied via inline style since we can't easily set animation through the token system
+      // Animation applied via inline style since we can't easily remember animation through the token system
     }
   });
   function Accordion(props) {
@@ -7254,7 +7940,7 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     Stack,
     Switch,
     Tabs,
-    Text,
+    Text: Text$1,
     TextArea,
     Toast,
     ToggleGroup,
@@ -7311,9 +7997,8 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
       }
     });
   }
-  const programDisposers = /* @__PURE__ */ new Map();
   function nativeMount(rootVnode, rootId = "dom") {
-    let componentKeys = /* @__PURE__ */ new Set();
+    const mountOwner = db.createChildOwner(db.getCurrentOwnerId(), "native-mount");
     const emitDisposer = reaction(
       () => {
         let vnode = rootVnode;
@@ -7328,16 +8013,22 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
       },
       (vnode) => {
         runInAction(() => {
-          for (const key of componentKeys) db.deleteByKey(key);
-          db.emitCollector = /* @__PURE__ */ new Set();
-          emitVdom(vnode, rootId, 0);
-          componentKeys = db.emitCollector;
-          db.emitCollector = null;
+          db.revokeOwner(mountOwner);
+          db.withOwnerScope(mountOwner, () => {
+            db.emitCollector = /* @__PURE__ */ new Set();
+            emitVdom(vnode, rootId, 0);
+            db.emitCollector = null;
+          });
         });
       },
       { fireImmediately: true, equals: () => false }
     );
-    return emitDisposer;
+    return () => {
+      emitDisposer();
+      runInAction(() => {
+        db.revokeOwner(mountOwner);
+      });
+    };
   }
   function callNative(action2, params) {
     const nativeFn = globalThis.__callNative;
@@ -7356,20 +8047,7 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     }
     return resultJson;
   }
-  const jamAPI = {
-    // Core primitives
-    db,
-    $,
-    _,
-    assert,
-    retract,
-    set,
-    when,
-    whenever,
-    transaction,
-    // JSX
-    h,
-    Fragment,
+  const nativeProgramApi = {
     // Native bridge
     callNative,
     // All UI exports (createJamUI, styled, components, etc.)
@@ -7387,14 +8065,11 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     /**
      * Load and execute a Jam program (imperative style).
      * The program source has access to all Jam APIs via `with(jam)`.
-     * Use this for programs that call assert/whenever directly.
+     * Use this for programs that call remember/whenever directly.
      */
     loadProgram(id, source) {
       try {
-        programDisposers.get(id)?.();
-        programDisposers.delete(id);
-        const fn = new Function("jam", `with(jam) { ${source} }`);
-        fn(jamAPI);
+        loadProgramSource(id, source, { api: nativeProgramApi });
         return "ok";
       } catch (e) {
         return `error: ${e.message}`;
@@ -7411,39 +8086,37 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
      */
     mountProgram(id, source, rootId) {
       try {
-        programDisposers.get(id)?.();
-        programDisposers.delete(id);
-        let result;
-        try {
-          const fn = new Function("jam", `with(jam) { return (${source}); }`);
-          result = fn(jamAPI);
-        } catch {
-          const lines = source.trim().split("\n");
-          const lastLine = lines.pop();
-          const setup = lines.join("\n");
-          const fn = new Function("jam", `with(jam) { ${setup}
+        registerProgram(id, (api) => {
+          let result;
+          try {
+            const fn = new Function("jam", `with(jam) { return (${source}); }`);
+            result = fn(api);
+          } catch {
+            const lines = source.trim().split("\n");
+            const lastLine = lines.pop();
+            const setup = lines.join("\n");
+            const fn = new Function("jam", `with(jam) { ${setup}
  return (${lastLine}); }`);
-          result = fn(jamAPI);
-        }
-        if (result && typeof result === "object" && "__vnode" in result) {
-          const disposer = nativeMount(result, rootId || "dom");
-          programDisposers.set(id, disposer);
-        } else if (typeof result === "function") {
-          const vnode = h(result, {});
-          const disposer = nativeMount(vnode, rootId || "dom");
-          programDisposers.set(id, disposer);
-        }
+            result = fn(api);
+          }
+          if (result && typeof result === "object" && "__vnode" in result) {
+            return nativeMount(result, rootId || "dom");
+          }
+          if (typeof result === "function") {
+            return nativeMount(h(result, {}), rootId || "dom");
+          }
+          return void 0;
+        }, { api: nativeProgramApi });
         return "ok";
       } catch (e) {
         return `error: ${e.message}`;
       }
     },
     /**
-     * Dispose a loaded program and retract its emitted facts.
+     * Dispose a loaded program and forget its emitted facts.
      */
     disposeProgram(id) {
-      programDisposers.get(id)?.();
-      programDisposers.delete(id);
+      removeProgram(id);
     },
     /**
      * Fire an event handler on an entity.
@@ -7478,21 +8151,21 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
      */
     assertFact(termsJson) {
       const terms = JSON.parse(termsJson);
-      runInAction(() => assert(...terms));
+      runInAction(() => remember(...terms));
     },
     /**
      * Retract a fact from Swift side.
      */
-    retractFact(termsJson) {
+    removeFact(termsJson) {
       const terms = JSON.parse(termsJson);
-      runInAction(() => retract(...terms));
+      runInAction(() => forget(...terms));
     },
     /**
-     * Set (upsert) a fact from Swift side.
+     * Replace the durable value for a fact prefix from Swift side.
      */
     setFact(termsJson) {
       const terms = JSON.parse(termsJson);
-      runInAction(() => set(...terms));
+      runInAction(() => replace(...terms));
     }
   };
 })();
