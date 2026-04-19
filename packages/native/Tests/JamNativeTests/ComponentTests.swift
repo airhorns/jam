@@ -476,6 +476,39 @@ final class ComponentTests: XCTestCase {
         XCTAssertTrue(facts.contains("Accept terms"))
     }
 
+    func testCatalogStyledFrameTags() throws {
+        let runtime = setupRuntime()
+        runtime.mountProgram(id: "catalog-frames", source: """
+            h(YStack, { gap: 12 },
+                h(Checkbox, { id: "accepted", checked: true }, h(Checkbox.Indicator, {}, h(Text, {}, "ok"))),
+                h(Switch, { id: "notifications", checked: true }),
+                h(RadioGroup, { value: "native", orientation: "horizontal" },
+                    h(RadioGroup.Item, { value: "web", checked: false }),
+                    h(RadioGroup.Item, { value: "native", checked: true }, h(RadioGroup.Indicator, {}))
+                ),
+                h(Slider, { value: [48], min: 0, max: 100 }),
+                h(Progress, { value: 48, max: 100 }),
+                h(Tabs, { value: "overview" },
+                    h(Tabs.List, {},
+                        h(Tabs.Tab, {}, h(Text, {}, "Overview")),
+                        h(Tabs.Tab, {}, h(Text, {}, "Native"))
+                    ),
+                    h(Tabs.Content, {}, h(Text, {}, "Tab content"))
+                )
+            )
+        """)
+        let facts = runtime.getCurrentFacts()
+        XCTAssertTrue(facts.contains("CheckboxFrame"))
+        XCTAssertTrue(facts.contains("SwitchFrame"))
+        XCTAssertTrue(facts.contains("RadioGroupFrame"))
+        XCTAssertTrue(facts.contains("RadioItemFrame"))
+        XCTAssertTrue(facts.contains("SliderFrame"))
+        XCTAssertTrue(facts.contains("ProgressFrame"))
+        XCTAssertTrue(facts.contains("TabsTab"))
+        XCTAssertTrue(facts.contains("aria-valuenow"))
+        XCTAssertTrue(facts.contains("48"))
+    }
+
     // MARK: - Helper Tests
 
     func testTextAlignmentMapping() throws {
@@ -494,5 +527,13 @@ final class ComponentTests: XCTestCase {
         XCTAssertEqual(mapObjectFit("contain"), .fit)
         XCTAssertEqual(mapObjectFit("cover"), .fill)
         XCTAssertEqual(mapObjectFit(nil), .fill)
+    }
+
+    func testNativeTagClassifiers() throws {
+        XCTAssertTrue(isButtonLikeTag("TabsTab"))
+        XCTAssertTrue(isButtonLikeTag("SelectTrigger"))
+        XCTAssertTrue(isTextLikeTag("DialogTitle"))
+        XCTAssertTrue(isTextLikeTag("SelectItemText"))
+        XCTAssertFalse(isButtonLikeTag("YStack"))
     }
 }

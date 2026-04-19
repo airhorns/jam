@@ -7,10 +7,10 @@ import Foundation
 @Observable
 public final class JamRuntime {
     /// Current parsed entity tree — drives SwiftUI rendering.
-    public private(insert) var entities: [String: UIEntity] = [:]
+    public private(set) var entities: [String: UIEntity] = [:]
 
     /// Root entity IDs (children of the "dom" root).
-    public private(insert) var rootChildren: [(index: Int, id: String)] = []
+    public private(set) var rootChildren: [(index: Int, id: String)] = []
 
     /// Callback for native actions dispatched from JS via `callNative(action, params)`.
     /// Called synchronously on the JS queue — dispatch async work if needed.
@@ -275,7 +275,7 @@ public final class JamRuntime {
 
             case "handler":
                 guard fact.count >= 4 else { continue }
-                entities[entityId]!.handlers.set("\(fact[2])")
+                entities[entityId]!.handlers.insert("\(fact[2])")
 
             case "child":
                 guard fact.count >= 4 else { continue }

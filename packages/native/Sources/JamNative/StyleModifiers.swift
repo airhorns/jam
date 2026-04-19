@@ -360,12 +360,52 @@ struct TextDecorationModifier: ViewModifier {
 
 extension Color {
     init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let value = hex.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if value == "transparent" {
+            self.init(red: 0, green: 0, blue: 0, opacity: 0)
+            return
+        }
+        if value == "currentcolor" || value == "inherit" {
+            self.init(red: 0, green: 0, blue: 0, opacity: 1)
+            return
+        }
+        if value == "white" {
+            self.init(red: 1, green: 1, blue: 1, opacity: 1)
+            return
+        }
+        if value == "black" {
+            self.init(red: 0, green: 0, blue: 0, opacity: 1)
+            return
+        }
+        if value.hasPrefix("rgba(") || value.hasPrefix("rgb(") {
+            let components = value
+                .replacingOccurrences(of: "rgba(", with: "")
+                .replacingOccurrences(of: "rgb(", with: "")
+                .replacingOccurrences(of: ")", with: "")
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+
+            if components.count >= 3,
+               let r = Double(components[0]),
+               let g = Double(components[1]),
+               let b = Double(components[2]) {
+                let opacity = components.count >= 4 ? (Double(components[3]) ?? 1) : 1
+                self.init(red: r / 255.0, green: g / 255.0, blue: b / 255.0, opacity: opacity)
+                return
+            }
+        }
+
+        let hex = value.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
         var int: UInt64 = 0
         Scanner(string: hex).scanHexInt64(&int)
 
         let r, g, b, a: Double
         switch hex.count {
+        case 3:
+            r = Double((int >> 8) & 0xF) / 15.0
+            g = Double((int >> 4) & 0xF) / 15.0
+            b = Double(int & 0xF) / 15.0
+            a = 1.0
         case 6:
             r = Double((int >> 16) & 0xFF) / 255.0
             g = Double((int >> 8) & 0xFF) / 255.0

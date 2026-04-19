@@ -30,7 +30,8 @@ just build-puddy-native
 swift test --package-path packages/native
 swift build --package-path packages/native
 swift build --package-path examples/counter-ios
-swift build --package-path examples/puddy-native
+swift build --package-path examples/ui-catalog-native
+swift build --package-path examples/puddy-native  # if that example exists in this checkout
 corepack pnpm --dir packages/native build
 ```
 
@@ -43,4 +44,5 @@ native runtime resource bundle must reflect TypeScript source changes.
 - `packages/native/Sources/JamNative/JamView.swift` and related files for SwiftUI rendering.
 - `packages/native/src/` for bundled runtime shims.
 - `examples/counter-ios` for the minimal native app proof.
-- `examples/puddy-native` for the fuller native app proof.
+- `examples/ui-catalog-native` for `@jam/ui` component catalog coverage through SwiftUI.
+- `examples/puddy-native` for the fuller native app proof, when present in the checkout.

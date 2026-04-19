@@ -53,3 +53,27 @@ Record the log path and any screenshot path in the ticket or PR notes when used 
 For branch PRs that touch `@jam/ui` appearance or interaction, upload or attach
 the screenshot/video in the PR description so reviewers can inspect the rendered
 component state directly.
+
+## Native Catalog
+
+Use `examples/ui-catalog-native` when validating the same `@jam/ui` primitives
+through the SwiftUI renderer. Build the native runtime bundle first so the Swift
+resource file reflects current TypeScript source:
+
+```bash
+corepack pnpm --dir packages/native build
+swift build --package-path examples/ui-catalog-native
+```
+
+For broader native coverage, also run:
+
+```bash
+swift test --package-path packages/native
+swift build --package-path examples/counter-ios
+swift build --package-path examples/spatial-counter
+```
+
+On Linux hosts without Swift or Xcode, record the missing `swift` / `xcrun`
+probe output and still run the web catalog plus `packages/native` JavaScript
+bundle build. The native catalog source remains the handoff artifact for macOS
+or Swift-enabled validation.
