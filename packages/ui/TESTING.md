@@ -12,7 +12,7 @@
 Run the UI package tests:
 
 ```bash
-corepack pnpm --dir packages/jamagui test
+corepack pnpm --dir packages/ui test
 ```
 
 The root CI path also runs these tests explicitly through:
@@ -37,7 +37,7 @@ corepack pnpm dev:ui
 Or run it directly:
 
 ```bash
-corepack pnpm --dir examples/jamagui-catalog dev
+corepack pnpm --dir examples/ui-catalog dev
 ```
 
 Use `.agents/skills/jam-ui-visual-review/SKILL.md` for the full agent workflow,

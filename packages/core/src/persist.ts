@@ -99,7 +99,7 @@ export async function persist(options: PersistOptions = {}): Promise<() => void>
     const currentFacts = new Map<string, Fact>();
     for (const [key, fact] of db.facts) {
       if (!exclude(fact)) {
-        currentFacts.set(key, fact);
+        currentFacts.set(key, [...fact]);
       }
     }
 

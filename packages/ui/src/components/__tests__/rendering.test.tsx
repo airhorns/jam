@@ -97,10 +97,10 @@ describe("Jam UI DOM rendering", () => {
       "review@example.com",
     );
     expect(container.textContent).toContain("Component review");
-    expect(document.getElementById("jamagui-themes")?.textContent).toContain(
+    expect(document.getElementById("jam-ui-themes")?.textContent).toContain(
       "--background: #f7f4ef",
     );
-    const styleElement = document.getElementById("jamagui-styles") as HTMLStyleElement | null;
+    const styleElement = document.getElementById("jam-ui-styles") as HTMLStyleElement | null;
     expect(styleElement?.sheet?.cssRules.length).toBeGreaterThan(0);
   });
 

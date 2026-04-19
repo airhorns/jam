@@ -15,7 +15,7 @@
     "paths": {
       "@jam/core": ["../core/src/index.ts"],
       "@jam/core/*": ["../core/src/*"],
-      "@jam/ui": ["../jamagui/src/index.ts"]
+      "@jam/ui": ["../ui/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "../core/src/jsx-types.d.ts"]

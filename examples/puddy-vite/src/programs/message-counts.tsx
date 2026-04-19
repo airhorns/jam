@@ -6,8 +6,9 @@
 
 import { h } from "@jam/core/jsx";
 import { program } from "@jam/core";
+import { Text } from "@jam/ui";
 
-export const dispose = program("puddy-ui/message-counts", ({ $, whenever, injectVdom }) =>
+export const dispose = program("puddy-vite/message-counts", ({ $, whenever, injectVdom }) =>
   whenever(
     [["message", $.sid, $.msgId, $.sender, $.kind, $.content]],
     (messages) => {
@@ -17,8 +18,10 @@ export const dispose = program("puddy-ui/message-counts", ({ $, whenever, inject
       }
       for (const [sid, count] of counts) {
         // Inject a badge element as a child of the session button (at high index)
-        injectVdom(`session-${sid}`, 1000,
-          h("span", { class: "msg-count-badge" }, String(count)),
+        injectVdom(
+          `session-${sid}`,
+          1000,
+          <Text class="msg-count-badge">{String(count)}</Text>,
         );
       }
     },

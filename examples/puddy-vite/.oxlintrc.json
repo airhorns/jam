@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "jsPlugins": ["./oxlint-plugin-puddy.mjs"],
+  "rules": {
+    "no-empty-pattern": "off",
+    "no-unused-vars": "off",
+    "puddy/no-raw-ui": "error"
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/**/*.test.ts",
+        "src/**/*.test.tsx",
+        "src/**/__tests__/**/*.{ts,tsx}",
+        "src/testing/**/*.{ts,tsx}"
+      ],
+      "rules": {
+        "puddy/no-raw-ui": "off"
+      }
+    }
+  ]
+}
