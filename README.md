@@ -11,21 +11,10 @@ corepack pnpm install
 corepack pnpm dev
 ```
 
-The repository pins pnpm in `package.json` and the preferred local toolchain in
-`mise.toml`. Install `mise` once for your host/user before creating Jam
-worktrees. If it is missing from `PATH`, provision it once and then start a new
-shell or export the install location:
+The repository pins pnpm in `package.json`. If you have `mise`, run commands
+through the pinned Node/pnpm toolchain:
 
 ```bash
-curl https://mise.run | sh
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-For each new worktree, use the pinned toolchain:
-
-```bash
-command -v mise
-mise install
 mise exec -- corepack pnpm install
 mise exec -- corepack pnpm dev
 ```
