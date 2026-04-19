@@ -9,5 +9,8 @@
     "test": "corepack pnpm -r --if-present test",
     "test:e2e": "corepack pnpm --dir examples/folk-todo test:e2e",
     "typecheck": "corepack pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "agent-browser": "0.26.0"
   }
 }
