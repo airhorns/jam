@@ -1,0 +1,65 @@
+---
+name: jam-browser-validation
+description: Validate Jam web examples by launching the real app and driving it with the repo-pinned agent-browser CLI. Use for UI changes, app behavior checks, screenshots, console/error inspection, or any browser proof in this repository.
+allowed-tools: Bash(corepack pnpm:*), Bash(corepack pnpm exec agent-browser:*), Bash(agent-browser:*)
+---
+
+# Jam Browser Validation
+
+Use this skill when a Jam change should be proven in a browser. Jam uses custom
+JSX and a fact database, so validate through the app UI plus any relevant
+`window.__db` or DOM checks instead of relying only on static review.
+
+## Launch
+
+Prefer the repo-pinned toolchain:
+
+```bash
+corepack pnpm --dir examples/folk-todo dev
+```
+
+Use package-specific dev commands when the changed surface is another example:
+
+```bash
+corepack pnpm --dir examples/counter dev
+corepack pnpm --dir examples/puddy-vite dev
+corepack pnpm --dir examples/trello-clone dev
+```
+
+If multiple worktrees are active, set a package-specific port or use the port
+shown by Vite.
+
+## Drive The App
+
+Use the repo-pinned `agent-browser` dependency:
+
+```bash
+corepack pnpm exec agent-browser open http://127.0.0.1:5173
+corepack pnpm exec agent-browser snapshot -i
+corepack pnpm exec agent-browser fill @e1 "Browser proof"
+corepack pnpm exec agent-browser press Enter
+corepack pnpm exec agent-browser snapshot -i
+```
+
+For folk-todo, a useful smoke path is:
+
+1. Open the app and wait for `todos`.
+2. Fill the new todo input.
+3. Press Enter.
+4. Toggle the created item.
+5. Verify item text, class/state, and item count.
+
+Useful evidence commands:
+
+```bash
+corepack pnpm exec agent-browser get text body
+corepack pnpm exec agent-browser console
+corepack pnpm exec agent-browser errors
+corepack pnpm exec agent-browser screenshot scratch/browser-proof.png
+```
+
+Close browser sessions you opened:
+
+```bash
+corepack pnpm exec agent-browser close
+```
