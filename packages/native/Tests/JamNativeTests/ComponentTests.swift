@@ -2,7 +2,7 @@ import XCTest
 import SwiftUI
 @testable import JamNative
 
-/// Tests for the expanded component library — verifies that all jamagui components
+/// Tests for the expanded component library — verifies that all @jam/ui components
 /// render correctly through the JamNative bridge and produce expected VDOM facts.
 final class ComponentTests: XCTestCase {
 

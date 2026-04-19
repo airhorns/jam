@@ -5464,10 +5464,10 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
   }
   function injectThemeCSS() {
     if (typeof document === "undefined") return;
-    let styleEl = document.getElementById("jamagui-themes");
+    let styleEl = document.getElementById("jam-ui-themes");
     if (!styleEl) {
       styleEl = document.createElement("style");
-      styleEl.id = "jamagui-themes";
+      styleEl.id = "jam-ui-themes";
       document.head.appendChild(styleEl);
     }
     const themeResults = when(["theme", $.name, $.key, $.value]);
@@ -5840,7 +5840,7 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
     if (typeof document === "undefined") return null;
     if (styleElement) return styleElement;
     styleElement = document.createElement("style");
-    styleElement.id = "jamagui-styles";
+    styleElement.id = "jam-ui-styles";
     document.head.appendChild(styleElement);
     return styleElement;
   }

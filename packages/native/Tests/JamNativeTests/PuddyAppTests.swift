@@ -8,7 +8,7 @@ final class PuddyAppTests: XCTestCase {
     private func createPuddyRuntime() -> JamRuntime {
         let runtime = JamRuntime()
 
-        // Design system setup (matches puddy-native's PuddyPrograms.designSystem)
+        // Design system setup (matches the canonical puddy example theme)
         runtime.loadProgram(id: "design", source: """
             createJamUI({
                 tokens: {
