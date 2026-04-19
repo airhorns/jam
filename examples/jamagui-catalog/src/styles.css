@@ -1,0 +1,181 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #172026;
+  background: #f7f4ef;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.catalog-shell {
+  min-height: 100vh;
+  padding: 32px;
+  background:
+    linear-gradient(135deg, rgba(0, 127, 115, 0.12), transparent 36%),
+    linear-gradient(315deg, rgba(184, 50, 93, 0.12), transparent 34%),
+    #f7f4ef;
+}
+
+.catalog-shell.theme-dark {
+  color: #f8fafc;
+  background:
+    linear-gradient(135deg, rgba(0, 150, 136, 0.18), transparent 35%),
+    linear-gradient(315deg, rgba(47, 111, 203, 0.18), transparent 34%),
+    #111827;
+}
+
+.catalog-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: end;
+  max-width: 1180px;
+  margin: 0 auto 28px;
+}
+
+.catalog-header h1 {
+  max-width: 760px;
+  margin: 0;
+  font-size: 52px;
+  line-height: 1;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: #007f73;
+}
+
+.theme-dark .eyebrow {
+  color: #7dd3c7;
+}
+
+.lede {
+  max-width: 680px;
+  font-size: 18px;
+  line-height: 1.55;
+}
+
+.toolbar {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.catalog-section {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 26px 0 34px;
+  border-top: 1px solid rgba(23, 32, 38, 0.14);
+}
+
+.theme-dark .catalog-section {
+  border-top-color: rgba(248, 250, 252, 0.18);
+}
+
+.section-heading {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+  margin-bottom: 18px;
+}
+
+.section-heading h2 {
+  margin: 0;
+}
+
+.section-heading p {
+  max-width: 720px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.foundation-grid,
+.control-grid,
+.composition-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.composition-grid {
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+}
+
+.review-card {
+  min-height: 176px;
+  box-shadow: 0 18px 42px rgba(23, 32, 38, 0.08);
+}
+
+.theme-dark .review-card {
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.24);
+}
+
+.review-card.wide {
+  min-height: 260px;
+}
+
+.swatch-row {
+  padding: 0 16px 16px;
+  flex-wrap: wrap;
+}
+
+.swatch {
+  width: 76px;
+}
+
+.swatch-chip {
+  width: 76px;
+  height: 48px;
+  border-radius: 6px;
+  border: 1px solid rgba(23, 32, 38, 0.16);
+}
+
+.scroll-sample {
+  max-height: 154px;
+  padding: 16px;
+}
+
+.scroll-sample.compact {
+  max-height: 118px;
+  padding: 10px 16px;
+}
+
+.timeline-row {
+  min-height: 34px;
+  padding: 6px 0;
+}
+
+@media (max-width: 860px) {
+  .catalog-shell {
+    padding: 20px;
+  }
+
+  .catalog-header,
+  .section-heading,
+  .foundation-grid,
+  .control-grid,
+  .composition-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .catalog-header h1 {
+    font-size: 38px;
+  }
+
+  .toolbar {
+    justify-content: flex-start;
+  }
+}
