@@ -1,17 +1,23 @@
 ## Build & Development Commands
 
 ```bash
-pnpm install              # Install all dependencies
-just dev                  # Run folk-todo example dev server
-just test                 # Run core + folk-todo unit tests
-just test-e2e             # Run folk-todo e2e tests (Playwright)
-just typecheck            # TypeScript check all packages
+corepack pnpm install       # Install all dependencies
+corepack pnpm dev           # Run folk-todo example dev server
+corepack pnpm test          # Run package/example unit tests where present
+corepack pnpm test:e2e      # Run folk-todo e2e tests (Playwright)
+corepack pnpm typecheck     # TypeScript check all packages
+
+# Optional just conveniences, if just is installed
+just dev
+just test
+just test-e2e
+just typecheck
 
 # Per-package commands (run from package directory)
-pnpm test                 # Unit tests (vitest run)
-pnpm test:watch           # Watch mode tests
-pnpm test:e2e             # E2e tests (Playwright, in examples that have them)
-pnpm run bench            # Benchmarks (packages/core only)
+corepack pnpm test          # Unit tests (vitest run)
+corepack pnpm test:watch    # Watch mode tests
+corepack pnpm test:e2e      # E2e tests (Playwright, in examples that have them)
+corepack pnpm run bench     # Benchmarks (packages/core only)
 ```
 
 ## Architecture
@@ -57,9 +63,9 @@ All packages use a custom JSX factory — **not React**:
 
 ## Testing
 
-- **Unit tests**: Vitest, files in `src/__tests__/`. Run a single test file: `cd packages/core && npx vitest run src/__tests__/db.test.ts`
-- **E2E tests**: Playwright (Chromium). Folk-todo uses port 5174, puddy-vite uses port 5173.
-- **CI** runs: typecheck → core tests → folk-todo tests → folk-todo e2e
+- **Unit tests**: Vitest, files in `src/__tests__/`. Run a single test file: `cd packages/core && corepack pnpm exec vitest run src/__tests__/db.test.ts`
+- **E2E tests**: Playwright (Chromium). Test servers use per-worktree default ports to avoid cross-worktree collisions; set `PLAYWRIGHT_PORT` or the example-specific `*_PLAYWRIGHT_PORT` variable to override.
+- **CI** runs: install → typecheck → unit tests → folk-todo e2e
 
 ## Browser Automation
 

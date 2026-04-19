@@ -1,7 +1,13 @@
 {
   "private": true,
+  "packageManager": "pnpm@10.18.3",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "dev": "corepack pnpm --dir examples/folk-todo dev",
+    "test": "corepack pnpm -r --if-present test",
+    "test:e2e": "corepack pnpm --dir examples/folk-todo test:e2e",
+    "typecheck": "corepack pnpm -r typecheck"
   }
 }

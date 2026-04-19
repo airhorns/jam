@@ -1,6 +1,6 @@
 // Benchmarks for the core FactDB operations.
 //
-// Run: pnpm bench
+// Run: corepack pnpm bench
 // These establish a performance baseline for:
 //   - Fact assertion (single, bulk, with pattern invalidation)
 //   - Fact removeion (exact, wildcard)

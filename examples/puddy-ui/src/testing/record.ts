@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Record a cassette — captures real HTTP interactions with a sandbox-agent server.
 //
-// Usage: npx tsx src/testing/record.ts <cassette-name> <message1> [message2] ...
+// Usage: corepack pnpm exec tsx src/testing/record.ts <cassette-name> <message1> [message2] ...
 //
 // Requires a running sandbox-agent server at http://localhost:2468.
 // Records all HTTP traffic into src/testing/cassettes/<cassette-name>.json.
@@ -48,8 +48,8 @@ async function recordRequest(
 async function main() {
   const args = process.argv.slice(2);
   if (args.length < 2) {
-    console.error("Usage: npx tsx src/testing/record.ts <cassette-name> <message1> [message2] ...");
-    console.error("Example: npx tsx src/testing/record.ts hello 'say hello'");
+    console.error("Usage: corepack pnpm exec tsx src/testing/record.ts <cassette-name> <message1> [message2] ...");
+    console.error("Example: corepack pnpm exec tsx src/testing/record.ts hello 'say hello'");
     process.exit(1);
   }
 

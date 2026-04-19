@@ -7,9 +7,36 @@ The core idea: programs don't call each other. They make **claims** into a share
 ## Quick start
 
 ```bash
-pnpm install
-cd examples/folk-todo && pnpm dev
+corepack pnpm install
+corepack pnpm dev
 ```
+
+The repository pins pnpm in `package.json`. If you have `mise`, run commands
+through the pinned Node/pnpm toolchain:
+
+```bash
+mise exec -- corepack pnpm install
+mise exec -- corepack pnpm dev
+```
+
+`just` recipes are available as conveniences, but the canonical commands are
+the root `corepack pnpm ...` scripts so a fresh worktree does not depend on a
+globally installed `pnpm` or `just`.
+
+Useful setup and validation commands:
+
+```bash
+corepack pnpm install       # Install all workspace dependencies
+corepack pnpm dev           # Run the folk-todo example dev server
+corepack pnpm test          # Run unit tests for packages/examples that define them
+corepack pnpm test:e2e      # Run folk-todo Playwright tests
+corepack pnpm typecheck     # TypeScript check all packages and examples
+```
+
+Playwright configs derive their default server ports from the current worktree
+path so multiple Codex worktrees can run e2e tests without accidentally reusing
+another app's dev server. Set `PLAYWRIGHT_PORT` or the example-specific
+`*_PLAYWRIGHT_PORT` variable when you need a fixed port.
 
 ## Core API
 
