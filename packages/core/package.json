@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "bench": "vitest bench",
+    "bench:ci": "mkdir -p benchmark-results && vitest bench --outputJson benchmark-results/core-benchmarks.json",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
