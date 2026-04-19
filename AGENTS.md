@@ -93,6 +93,19 @@ capture evidence with `snapshot -i`, `get text`, `console`, `errors`, or a
 screenshot. Do not rely only on static inspection when the change affects user
 flows.
 
+## PR Media Requirements
+
+When a branch changes Jam UI, app behavior, examples, native views, renderer
+output, or `@jam/ui` component appearance, capture screenshots or video from the
+relevant running app, example, or component catalog after validation. Upload or
+attach that media in the pull request description so reviewers can inspect the
+result without rebuilding locally.
+
+For low-level changes with no user-visible surface, such as fact database
+performance work or internal refactors that do not affect rendered output, media
+may be omitted. In that case, the pull request description should say media was
+omitted and briefly explain why the change has no UI/app-visible effect.
+
 ## Native / Swift Development
 
 Use the existing Swift package entry points; do not add alternate native command

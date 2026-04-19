@@ -6,7 +6,10 @@
   },
   "scripts": {
     "dev": "corepack pnpm --dir examples/folk-todo dev",
+    "dev:ui": "corepack pnpm --dir examples/ui-catalog dev",
+    "build:ui-catalog": "corepack pnpm --dir examples/ui-catalog build",
     "test": "corepack pnpm -r --if-present test",
+    "test:ui": "corepack pnpm --dir packages/ui test",
     "test:e2e": "corepack pnpm --dir examples/folk-todo test:e2e && corepack pnpm --dir examples/puddy-vite test:e2e",
     "typecheck": "corepack pnpm -r typecheck"
   },
