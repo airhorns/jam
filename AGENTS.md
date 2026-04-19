@@ -38,7 +38,7 @@ All application state — including the VDOM — lives in a shared **fact databa
   - `select.ts` — CSS selector queries over VDOM facts
   - `persist.ts` / `persist-worker.ts` — SQLite/OPFS persistence via wa-sqlite
 
-- **@jam/ui** (`packages/jamagui/`): Tamagui-inspired styled component library with theming, tokens, and 40+ components.
+- **@jam/ui** (`packages/ui/`): Tamagui-inspired styled component library with theming, tokens, and 40+ components.
 
 ### Examples
 
@@ -101,10 +101,8 @@ layers unless the package layout changes.
 ```bash
 just test-swift
 just build-native
-just build-puddy-native
 swift test --package-path packages/native
 swift build --package-path examples/counter-ios
-swift build --package-path examples/puddy-native
 ```
 
 Before native work, probe the host:

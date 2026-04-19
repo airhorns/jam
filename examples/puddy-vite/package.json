@@ -6,14 +6,16 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "lint": "node scripts/check-no-raw-jsx.mjs",
+    "test": "node scripts/check-no-raw-jsx.mjs && vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:record": "tsx src/testing/record.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@jam/core": "workspace:*"
+    "@jam/core": "workspace:*",
+    "@jam/ui": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

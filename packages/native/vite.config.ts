@@ -27,7 +27,7 @@ export default defineConfig({
     alias: {
       "@jam/core/jsx": "../core/src/jsx.ts",
       "@jam/core": "../core/src/index.ts",
-      "@jam/ui": "../jamagui/src/index.ts",
+      "@jam/ui": "../ui/src/index.ts",
     },
   },
 });

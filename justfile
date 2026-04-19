@@ -25,7 +25,3 @@ swift-run target:
 build-native:
     corepack pnpm --dir packages/native build
     swift build --package-path packages/native
-
-build-puddy-native:
-    corepack pnpm --dir packages/native build
-    swift build --package-path examples/puddy-native

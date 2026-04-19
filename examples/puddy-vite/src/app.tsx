@@ -1,9 +1,76 @@
-// Puddy — reactive chat app built on Jam's fact database.
+// Puddy — reactive chat app built on Jam's fact database + @jam/ui design system.
 
 import { h } from "@jam/core/jsx";
 import { $, replace, when } from "@jam/core";
+import {
+  createJamUI,
+  XStack,
+  YStack,
+  Text,
+  Button,
+  Input,
+  Separator,
+  Spinner,
+  styled,
+} from "@jam/ui";
 import "./app.css";
 import { SessionManager } from "./networking/session-manager";
+
+// --- Design system setup ---
+createJamUI({
+  tokens: {
+    size: { "1": 5, "2": 10, "3": 15, "4": 20, "5": 25, "6": 30, "7": 40, "8": 50 },
+    space: { "1": 4, "2": 8, "3": 12, "4": 16, "5": 20, "6": 24, "7": 32, "8": 48 },
+    radius: { "1": 3, "2": 6, "3": 8, "4": 10, "5": 12, "6": 16 },
+    color: {
+      bg: "#0d1117",
+      bgSidebar: "#010409",
+      bgSurface: "#161b22",
+      bgInput: "#0d1117",
+      border: "#21262d",
+      borderHover: "#484f58",
+      text: "#c9d1d9",
+      textBright: "#e6edf3",
+      textMuted: "#8b949e",
+      green: "#3fb950",
+      orange: "#d29922",
+      red: "#f85149",
+      blue: "#58a6ff",
+      purple: "#bc8cff",
+      gray: "#484f58",
+      btnBg: "#21262d",
+      btnBorder: "#30363d",
+    },
+    zIndex: { "1": 10, "2": 50, "3": 100 },
+  },
+  themes: {
+    dark: {
+      background: "#0d1117",
+      backgroundHover: "#161b22",
+      backgroundPress: "#21262d",
+      backgroundFocus: "#58a6ff",
+      color: "#c9d1d9",
+      colorHover: "#e6edf3",
+      borderColor: "#21262d",
+      borderColorHover: "#484f58",
+      borderColorFocus: "#58a6ff",
+      placeholderColor: "#484f58",
+      outlineColor: "rgba(88,166,255,0.15)",
+      shadowColor: "rgba(0,0,0,0.3)",
+    },
+  },
+  defaultTheme: "dark",
+  fonts: {
+    body: {
+      family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
+      size: { "1": 11, "2": 12, "3": 13, "4": 14, "5": 15, "6": 16 },
+    },
+    mono: {
+      family: "'SF Mono', 'Fira Code', Menlo, Consolas, monospace",
+      size: { "1": 11, "2": 12, "3": 13, "4": 14 },
+    },
+  },
+});
 
 // --- Session manager (singleton) ---
 export const sessionManager = new SessionManager();
@@ -19,7 +86,26 @@ replace("ui", "selectedSession", "");
 // Check connection on startup
 sessionManager.checkConnection();
 
-// --- Components ---
+// --- Styled primitives ---
+
+const StatusDot = styled("span", {
+  name: "StatusDot",
+  defaultProps: {
+    width: 8,
+    height: 8,
+    borderRadius: 100000,
+    flexShrink: 0,
+  },
+});
+
+const MonoText = styled("span", {
+  name: "MonoText",
+  defaultProps: {
+    fontFamily: "'SF Mono', 'Fira Code', Menlo, Consolas, monospace",
+    fontSize: 13,
+    lineHeight: 1.7,
+  },
+});
 
 function ConnectionBar() {
   const statuses = when(["connection", "status", $.status]);
@@ -31,10 +117,10 @@ function ConnectionBar() {
 
   const dotColor =
     status === "connected"
-      ? "bg-green"
+      ? "$color.green"
       : status === "checking"
-        ? "bg-orange"
-        : "bg-red";
+        ? "$color.orange"
+        : "$color.red";
   const label =
     status === "connected"
       ? host
@@ -43,10 +129,17 @@ function ConnectionBar() {
         : "Disconnected";
 
   return (
-    <div class="connection-bar hstack gap-8" data-testid="connection-bar">
-      <span class={`circle ${dotColor}`} />
-      <span class="font-caption">{label}</span>
-    </div>
+    <XStack
+      class="connection-bar"
+      gap="$space.2"
+      padding="$space.2"
+      paddingHorizontal="$space.6"
+      backgroundColor="$color.bgSidebar"
+      data-testid="connection-bar"
+    >
+      <StatusDot backgroundColor={dotColor} />
+      <Text fontSize={12} color="$color.textMuted">{label}</Text>
+    </XStack>
   );
 }
 
@@ -61,93 +154,114 @@ function SessionList() {
     connection.length > 0 && connection[0].status === "connected";
 
   return (
-    <div class="sidebar vstack" data-testid="sidebar">
-      <div class="sidebar-header">Sessions</div>
-      <div class="divider" />
+    <YStack class="sidebar" width={300} minWidth={300} backgroundColor="$color.bgSidebar" data-testid="sidebar">
+      <Text
+        padding="$space.4"
+        paddingTop="$space.5"
+        paddingBottom="$space.3"
+        fontWeight="600"
+        fontSize={11}
+        color="$color.textMuted"
+        textTransform="uppercase"
+        letterSpacing={1.5}
+      >
+        Sessions
+      </Text>
+      <Separator />
 
-      <div class="vstack gap-4 p-8 scroll-area">
+      <YStack gap="$space.1" padding="$space.2" class="scroll-area">
         {sessions.map(({ sid, agent, status }) => {
           const dotColor =
             status === "starting"
-              ? "bg-gray"
+              ? "$color.gray"
               : status === "active"
-                ? "bg-blue"
+                ? "$color.blue"
                 : status === "failed"
-                  ? "bg-red"
-                  : "bg-secondary";
+                  ? "$color.red"
+                  : "$color.textMuted";
           return (
-            <button
+            <Button
               key={sid as string}
               id={`session-${sid}`}
               class="session-row hstack gap-8"
+              variant="ghost"
+              justifyContent="flex-start"
               onClick={() => replace("ui", "selectedSession", sid)}
             >
-              <span class={`circle ${dotColor}`} />
-              <span class="font-body">{`${agent} — ${sid}`}</span>
-              <span class="font-caption fg-secondary">{status as string}</span>
-            </button>
+              <StatusDot backgroundColor={dotColor} />
+              <Text fontSize={13} color="$color.textBright" flex={1} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+                {`${agent} — ${sid}`}
+              </Text>
+              <Text fontSize={11} color="$color.textMuted" textTransform="uppercase" letterSpacing={0.5} flexShrink={0}>
+                {status as string}
+              </Text>
+            </Button>
           );
         })}
-      </div>
+      </YStack>
 
-      <div class="sidebar-bottom">
-        <button
+      <XStack padding="$space.4" borderTopWidth={1} borderColor="$color.border" marginTop="auto">
+        <Button
           data-testid="new-session"
           disabled={!isConnected}
-          class={!isConnected ? "fg-secondary" : ""}
+          width="100%"
+          justifyContent="center"
+          size="2"
+          opacity={!isConnected ? 0.4 : 1}
           onClick={() => {
             try {
               const id = sessionManager.createNewSession();
               replace("ui", "selectedSession", id);
             } catch (err: any) {
-              console.error(
-                "Failed to create session:",
-                err.message ?? err,
-              );
+              console.error("Failed to create session:", err.message ?? err);
             }
           }}
         >
           + New Session
-        </button>
-      </div>
-    </div>
+        </Button>
+      </XStack>
+    </YStack>
   );
 }
 
 function ModeBadge() {
   const modes = when(["session", $.sid, "currentMode", $.mode]);
 
-  return (
-    <div class="vstack" data-testid="mode-badges">
-      {modes.map(({ sid, mode }) => (
-        <div
+  return modes.map(({ sid, mode }) => (
+        <XStack
           key={`mode-${sid}`}
           class="mode-badge hstack gap-8"
+          gap="$space.2"
+          padding="$space.2"
+          paddingHorizontal="$space.6"
           data-testid="mode-badge"
         >
-          <span class="font-caption fg-blue">{`[${mode}]`}</span>
-        </div>
-      ))}
-    </div>
-  );
+          <Text fontSize={12} color="$color.blue">{`[${mode}]`}</Text>
+        </XStack>
+  ));
 }
 
 function PlanList() {
-  const plans = when([
-    "plan",
-    $.sid,
-    $.entryId,
-    $.planContent,
-    $.planStatus,
-    $.planPriority,
-  ]);
+  const selection = when(["ui", "selectedSession", $.selectedId]);
+  const selectedId =
+    selection.length > 0 ? (selection[0].selectedId as string) : "";
+  const plans = selectedId
+    ? when([
+        "plan",
+        selectedId,
+        $.entryId,
+        $.planContent,
+        $.planStatus,
+        $.planPriority,
+      ])
+    : [];
 
   if (plans.length === 0) return null;
 
   return (
-    <div class="plan-section vstack gap-4" data-testid="plan-list">
+    <YStack gap="$space.1" padding="$space.4" paddingHorizontal="$space.6" backgroundColor="$color.bgSurface" class="plan-section" data-testid="plan-list">
       {plans.map(
-        ({ sid, entryId, planContent, planStatus, planPriority }) => {
+        ({ entryId, planContent, planStatus, planPriority }) => {
           const statusIcon =
             planStatus === "completed"
               ? "[done]"
@@ -156,80 +270,84 @@ function PlanList() {
                 : "[ ]";
           const statusColor =
             planStatus === "completed"
-              ? "fg-green"
+              ? "$color.green"
               : planStatus === "in_progress"
-                ? "fg-blue"
-                : "fg-secondary";
+                ? "$color.blue"
+                : "$color.textMuted";
           return (
-            <div
-              key={`plan-${sid}-${entryId}`}
+            <XStack
+              key={`plan-${selectedId}-${entryId}`}
               class="plan-entry hstack gap-8"
+              gap="$space.3"
+              alignItems="baseline"
             >
-              <span class={`font-body ${statusColor}`}>{statusIcon}</span>
-              <span class="font-body">{planContent as string}</span>
+              <MonoText color={statusColor} fontSize={11} minWidth={44}>{statusIcon}</MonoText>
+              <MonoText fontSize={13}>{planContent as string}</MonoText>
               {planPriority === "high" ? (
-                <span class="font-caption fg-red">!</span>
+                <Text fontSize={12} color="$color.red">!</Text>
               ) : null}
-            </div>
+            </XStack>
           );
         },
       )}
-    </div>
+    </YStack>
   );
 }
 
 function MessageList() {
-  const messages = when([
-    "message",
-    $.selectedId,
-    $.msgId,
-    $.sender,
-    $.kind,
-    $.content,
-  ]);
+  const selection = when(["ui", "selectedSession", $.selectedId]);
+  const selectedId =
+    selection.length > 0 ? (selection[0].selectedId as string) : "";
+  const messages = selectedId
+    ? when([
+        "message",
+        selectedId,
+        $.msgId,
+        $.sender,
+        $.kind,
+        $.content,
+      ])
+    : [];
 
   return (
-    <div class="message-list vstack gap-4" data-testid="message-list">
+    <YStack gap="$space.1" padding="$space.5" paddingHorizontal="$space.6" class="message-list" data-testid="message-list">
       {messages.map(({ msgId, sender, kind, content }) => {
         if (kind === "thought") {
           return (
-            <div key={msgId as string} class="message hstack gap-8">
-              <span class="fg-secondary">...</span>
-              <span class="font-caption fg-secondary">
-                {content as string}
-              </span>
-            </div>
+            <XStack key={msgId as string} gap="$space.3" class="message" alignItems="baseline">
+              <MonoText color="$color.textMuted" fontWeight="700" minWidth={14} textAlign="center">...</MonoText>
+              <MonoText fontSize={12} color="$color.textMuted">{content as string}</MonoText>
+            </XStack>
           );
         }
 
         if (kind === "toolUse") {
           return (
-            <div key={msgId as string} class="message hstack gap-8">
-              <span class="fg-orange">~</span>
-              <span class="font-callout fg-orange">{content as string}</span>
-            </div>
+            <XStack key={msgId as string} gap="$space.3" class="message" alignItems="baseline">
+              <MonoText color="$color.orange" fontWeight="700" minWidth={14} textAlign="center">~</MonoText>
+              <MonoText fontSize={13} color="$color.orange">{content as string}</MonoText>
+            </XStack>
           );
         }
 
         if (kind === "toolResult") {
-          const statusColor = content === "completed" ? "fg-green" : "fg-red";
-          const statusIcon = content === "completed" ? "+" : "x";
+          const isCompleted = content === "completed";
+          const color = isCompleted ? "$color.green" : "$color.red";
+          const icon = isCompleted ? "+" : "x";
           return (
-            <div key={msgId as string} class="message hstack gap-8">
-              <span class={statusColor}>{statusIcon}</span>
-              <span class={`font-caption ${statusColor}`}>
-                {content as string}
-              </span>
-            </div>
+            <XStack key={msgId as string} gap="$space.3" class="message" alignItems="baseline">
+              <MonoText color={color} fontWeight="700" minWidth={14} textAlign="center">{icon}</MonoText>
+              <MonoText fontSize={12} color={color}>{content as string}</MonoText>
+            </XStack>
           );
         }
 
         if (kind === "modeChange") {
           return (
-            <div key={msgId as string} class="message hstack gap-8">
-              <span class="fg-blue">*</span>
-              <span class="font-caption fg-blue">{`Mode: ${content}`}</span>
-            </div>
+            <XStack key={msgId as string} gap="$space.3" class="message" alignItems="baseline">
+              <MonoText color="$color.blue" fontWeight="700" minWidth={14} textAlign="center">*</MonoText>
+              <MonoText fontSize={12} color="$color.blue">{`Mode: ${content}`}</MonoText>
+            </XStack>
           );
         }
 
@@ -237,78 +355,90 @@ function MessageList() {
           sender === "user" ? ">" : sender === "assistant" ? "<" : "#";
         const color =
           sender === "user"
-            ? "fg-blue"
+            ? "$color.blue"
             : sender === "assistant"
-              ? "fg-purple"
-              : "fg-orange";
+              ? "$color.purple"
+              : "$color.orange";
 
         return (
-          <div key={msgId as string} class="message hstack gap-8">
-            <span class={color}>{icon}</span>
-            <span class="font-body">{content as string}</span>
-          </div>
+          <XStack key={msgId as string} gap="$space.3" class="message" alignItems="baseline">
+            <MonoText color={color} fontWeight="700" minWidth={14} textAlign="center">{icon}</MonoText>
+            <MonoText fontSize={13}>{content as string}</MonoText>
+          </XStack>
         );
       })}
-    </div>
+    </YStack>
   );
 }
 
 function StreamingIndicators() {
-  const thinking = when(["session", $.selectedId, "thinking", $.val]);
-  const streamingText = when(["session", $.selectedId, "streamingText", $.streaming]);
-  const streamingThought = when(["session", $.selectedId, "streamingThought", $.thought]);
-  const activeTools = when(["session", $.selectedId, "hasActiveTools", $.hasTools]);
+  const selection = when(["ui", "selectedSession", $.selectedId]);
+  const selectedId =
+    selection.length > 0 ? (selection[0].selectedId as string) : "";
+  const thinking = selectedId
+    ? when(["session", selectedId, "thinking", $.val])
+    : [];
+  const streamingText = selectedId
+    ? when(["session", selectedId, "streamingText", $.streaming])
+    : [];
+  const streamingThought = selectedId
+    ? when(["session", selectedId, "streamingThought", $.thought])
+    : [];
+  const activeTools = selectedId
+    ? when(["session", selectedId, "hasActiveTools", $.hasTools])
+    : [];
 
-  return (
-    <div class="vstack" data-testid="streaming-indicators">
-      {thinking.map(
+  return [
+      thinking.map(
         ({ val }) =>
           val === "true" && (
-            <div class="streaming-indicator hstack gap-8" data-testid="thinking">
-              <span class="spinner" />
-              <span class="font-caption fg-secondary">Thinking...</span>
-            </div>
+            <XStack key="thinking" gap="$space.2" padding="$space.3" paddingHorizontal="$space.6" backgroundColor="$color.bgSurface" borderTopWidth={1} borderColor="$color.border" class="streaming-indicator" data-testid="thinking">
+              <Spinner size="1" />
+              <Text fontSize={12} color="$color.textMuted">Thinking...</Text>
+            </XStack>
           ),
-      )}
+      ),
 
-      {streamingThought.map(
+      streamingThought.map(
         ({ thought }) =>
           thought && (
-            <div
+            <XStack
+              key="streaming-thought"
+              gap="$space.2"
+              padding="$space.3"
+              paddingHorizontal="$space.6"
+              backgroundColor="$color.bgSurface"
+              borderTopWidth={1}
+              borderColor="$color.border"
               class="streaming-indicator hstack gap-8"
               data-testid="streaming-thought"
             >
-              <span class="fg-secondary">...</span>
-              <span class="font-caption fg-secondary">
-                {thought as string}
-              </span>
-            </div>
+              <MonoText color="$color.textMuted">...</MonoText>
+              <MonoText fontSize={12} color="$color.textMuted">{thought as string}</MonoText>
+            </XStack>
           ),
-      )}
+      ),
 
-      {streamingText.map(
+      streamingText.map(
         ({ streaming }) =>
           streaming && (
-            <div class="streaming-indicator hstack gap-8" data-testid="streaming-text">
-              <span class="fg-purple">{"<"}</span>
-              <span class="font-body fg-secondary">
-                {streaming as string}
-              </span>
-            </div>
+            <XStack key="streaming-text" gap="$space.2" padding="$space.3" paddingHorizontal="$space.6" backgroundColor="$color.bgSurface" borderTopWidth={1} borderColor="$color.border" class="streaming-indicator" data-testid="streaming-text">
+              <MonoText color="$color.purple">{"<"}</MonoText>
+              <MonoText fontSize={13} color="$color.textMuted">{streaming as string}</MonoText>
+            </XStack>
           ),
-      )}
+      ),
 
-      {activeTools.map(
+      activeTools.map(
         ({ hasTools }) =>
           hasTools === "true" && (
-            <div class="streaming-indicator hstack gap-8" data-testid="active-tools">
-              <span class="spinner" />
-              <span class="font-caption fg-orange">Tools running...</span>
-            </div>
+            <XStack key="active-tools" gap="$space.2" padding="$space.3" paddingHorizontal="$space.6" backgroundColor="$color.bgSurface" borderTopWidth={1} borderColor="$color.border" class="streaming-indicator" data-testid="active-tools">
+              <Spinner size="1" />
+              <Text fontSize={12} color="$color.orange">Tools running...</Text>
+            </XStack>
           ),
-      )}
-    </div>
-  );
+      ),
+    ];
 }
 
 function SessionDetail() {
@@ -317,32 +447,45 @@ function SessionDetail() {
     selection.length > 0 ? (selection[0].selectedId as string) : "";
 
   return (
-    <div class="detail vstack" data-testid="detail">
+    <YStack flex={1} overflow="hidden" backgroundColor="$color.bg" class="detail" data-testid="detail">
       {ConnectionBar()}
-      <div class="divider" />
+      <Separator />
 
       {ModeBadge()}
 
-      <div id="detail-header" class="detail-header hstack gap-8">
-        <span class="font-headline" data-testid="detail-title">
+      <XStack
+        id="detail-header"
+        class="detail-header"
+        gap="$space.2"
+        padding="$space.4"
+        paddingHorizontal="$space.6"
+        justifyContent="space-between"
+        borderBottomWidth={1}
+        borderColor="$color.border"
+      >
+        <Text fontWeight="600" fontSize={15} color="$color.textBright" data-testid="detail-title">
           {selectedId ? `Session: ${selectedId}` : "Select a session"}
-        </span>
-      </div>
+        </Text>
+      </XStack>
 
       {PlanList()}
 
-      <div class="scroll-area">
+      <YStack flex={1} overflow="auto" class="scroll-area">
         {MessageList()}
-      </div>
+      </YStack>
 
       {StreamingIndicators()}
 
       {selectedId ? [
-        <div class="divider" />,
-        <div class="input-bar hstack gap-8">
-          <input
-            type="text"
+        <Separator />,
+        <XStack gap="$space.2" padding="$space.4" paddingHorizontal="$space.6" backgroundColor="$color.bgSidebar" class="input-bar">
+          <Input
+            size="3"
+            flex={1}
             placeholder="Type a message..."
+            backgroundColor="$color.bgInput"
+            borderColor="$color.btnBorder"
+            color="$color.text"
             data-testid="message-input"
             onKeyDown={(e: KeyboardEvent) => {
               if (e.key === "Enter") {
@@ -354,10 +497,10 @@ function SessionDetail() {
                 }
               }
             }}
-          />
-        </div>,
+          />,
+        </XStack>,
       ] : null}
-    </div>
+    </YStack>
   );
 }
 
@@ -365,9 +508,9 @@ function SessionDetail() {
 
 export function App() {
   return (
-    <div class="split-view" data-testid="split-view">
+    <XStack height="100vh" class="split-view" data-testid="split-view">
       {SessionList()}
       {SessionDetail()}
-    </div>
+    </XStack>
   );
 }

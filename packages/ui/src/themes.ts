@@ -119,10 +119,10 @@ export function updateTheme(name: string, values: Partial<ThemeValues>): void {
 export function injectThemeCSS(): void {
   if (typeof document === "undefined") return;
 
-  let styleEl = document.getElementById("jamagui-themes") as HTMLStyleElement | null;
+  let styleEl = document.getElementById("jam-ui-themes") as HTMLStyleElement | null;
   if (!styleEl) {
     styleEl = document.createElement("style");
-    styleEl.id = "jamagui-themes";
+    styleEl.id = "jam-ui-themes";
     document.head.appendChild(styleEl);
   }
 

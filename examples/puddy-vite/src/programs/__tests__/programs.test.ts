@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { h } from "@jam/core/jsx";
 import { vi } from "vitest";
+import { Text } from "@jam/ui";
 import {
   db,
   $,
@@ -71,7 +72,7 @@ function startMessageCounts() {
         injectVdom(
           `session-${sid}`,
           1000,
-          h("span", { class: "msg-count-badge" }, String(count)),
+          h(Text, { class: "msg-count-badge" }, String(count)),
         );
       }
     },

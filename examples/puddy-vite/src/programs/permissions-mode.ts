@@ -18,6 +18,7 @@ import {
   claim,
   injectVdom,
 } from "@jam/core";
+import { Button, XStack } from "@jam/ui";
 import { SessionManager } from "../networking/session-manager";
 
 type PermMode = "default" | "plan" | "bypassPermissions";
@@ -61,16 +62,20 @@ export function startPermissionsMode(sessionManager: SessionManager) {
         "detail-header",
         1000,
         h(
-          "div",
+          XStack,
           {
             id: "permissions-toggle",
             class: "permissions-toggle hstack gap-4",
+            gap: "$space.1",
           },
           ...MODES.map((m) =>
             h(
-              "button",
+              Button,
               {
                 class: `perm-btn ${mode === m.id ? "perm-btn-active" : ""}`,
+                variant: "ghost",
+                size: "1",
+                title: m.description,
                 onClick: () => {
                   replace("permissions", sid, "mode", m.id);
                   // Send mode change to backend
