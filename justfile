@@ -16,6 +16,24 @@ typecheck:
 dev:
     corepack pnpm --dir examples/folk-todo dev
 
+agent-dev:
+    node scripts/agent-harness.mjs start folk-todo
+
+agent-status:
+    node scripts/agent-harness.mjs status
+
+agent-logs run='':
+    node scripts/agent-harness.mjs logs {{run}}
+
+agent-stop run='all':
+    node scripts/agent-harness.mjs stop {{run}}
+
+agent-browser:
+    node scripts/agent-harness.mjs browser-smoke folk-todo
+
+agent-native:
+    node scripts/agent-harness.mjs native doctor
+
 swift-build target:
     swift build --package-path {{target}}
 

@@ -8,6 +8,16 @@
     "dev": "corepack pnpm --dir examples/folk-todo dev",
     "test": "corepack pnpm -r --if-present test",
     "test:e2e": "corepack pnpm --dir examples/folk-todo test:e2e",
-    "typecheck": "corepack pnpm -r typecheck"
+    "typecheck": "corepack pnpm -r typecheck",
+    "agent:harness": "node scripts/agent-harness.mjs",
+    "agent:dev": "node scripts/agent-harness.mjs start folk-todo",
+    "agent:status": "node scripts/agent-harness.mjs status",
+    "agent:logs": "node scripts/agent-harness.mjs logs",
+    "agent:stop": "node scripts/agent-harness.mjs stop",
+    "agent:browser": "node scripts/agent-harness.mjs browser-smoke folk-todo",
+    "agent:native": "node scripts/agent-harness.mjs native doctor"
+  },
+  "devDependencies": {
+    "agent-browser": "0.26.0"
   }
 }

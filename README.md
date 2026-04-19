@@ -31,12 +31,18 @@ corepack pnpm dev           # Run the folk-todo example dev server
 corepack pnpm test          # Run unit tests for packages/examples that define them
 corepack pnpm test:e2e      # Run folk-todo Playwright tests
 corepack pnpm typecheck     # TypeScript check all packages and examples
+corepack pnpm run agent:dev     # Start folk-todo through the logged agent harness
+corepack pnpm run agent:browser # Validate the running app with agent-browser
 ```
 
 Playwright configs derive their default server ports from the current worktree
 path so multiple Codex worktrees can run e2e tests without accidentally reusing
 another app's dev server. Set `PLAYWRIGHT_PORT` or the example-specific
 `*_PLAYWRIGHT_PORT` variable when you need a fixed port.
+
+For unattended agentic development sessions, see
+[`docs/agentic-development-harness.md`](docs/agentic-development-harness.md)
+for logged app runs, `agent-browser` validation, and Swift/native entry points.
 
 ## Core API
 
