@@ -158,19 +158,24 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       }
       (el as any).__handlers = newHandlers;
 
-      const childList = children.get(entityId) ?? [];
-      const childNodes: Node[] = [];
-      for (const [, childId] of childList) {
-        const node = reconcile(childId);
-        if (node) childNodes.push(node);
-      }
-      for (let i = 0; i < childNodes.length; i++) {
-        if (el.childNodes[i] !== childNodes[i]) {
-          el.insertBefore(childNodes[i], el.childNodes[i] || null);
+      // Imperative widgets can opt out so libraries can own their subtree.
+      const ownsChildren =
+        el.getAttribute("data-jam-unmanaged-children") !== "true";
+      if (ownsChildren) {
+        const childList = children.get(entityId) ?? [];
+        const childNodes: Node[] = [];
+        for (const [, childId] of childList) {
+          const node = reconcile(childId);
+          if (node) childNodes.push(node);
         }
-      }
-      while (el.childNodes.length > childNodes.length) {
-        el.removeChild(el.lastChild!);
+        for (let i = 0; i < childNodes.length; i++) {
+          if (el.childNodes[i] !== childNodes[i]) {
+            el.insertBefore(childNodes[i], el.childNodes[i] || null);
+          }
+        }
+        while (el.childNodes.length > childNodes.length) {
+          el.removeChild(el.lastChild!);
+        }
       }
 
       return el;

@@ -1,5 +1,7 @@
 import { defineConfig } from "vite";
 
+const sandboxAgentURL = process.env.SANDBOX_AGENT_URL ?? "http://localhost:2468";
+
 export default defineConfig({
   esbuild: {
     jsxFactory: "h",
@@ -14,8 +16,9 @@ export default defineConfig({
   server: {
     proxy: {
       "/v1": {
-        target: "http://localhost:2468",
+        target: sandboxAgentURL,
         changeOrigin: true,
+        ws: true,
       },
     },
   },

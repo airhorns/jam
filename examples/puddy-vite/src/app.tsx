@@ -460,9 +460,7 @@ function TerminalPanel() {
   const activeTerminal =
     terminals.find(({ tid }) => tid === selectedTerminalId) ?? terminals[0];
   const activeTerminalId = activeTerminal.tid as string;
-  const outputFacts = when(["terminal", activeTerminalId, "output", $.output]);
   const cwdFacts = when(["terminal", activeTerminalId, "cwd", $.cwd]);
-  const output = (outputFacts[0]?.output as string | undefined) ?? "";
   const cwd = (cwdFacts[0]?.cwd as string | undefined) ?? "/";
 
   return (
@@ -493,34 +491,12 @@ function TerminalPanel() {
         </Text>
       </XStack>
 
-      <YStack class="terminal-output" data-testid="terminal-output">
-        <MonoText fontSize={12} whiteSpace="pre-wrap">
-          {output || "$ "}
-        </MonoText>
-      </YStack>
-
-      <XStack class="terminal-input-bar hstack gap-8">
-        <MonoText color="$color.green">$</MonoText>
-        <Input
-          size="2"
-          flex={1}
-          placeholder="Send terminal input..."
-          backgroundColor="$color.bgInput"
-          borderColor="$color.btnBorder"
-          color="$color.text"
-          data-testid="terminal-input"
-          onKeyDown={(e: KeyboardEvent) => {
-            if (e.key === "Enter") {
-              const input = e.target as HTMLInputElement;
-              const text = input.value;
-              if (text) {
-                void sessionManager.sendTerminalInput(activeTerminalId, `${text}\n`);
-                input.value = "";
-              }
-            }
-          }}
-        />
-      </XStack>
+      <YStack
+        id={`terminal-host-${activeTerminalId}`}
+        class="terminal-output"
+        data-testid="terminal-output"
+        data-jam-unmanaged-children="true"
+      />
     </YStack>
   );
 }
