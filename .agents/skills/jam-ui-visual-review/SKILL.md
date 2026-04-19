@@ -74,6 +74,15 @@ swift build --package-path examples/spatial-counter
 ```
 
 On Linux hosts without Swift or Xcode, record the missing `swift` / `xcrun`
-probe output and still run the web catalog plus `packages/native` JavaScript
-bundle build. The native catalog source remains the handoff artifact for macOS
-or Swift-enabled validation.
+probe output and still run the local native-mode VDOM contract test, web catalog,
+and `packages/native` JavaScript bundle build:
+
+```bash
+corepack pnpm --dir packages/ui exec vitest run src/__tests__/native-mode.test.ts
+corepack pnpm --dir examples/ui-catalog build
+corepack pnpm --dir packages/native build
+```
+
+The native catalog source remains the handoff artifact for macOS or
+Swift-enabled validation. CI should run the Swift package and native example
+builds on macOS when this surface changes.

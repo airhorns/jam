@@ -50,3 +50,27 @@ jobs:
           name: jam-core-benchmarks
           path: packages/core/benchmark-results/core-benchmarks.json
           if-no-files-found: error
+
+  native-swift:
+    name: Native Swift
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: corepack pnpm install --frozen-lockfile
+      - name: Build native JavaScript runtime bundle
+        run: corepack pnpm --dir packages/native build
+      - name: Test JamNative Swift package
+        run: swift test --package-path packages/native
+      - name: Build counter native example
+        run: swift build --package-path examples/counter-ios
+      - name: Build spatial counter native example
+        run: swift build --package-path examples/spatial-counter
+      - name: Build Jam UI native catalog example
+        run: swift build --package-path examples/ui-catalog-native

@@ -41,6 +41,13 @@ swift build --package-path examples/ui-catalog-native
 On Linux without Swift, run the JavaScript bundle build and web catalog build:
 
 ```bash
+corepack pnpm --dir packages/ui exec vitest run src/__tests__/native-mode.test.ts
 corepack pnpm --dir packages/native build
 corepack pnpm --dir examples/ui-catalog build
 ```
+
+The `native-mode.test.ts` suite is the local Linux proof for the JavaScript side
+of native rendering: it verifies catalog-level `@jam/ui` components emit native
+display tags, resolved style facts, ARIA/value props, handler refs, and no web
+class facts. GitHub CI runs the Swift package and native example builds on
+macOS, where SwiftUI and JavaScriptCore are available.

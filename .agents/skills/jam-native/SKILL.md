@@ -33,10 +33,14 @@ swift build --package-path examples/counter-ios
 swift build --package-path examples/ui-catalog-native
 swift build --package-path examples/puddy-native  # if that example exists in this checkout
 corepack pnpm --dir packages/native build
+corepack pnpm --dir packages/ui exec vitest run src/__tests__/native-mode.test.ts
 ```
 
 Run `corepack pnpm --dir packages/native build` before Swift builds when the
 native runtime resource bundle must reflect TypeScript source changes.
+On Linux hosts without SwiftUI/Xcode, run the `native-mode.test.ts` contract test
+to prove the JavaScript side emits native tags/style facts, then rely on macOS CI
+for the Swift package and native example builds.
 
 ## What To Inspect
 
