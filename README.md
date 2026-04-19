@@ -11,10 +11,17 @@ corepack pnpm install
 corepack pnpm dev
 ```
 
-The repository pins pnpm in `package.json`. If you have `mise`, run commands
-through the pinned Node/pnpm toolchain:
+The repository pins pnpm in `package.json` and the preferred local toolchain in
+`mise.toml`. In new worktrees, install `mise` if the host does not already have
+it, then run setup through the pinned toolchain:
 
 ```bash
+if ! command -v mise >/dev/null 2>&1; then
+  curl https://mise.run | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
+mise install
 mise exec -- corepack pnpm install
 mise exec -- corepack pnpm dev
 ```

@@ -20,6 +20,26 @@ corepack pnpm test:e2e      # E2e tests (Playwright, in examples that have them)
 corepack pnpm run bench     # Benchmarks (packages/core only)
 ```
 
+## New Worktree Setup With Mise
+
+`mise.toml` pins the toolchain for Codex/native worktrees. Do not assume `mise`
+is already installed on a new host or shell. At the start of a new worktree,
+bootstrap it first if needed, then run setup through `mise exec`:
+
+```bash
+if ! command -v mise >/dev/null 2>&1; then
+  curl https://mise.run | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
+mise install
+mise exec -- corepack pnpm install
+```
+
+After that, prefer `mise exec -- <command>` for repo commands, for example
+`mise exec -- corepack pnpm typecheck`. This keeps Node, pnpm, and just aligned
+with `mise.toml` instead of whatever happens to be installed globally.
+
 ## Architecture
 
 This is a **pnpm monorepo** with workspaces under `packages/` and `examples/`.
