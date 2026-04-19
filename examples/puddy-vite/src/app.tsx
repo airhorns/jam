@@ -1,6 +1,6 @@
 // Puddy — reactive chat app built on Jam's fact database.
 
-import { h, Fragment } from "@jam/core/jsx";
+import { h } from "@jam/core/jsx";
 import { $, replace, when } from "@jam/core";
 import "./app.css";
 import { SessionManager } from "./networking/session-manager";
@@ -22,34 +22,31 @@ sessionManager.checkConnection();
 // --- Components ---
 
 function ConnectionBar() {
-  const matches = when(
-    ["connection", "status", $.status],
-    ["connection", "hostname", $.host],
-  );
+  const statuses = when(["connection", "status", $.status]);
+  const hosts = when(["connection", "hostname", $.host]);
+  const status = statuses[0]?.status as string | undefined;
+  const host = (hosts[0]?.host as string | undefined) ?? sessionManager.hostname;
+
+  if (!status) return null;
+
+  const dotColor =
+    status === "connected"
+      ? "bg-green"
+      : status === "checking"
+        ? "bg-orange"
+        : "bg-red";
+  const label =
+    status === "connected"
+      ? host
+      : status === "checking"
+        ? "Connecting..."
+        : "Disconnected";
 
   return (
-    <Fragment>
-      {matches.map(({ status, host }) => {
-        const dotColor =
-          status === "connected"
-            ? "bg-green"
-            : status === "checking"
-              ? "bg-orange"
-              : "bg-red";
-        const label =
-          status === "connected"
-            ? (host as string)
-            : status === "checking"
-              ? "Connecting..."
-              : "Disconnected";
-        return (
-          <div class="connection-bar hstack gap-8" data-testid="connection-bar">
-            <span class={`circle ${dotColor}`} />
-            <span class="font-caption">{label}</span>
-          </div>
-        );
-      })}
-    </Fragment>
+    <div class="connection-bar hstack gap-8" data-testid="connection-bar">
+      <span class={`circle ${dotColor}`} />
+      <span class="font-caption">{label}</span>
+    </div>
   );
 }
 
@@ -121,7 +118,7 @@ function ModeBadge() {
   const modes = when(["session", $.sid, "currentMode", $.mode]);
 
   return (
-    <Fragment>
+    <div class="vstack" data-testid="mode-badges">
       {modes.map(({ sid, mode }) => (
         <div
           key={`mode-${sid}`}
@@ -131,7 +128,7 @@ function ModeBadge() {
           <span class="font-caption fg-blue">{`[${mode}]`}</span>
         </div>
       ))}
-    </Fragment>
+    </div>
   );
 }
 
@@ -263,7 +260,7 @@ function StreamingIndicators() {
   const activeTools = when(["session", $.selectedId, "hasActiveTools", $.hasTools]);
 
   return (
-    <Fragment>
+    <div class="vstack" data-testid="streaming-indicators">
       {thinking.map(
         ({ val }) =>
           val === "true" && (
@@ -310,7 +307,7 @@ function StreamingIndicators() {
             </div>
           ),
       )}
-    </Fragment>
+    </div>
   );
 }
 
@@ -321,10 +318,10 @@ function SessionDetail() {
 
   return (
     <div class="detail vstack" data-testid="detail">
-      <ConnectionBar />
+      {ConnectionBar()}
       <div class="divider" />
 
-      <ModeBadge />
+      {ModeBadge()}
 
       <div id="detail-header" class="detail-header hstack gap-8">
         <span class="font-headline" data-testid="detail-title">
@@ -332,13 +329,13 @@ function SessionDetail() {
         </span>
       </div>
 
-      <PlanList />
+      {PlanList()}
 
       <div class="scroll-area">
-        <MessageList />
+        {MessageList()}
       </div>
 
-      <StreamingIndicators />
+      {StreamingIndicators()}
 
       {selectedId ? [
         <div class="divider" />,
@@ -369,8 +366,8 @@ function SessionDetail() {
 export function App() {
   return (
     <div class="split-view" data-testid="split-view">
-      <SessionList />
-      <SessionDetail />
+      {SessionList()}
+      {SessionDetail()}
     </div>
   );
 }
