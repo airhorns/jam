@@ -9,6 +9,13 @@ async function gotoApp(page: Page) {
     const db = (window as any).__db;
     return Boolean(db?.insert && db?.replace && db?.drop);
   });
+  await page.waitForFunction(() => {
+    const db = (window as any).__db;
+    return (
+      db.query(["connection", "status", "connected"]).length > 0 ||
+      db.query(["connection", "status", "disconnected"]).length > 0
+    );
+  });
 }
 
 async function insertFacts(page: Page, facts: Fact[]) {

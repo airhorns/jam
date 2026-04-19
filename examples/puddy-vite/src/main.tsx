@@ -7,6 +7,7 @@ import "./programs/session-highlights";
 import "./programs/error-tooltips";
 import "./programs/cost-display";
 import "./programs/message-counts";
+import "./programs/git-viewer";
 import { startPermissionsMode } from "./programs/permissions-mode";
 
 async function start() {

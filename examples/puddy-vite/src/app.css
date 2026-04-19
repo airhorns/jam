@@ -289,8 +289,135 @@ input[type="text"]:focus {
 /* ---- Detail sections ---- */
 
 .connection-bar {
+  position: relative;
+  min-height: 34px;
+  align-items: center;
   padding: 7px 24px;
   background: #010409;
+}
+
+.git-viewer {
+  margin-left: auto;
+  position: relative;
+  flex-shrink: 0;
+  font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+}
+
+.git-viewer-trigger {
+  height: 22px;
+  min-width: 0;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 2px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: #161b22;
+  color: #c9d1d9;
+}
+
+.git-viewer-trigger:hover {
+  border-color: #484f58;
+  background: #21262d;
+}
+
+.git-viewer-branch,
+.git-viewer-pill,
+.git-viewer-count {
+  font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.git-viewer-branch {
+  max-width: min(30vw, 260px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #e6edf3;
+}
+
+.git-viewer-pill {
+  color: #8b949e;
+}
+
+.git-viewer-dirty .git-viewer-pill {
+  color: #d29922;
+}
+
+.git-viewer-clean .git-viewer-pill {
+  color: #3fb950;
+}
+
+.git-viewer-count {
+  color: #58a6ff;
+}
+
+.git-viewer-panel {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  width: min(460px, calc(100vw - 340px));
+  max-height: min(520px, calc(100vh - 64px));
+  overflow: auto;
+  z-index: 100;
+  padding: 14px;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #0d1117;
+  box-shadow: 0 18px 50px rgba(1, 4, 9, 0.55);
+}
+
+.git-viewer-label {
+  color: #8b949e;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.git-viewer-value,
+.git-viewer-row,
+.git-viewer-meta {
+  font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+  line-height: 1.45;
+}
+
+.git-viewer-value {
+  color: #e6edf3;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.git-viewer-row {
+  color: #c9d1d9;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.git-viewer-meta {
+  color: #8b949e;
+  font-size: 10px;
+  border-top: 1px solid #21262d;
+  padding-top: 10px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .sidebar {
+    width: 240px;
+    min-width: 240px;
+  }
+
+  .git-viewer-panel {
+    width: min(360px, calc(100vw - 24px));
+    right: -12px;
+  }
+
+  .git-viewer-branch {
+    max-width: 34vw;
+  }
 }
 
 .detail-header {

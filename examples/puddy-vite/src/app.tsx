@@ -130,6 +130,7 @@ function ConnectionBar() {
 
   return (
     <XStack
+      id="connection-bar"
       class="connection-bar"
       gap="$space.2"
       padding="$space.2"
