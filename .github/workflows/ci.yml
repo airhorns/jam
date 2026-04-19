@@ -28,3 +28,25 @@ jobs:
       - run: corepack pnpm --dir examples/folk-todo exec playwright install --with-deps chromium
       - run: corepack pnpm --dir examples/puddy-vite exec playwright install --with-deps chromium
       - run: corepack pnpm test:e2e
+
+  core-benchmarks:
+    name: Core Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: corepack pnpm install --frozen-lockfile
+      - name: Run core benchmarks
+        run: corepack pnpm --dir packages/core run bench:ci
+      - name: Upload core benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: jam-core-benchmarks
+          path: packages/core/benchmark-results/core-benchmarks.json
+          if-no-files-found: error
