@@ -5,25 +5,25 @@ Web-based prototype of the Puddy chat app, built on a simplified Jam fact databa
 ## Setup
 
 ```bash
-pnpm install
+corepack pnpm install
 ```
 
 ## Development
 
 ```bash
-pnpm dev          # Start dev server at http://localhost:5173
+corepack pnpm dev          # Start dev server at http://localhost:5173
 ```
 
 ## Testing
 
 ```bash
-pnpm test         # Run unit tests (vitest)
-pnpm test:watch   # Run tests in watch mode
-pnpm test:e2e     # Run Playwright e2e tests
-pnpm typecheck    # TypeScript type checking
+corepack pnpm test         # Run unit tests (vitest)
+corepack pnpm test:watch   # Run tests in watch mode
+corepack pnpm test:e2e     # Run Playwright e2e tests
+corepack pnpm typecheck    # TypeScript type checking
 ```
 
-Playwright requires browsers installed: `npx playwright install chromium`
+Playwright requires browsers installed: `corepack pnpm exec playwright install chromium`
 
 ## Architecture
 

@@ -1,15 +1,19 @@
 import { defineConfig } from "@playwright/test";
+import { worktreePort } from "../../playwright.worktree-port.mjs";
+
+const port = worktreePort(5173, "PUDDY_UI_PLAYWRIGHT_PORT");
+const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30000,
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL,
   },
   webServer: {
-    command: "npx vite --port 5173",
-    port: 5173,
-    reuseExistingServer: !process.env.CI,
+    command: `corepack pnpm exec vite --host 127.0.0.1 --port ${port} --strictPort`,
+    url: baseURL,
+    reuseExistingServer: false,
   },
   projects: [
     {

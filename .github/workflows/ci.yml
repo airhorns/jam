@@ -16,9 +16,8 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install
-      - run: pnpm -r typecheck
-      - run: pnpm test
-      - run: cd examples/folk-todo && pnpm test
-      - run: npx playwright install --with-deps chromium
-      - run: cd examples/folk-todo && pnpm test:e2e
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack pnpm typecheck
+      - run: corepack pnpm test
+      - run: corepack pnpm --dir examples/folk-todo exec playwright install --with-deps chromium
+      - run: corepack pnpm test:e2e

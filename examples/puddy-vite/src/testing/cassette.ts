@@ -3,7 +3,7 @@
 // For SSE (text/event-stream) responses, the body stores the raw SSE text.
 
 import { test as base } from "vitest";
-import { setupServer, type SetupServerApi } from "msw/node";
+import { setupServer, type SetupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { SandboxAgentClient } from "../networking/client";
 import { SessionManager } from "../networking/session-manager";
@@ -45,7 +45,7 @@ export interface VCRFixture {
   /** SessionManager wired to the VCR client. */
   manager: SessionManager;
   /** The MSW server instance (for advanced use like adding extra handlers). */
-  server: SetupServerApi;
+  server: SetupServer;
 }
 
 export const test = base.extend<{ vcr: VCRFixture }>({

@@ -2,20 +2,19 @@ default:
     @just --list
 
 test:
-    cd packages/core && pnpm test
-    cd examples/folk-todo && pnpm test
+    corepack pnpm -r --if-present test
 
 test-swift:
     swift test --package-path packages/native
 
 test-e2e:
-    cd examples/folk-todo && pnpm test:e2e
+    corepack pnpm --dir examples/folk-todo test:e2e
 
 typecheck:
-    pnpm -r typecheck
+    corepack pnpm -r typecheck
 
 dev:
-    cd examples/folk-todo && pnpm dev
+    corepack pnpm --dir examples/folk-todo dev
 
 swift-build target:
     swift build --package-path {{target}}
@@ -24,9 +23,9 @@ swift-run target:
     swift run --package-path {{target}}
 
 build-native:
-    cd packages/native && pnpm build
+    corepack pnpm --dir packages/native build
     swift build --package-path packages/native
 
 build-puddy-native:
-    cd packages/native && pnpm build
+    corepack pnpm --dir packages/native build
     swift build --package-path examples/puddy-native
