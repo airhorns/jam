@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "corepack pnpm --dir examples/folk-todo dev",
     "test": "corepack pnpm -r --if-present test",
-    "test:e2e": "corepack pnpm --dir examples/folk-todo test:e2e",
+    "test:e2e": "corepack pnpm --dir examples/folk-todo test:e2e && corepack pnpm --dir examples/puddy-vite test:e2e",
     "typecheck": "corepack pnpm -r typecheck"
   }
 }
