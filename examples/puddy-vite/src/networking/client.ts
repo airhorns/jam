@@ -10,6 +10,17 @@ export interface AgentInfo {
   credentialsAvailable?: boolean;
 }
 
+export interface ProcessInfo {
+  id: string;
+  command: string;
+  args: string[];
+  cwd: string | null;
+  interactive: boolean;
+  tty: boolean;
+  status: string;
+  pid: number | null;
+}
+
 export class SandboxAgentError extends Error {
   constructor(
     public code: string,
@@ -101,6 +112,63 @@ export class SandboxAgentClient {
     if (data.result?.sessionId) {
       this.acpSessionIds.set(sessionId, data.result.sessionId);
     }
+  }
+
+  // --- Terminal Processes ---
+
+  async createTerminalProcess(cwd: string = "/"): Promise<ProcessInfo> {
+    const response = await fetch(`${this.baseURL}/v1/processes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify({
+        command: "bash",
+        args: [],
+        cwd,
+        interactive: true,
+        tty: true,
+      }),
+    });
+
+    if (!response.ok) {
+      throw SandboxAgentError.httpError(response.status, await response.text());
+    }
+
+    return await response.json();
+  }
+
+  async sendProcessInput(processId: string, data: string): Promise<void> {
+    const response = await fetch(
+      `${this.baseURL}/v1/processes/${encodeURIComponent(processId)}/input`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...this.authHeaders() },
+        body: JSON.stringify({ data, encoding: "utf8" }),
+      },
+    );
+
+    if (!response.ok) {
+      throw SandboxAgentError.httpError(response.status, await response.text());
+    }
+  }
+
+  buildTerminalWebSocketURL(processId: string): string {
+    const path = `/v1/processes/${encodeURIComponent(processId)}/terminal/ws`;
+    const base =
+      this.baseURL ||
+      (typeof window !== "undefined" ? window.location.origin : "http://localhost");
+    const url = new URL(path, base);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    if (this.token) {
+      url.searchParams.set("access_token", this.token);
+    }
+    return url.toString();
+  }
+
+  openTerminalSocket(processId: string): WebSocket | undefined {
+    if (typeof WebSocket === "undefined") return undefined;
+    const socket = new WebSocket(this.buildTerminalWebSocketURL(processId));
+    socket.binaryType = "arraybuffer";
+    return socket;
   }
 
   // --- SSE Event Stream ---

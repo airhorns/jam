@@ -314,3 +314,47 @@ test.describe("Input", () => {
     await expect(input).toHaveValue("");
   });
 });
+
+test.describe("Terminal sessions", () => {
+  test("starts a terminal grouped with the selected session and sends input", async ({
+    page,
+  }) => {
+    await gotoApp(page);
+    await seedSession(page);
+    await page.evaluate(() => {
+      const db = (window as any).__db;
+      const manager = (window as any).sessionManager;
+      manager.createTerminalSession = (sessionId: string) => {
+        db.insert("terminal", "term-ui", "session", sessionId);
+        db.replace("terminal", "term-ui", "cwd", "/workspace");
+        db.replace("terminal", "term-ui", "status", "connected");
+        db.replace("terminal", "term-ui", "output", "$ ");
+        return "term-ui";
+      };
+      manager.sendTerminalInput = async (terminalId: string, text: string) => {
+        db.replace(
+          "terminal",
+          terminalId,
+          "output",
+          `$ ${text.trim()}\n/workspace\n`,
+        );
+      };
+    });
+
+    await page.getByTestId("new-terminal").click();
+
+    await expect(page.getByTestId("terminal-panel")).toBeVisible();
+    await expect(page.getByTestId("terminal-output")).toContainText("$ ");
+    await expect(page.getByTestId("terminal-tabs")).toContainText("connected");
+
+    const input = page.getByTestId("terminal-input");
+    await input.fill("pwd");
+    await input.press("Enter");
+
+    await expect(page.getByTestId("terminal-output")).toContainText("pwd");
+    await expect(page.getByTestId("terminal-output")).toContainText(
+      "/workspace",
+    );
+    await expect(input).toHaveValue("");
+  });
+});

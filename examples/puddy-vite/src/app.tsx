@@ -441,6 +441,90 @@ function StreamingIndicators() {
     ];
 }
 
+function TerminalPanel() {
+  const selection = when(["ui", "selectedSession", $.selectedId]);
+  const selectedId =
+    selection.length > 0 ? (selection[0].selectedId as string) : "";
+  if (!selectedId) return null;
+
+  const terminals = when(
+    ["terminal", $.tid, "session", selectedId],
+    ["terminal", $.tid, "status", $.status],
+  );
+  if (terminals.length === 0) return null;
+
+  const selectedTerminalFacts = when(["ui", "selectedTerminal", $.terminalId]);
+  const selectedTerminalId = selectedTerminalFacts[0]?.terminalId as
+    | string
+    | undefined;
+  const activeTerminal =
+    terminals.find(({ tid }) => tid === selectedTerminalId) ?? terminals[0];
+  const activeTerminalId = activeTerminal.tid as string;
+  const outputFacts = when(["terminal", activeTerminalId, "output", $.output]);
+  const cwdFacts = when(["terminal", activeTerminalId, "cwd", $.cwd]);
+  const output = (outputFacts[0]?.output as string | undefined) ?? "";
+  const cwd = (cwdFacts[0]?.cwd as string | undefined) ?? "/";
+
+  return (
+    <YStack class="terminal-panel" data-testid="terminal-panel">
+      <XStack class="terminal-header hstack gap-8">
+        <Text fontSize={12} color="$color.textMuted" textTransform="uppercase">
+          Terminal
+        </Text>
+        <XStack class="terminal-tabs hstack gap-4" data-testid="terminal-tabs">
+          {terminals.map(({ tid, status }, index) => (
+            <Button
+              key={tid as string}
+              size="1"
+              class={
+                tid === activeTerminalId
+                  ? "terminal-tab terminal-tab-active"
+                  : "terminal-tab"
+              }
+              data-testid={`terminal-tab-${index}`}
+              onClick={() => replace("ui", "selectedTerminal", tid)}
+            >
+              {`${index + 1} ${status}`}
+            </Button>
+          ))}
+        </XStack>
+        <Text fontSize={12} color="$color.textMuted" marginLeft="auto">
+          {cwd}
+        </Text>
+      </XStack>
+
+      <YStack class="terminal-output" data-testid="terminal-output">
+        <MonoText fontSize={12} whiteSpace="pre-wrap">
+          {output || "$ "}
+        </MonoText>
+      </YStack>
+
+      <XStack class="terminal-input-bar hstack gap-8">
+        <MonoText color="$color.green">$</MonoText>
+        <Input
+          size="2"
+          flex={1}
+          placeholder="Send terminal input..."
+          backgroundColor="$color.bgInput"
+          borderColor="$color.btnBorder"
+          color="$color.text"
+          data-testid="terminal-input"
+          onKeyDown={(e: KeyboardEvent) => {
+            if (e.key === "Enter") {
+              const input = e.target as HTMLInputElement;
+              const text = input.value;
+              if (text) {
+                void sessionManager.sendTerminalInput(activeTerminalId, `${text}\n`);
+                input.value = "";
+              }
+            }
+          }}
+        />
+      </XStack>
+    </YStack>
+  );
+}
+
 function SessionDetail() {
   const selection = when(["ui", "selectedSession", $.selectedId]);
   const selectedId =
@@ -466,6 +550,23 @@ function SessionDetail() {
         <Text fontWeight="600" fontSize={15} color="$color.textBright" data-testid="detail-title">
           {selectedId ? `Session: ${selectedId}` : "Select a session"}
         </Text>
+        {selectedId ? (
+          <Button
+            size="2"
+            class="new-terminal-button"
+            data-testid="new-terminal"
+            onClick={() => {
+              try {
+                const id = sessionManager.createTerminalSession(selectedId);
+                replace("ui", "selectedTerminal", id);
+              } catch (err: any) {
+                console.error("Failed to create terminal:", err.message ?? err);
+              }
+            }}
+          >
+            + Terminal
+          </Button>
+        ) : null}
       </XStack>
 
       {PlanList()}
@@ -475,6 +576,8 @@ function SessionDetail() {
       </YStack>
 
       {StreamingIndicators()}
+
+      {TerminalPanel()}
 
       {selectedId ? [
         <Separator />,
