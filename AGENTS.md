@@ -69,11 +69,74 @@ All packages use a custom JSX factory — **not React**:
 
 ## Browser Automation
 
-Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.
+Use the repo-local `agent-browser` dependency for web automation:
+
+```bash
+corepack pnpm exec agent-browser --help
+```
+
+If a global `agent-browser` exists, it is fine to use it, but prefer
+`corepack pnpm exec agent-browser` in unattended sessions so the CLI version is
+pinned by the repo lockfile.
 
 Core workflow:
 
-1. `agent-browser open <url>` - Navigate to page
-2. `agent-browser snapshot -i` - Get interactive elements with refs (@e1, @e2)
-3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
-4. Re-snapshot after page changes
+1. `corepack pnpm dev` or a package-level `corepack pnpm --dir <example> dev` - launch the app
+2. `corepack pnpm exec agent-browser open <url>` - navigate to the running app
+3. `corepack pnpm exec agent-browser snapshot -i` - get interactive elements with refs (@e1, @e2)
+4. `corepack pnpm exec agent-browser click @e1` / `fill @e2 "text"` - interact using refs
+5. Re-snapshot after page changes
+
+For Jam app changes, browser validation should touch the actual running app:
+launch the relevant example, add or modify real app state through the UI, and
+capture evidence with `snapshot -i`, `get text`, `console`, `errors`, or a
+screenshot. Do not rely only on static inspection when the change affects user
+flows.
+
+## Native / Swift Development
+
+Use the existing Swift package entry points; do not add alternate native command
+layers unless the package layout changes.
+
+```bash
+just test-swift
+just build-native
+just build-puddy-native
+swift test --package-path packages/native
+swift build --package-path examples/counter-ios
+swift build --package-path examples/puddy-native
+```
+
+Before native work, probe the host:
+
+```bash
+swift --version
+xcrun simctl list devices
+```
+
+If Swift/Xcode is unavailable, record that as an environment limitation in the
+ticket workpad and still run the web/package validation that is relevant to the
+change.
+
+## Runtime Logs
+
+When starting any long-running dev server or backend-like process, preserve logs
+so another agent can inspect them later. Use the existing ignored `scratch/`
+directory for transient logs:
+
+```bash
+mkdir -p scratch/logs
+corepack pnpm --dir examples/folk-todo dev 2>&1 | tee scratch/logs/folk-todo.log
+```
+
+For background processes, write both a log and PID file:
+
+```bash
+mkdir -p scratch/logs
+nohup corepack pnpm --dir examples/folk-todo dev > scratch/logs/folk-todo.log 2>&1 &
+echo $! > scratch/logs/folk-todo.pid
+tail -f scratch/logs/folk-todo.log
+```
+
+Before handoff, stop any process you started and leave the log path in the
+workpad or PR notes when it was used as validation evidence.
