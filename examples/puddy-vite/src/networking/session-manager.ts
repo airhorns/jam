@@ -6,6 +6,12 @@ import { remember, replace, forget, _, transaction } from "@jam/core";
 import { type AgentEvent } from "../models/events";
 import { isTerminalStatus } from "../models/session";
 import {
+  ensureDefaultWorkspace,
+  ensureSessionWorkspace,
+  getActiveWorkspaceId,
+  getSessionWorkspaceId,
+} from "../models/workspace";
+import {
   SandboxAgentClient,
   SandboxAgentError,
   type AgentInfo,
@@ -94,14 +100,21 @@ export class SessionManager {
 
   // --- Session Lifecycle ---
 
-  createNewSession(initialPrompt?: string): string {
+  createNewSession(
+    initialPrompt?: string,
+    workspaceId = getActiveWorkspaceId(),
+  ): string {
     const agent = this.preferredAgent?.id;
     if (!agent) throw SandboxAgentError.noReadyAgent();
 
+    ensureDefaultWorkspace();
     const sessionId = "s-" + Date.now();
 
-    remember("session", sessionId, "agent", agent);
-    replace("session", sessionId, "status", "starting");
+    transaction(() => {
+      remember("session", sessionId, "agent", agent);
+      remember("session", sessionId, "workspace", workspaceId);
+      replace("session", sessionId, "status", "starting");
+    });
     this.sessionStatuses.set(sessionId, "starting");
 
     this.connectSession(sessionId, agent, initialPrompt);
@@ -160,6 +173,9 @@ export class SessionManager {
       throw new SandboxAgentError("NO_SESSION", "Select a session before starting a terminal");
     }
 
+    const workspaceId =
+      getSessionWorkspaceId(sessionId) ??
+      ensureSessionWorkspace(sessionId, getActiveWorkspaceId());
     const terminalId = `term-${Date.now()}-${_nextTerminalId++}`;
     this.terminalHandles.set(terminalId, { sessionId });
     this.terminalStatuses.set(terminalId, "starting");
@@ -167,6 +183,7 @@ export class SessionManager {
 
     transaction(() => {
       remember("terminal", terminalId, "session", sessionId);
+      remember("terminal", terminalId, "workspace", workspaceId);
       replace("terminal", terminalId, "cwd", cwd);
       replace("terminal", terminalId, "status", "starting");
       replace("terminal", terminalId, "output", "");
@@ -342,6 +359,7 @@ export class SessionManager {
     transaction(() => {
       forget("plan", id, _, _, _, _);
       forget("command", id, _, _);
+      forget("session", id, "workspace", _);
       for (const terminalId of terminals) {
         this.forgetTerminalFacts(terminalId);
       }
@@ -434,6 +452,7 @@ export class SessionManager {
   private forgetTerminalFacts(terminalId: string): void {
     forget("terminal", terminalId, "session", _);
     forget("terminal", terminalId, "processId", _);
+    forget("terminal", terminalId, "workspace", _);
     forget("terminal", terminalId, "cwd", _);
     forget("terminal", terminalId, "status", _);
     forget("terminal", terminalId, "statusDetail", _);

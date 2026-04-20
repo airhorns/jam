@@ -103,6 +103,13 @@ describe("SessionManager readiness", () => {
     // Should have session facts in the DB
     const agentFacts = db.query(["session", sid, "agent", "claude"] as any);
     expect(agentFacts).toHaveLength(1);
+    const workspaceFacts = db.query([
+      "session",
+      sid,
+      "workspace",
+      "default",
+    ] as any);
+    expect(workspaceFacts).toHaveLength(1);
     const statusFacts = db.query(["session", sid, "status", "starting"] as any);
     expect(statusFacts).toHaveLength(1);
   });
@@ -123,6 +130,9 @@ describe("SessionManager terminal sessions", () => {
 
     expect(
       db.query(["terminal", terminalId, "session", "s1"] as any),
+    ).toHaveLength(1);
+    expect(
+      db.query(["terminal", terminalId, "workspace", "default"] as any),
     ).toHaveLength(1);
     expect(
       db.query(["terminal", terminalId, "cwd", "/workspace"] as any),

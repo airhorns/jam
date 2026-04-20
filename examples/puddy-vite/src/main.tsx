@@ -9,14 +9,20 @@ import "./programs/cost-display";
 import "./programs/message-counts";
 import { startPermissionsMode } from "./programs/permissions-mode";
 import { startTerminalEmulator } from "./programs/terminal-emulator";
+import {
+  startWorkspaceKeyboardShortcuts,
+  startWorkspaceSupport,
+} from "./models/workspace";
 
 async function start() {
   // Restore persisted facts (sessions, UI state, permissions, etc.)
   await persist({ name: "puddy" });
 
+  startWorkspaceSupport();
   mount(<App />, document.getElementById("app")!);
   startPermissionsMode(sessionManager);
   startTerminalEmulator(sessionManager);
+  startWorkspaceKeyboardShortcuts();
 }
 
 start();

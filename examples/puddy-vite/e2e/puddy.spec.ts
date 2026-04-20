@@ -78,6 +78,14 @@ test.describe("App loads", () => {
     await expect(page.getByText("Sessions")).toBeVisible();
   });
 
+  test("shows workspace controls", async ({ page }) => {
+    await gotoApp(page);
+    await expect(page.getByText("Workspaces")).toBeVisible();
+    await expect(page.getByTestId("workspace-list")).toBeVisible();
+    await expect(page.getByTestId("new-workspace")).toHaveText("+ Workspace");
+    await expect(page.getByTestId("workspace-0")).toContainText("Alt+1");
+  });
+
   test("shows new session button", async ({ page }) => {
     await gotoApp(page);
     await expect(page.getByTestId("new-session")).toBeVisible();
@@ -89,6 +97,112 @@ test.describe("App loads", () => {
     await expect(page.getByTestId("detail-title")).toHaveText(
       "Select a session",
     );
+  });
+});
+
+test.describe("Workspaces", () => {
+  test("creates and switches workspaces from the sidebar", async ({ page }) => {
+    await gotoApp(page);
+
+    await page.getByTestId("new-workspace").click();
+    await expect(page.getByTestId("workspace-1")).toContainText("Workspace 2");
+    await expect(page.getByTestId("detail-title")).toHaveText("Select a session");
+
+    const selectedWorkspace = await page.evaluate(() =>
+      (Array.from((window as any).__db.facts.values()) as Fact[]).filter(
+        (fact: Fact) => fact[0] === "ui" && fact[1] === "selectedWorkspace",
+      ),
+    );
+    expect(JSON.stringify(selectedWorkspace)).toContain("workspace-");
+  });
+
+  test("filters sessions by active workspace and restores selection", async ({
+    page,
+  }) => {
+    await gotoApp(page);
+    const workspaceIds = await page.evaluate(() => {
+      const db = (window as any).__db;
+      const defaultWorkspace = "default";
+      const otherWorkspace = "workspace-test";
+      db.insert("workspace", otherWorkspace, "name", "Project B");
+      db.insert("workspace", otherWorkspace, "createdAt", 1);
+      db.insert("session", "s-default", "agent", "claude");
+      db.insert("session", "s-default", "workspace", defaultWorkspace);
+      db.replace("session", "s-default", "status", "active");
+      db.insert("session", "s-other", "agent", "codex");
+      db.insert("session", "s-other", "workspace", otherWorkspace);
+      db.replace("session", "s-other", "status", "active");
+      db.replace("workspace", defaultWorkspace, "selectedSession", "s-default");
+      db.replace("workspace", otherWorkspace, "selectedSession", "s-other");
+      db.replace("ui", "selectedWorkspace", defaultWorkspace);
+      db.replace("ui", "selectedSession", "s-default");
+      return { defaultWorkspace, otherWorkspace };
+    });
+
+    await expect(page.getByText("claude — s-default")).toBeVisible();
+    await expect(page.getByText("codex — s-other")).not.toBeVisible();
+    await expect(page.getByTestId("detail-title")).toHaveText(
+      "Session: s-default",
+    );
+
+    await page.getByTestId("workspace-1").click();
+
+    await expect(page.getByText("codex — s-other")).toBeVisible();
+    await expect(page.getByText("claude — s-default")).not.toBeVisible();
+    await expect(page.getByTestId("detail-title")).toHaveText(
+      "Session: s-other",
+    );
+
+    await page.keyboard.press("Alt+1");
+
+    await expect(page.getByText("claude — s-default")).toBeVisible();
+    await expect(page.getByTestId("detail-title")).toHaveText(
+      "Session: s-default",
+    );
+    expect(workspaceIds.defaultWorkspace).toBe("default");
+  });
+
+  test("scopes terminal panels and workspace items to the active workspace", async ({
+    page,
+  }) => {
+    await gotoApp(page);
+    await page.evaluate(() => {
+      const db = (window as any).__db;
+      db.insert("workspace", "workspace-test", "name", "Project B");
+      db.insert("workspace", "workspace-test", "createdAt", 1);
+      db.insert("session", "s-default", "agent", "claude");
+      db.insert("session", "s-default", "workspace", "default");
+      db.replace("session", "s-default", "status", "active");
+      db.insert("session", "s-other", "agent", "codex");
+      db.insert("session", "s-other", "workspace", "workspace-test");
+      db.replace("session", "s-other", "status", "active");
+      db.insert("terminal", "term-default", "session", "s-default");
+      db.insert("terminal", "term-default", "workspace", "default");
+      db.replace("terminal", "term-default", "status", "connected");
+      db.insert("terminal", "term-other", "session", "s-other");
+      db.insert("terminal", "term-other", "workspace", "workspace-test");
+      db.replace("terminal", "term-other", "status", "connected");
+      db.replace("terminal", "term-default", "cwd", "/default");
+      db.replace("terminal", "term-other", "cwd", "/project-b");
+      db.insert("workspaceItem", "item-default", "workspace", "default");
+      db.insert("workspaceItem", "item-default", "label", "Default notes");
+      db.insert("workspaceItem", "item-other", "workspace", "workspace-test");
+      db.insert("workspaceItem", "item-other", "label", "Project B notes");
+      db.replace("workspace", "default", "selectedSession", "s-default");
+      db.replace("workspace", "workspace-test", "selectedSession", "s-other");
+      db.replace("ui", "selectedWorkspace", "default");
+      db.replace("ui", "selectedSession", "s-default");
+    });
+
+    await expect(page.getByText("Default notes")).toBeVisible();
+    await expect(page.getByText("Project B notes")).not.toBeVisible();
+    await expect(page.getByTestId("terminal-panel")).toContainText("/default");
+
+    await page.getByTestId("workspace-1").click();
+
+    await expect(page.getByText("Project B notes")).toBeVisible();
+    await expect(page.getByText("Default notes")).not.toBeVisible();
+    await expect(page.getByTestId("terminal-panel")).toContainText("/project-b");
   });
 });
 
@@ -228,11 +342,8 @@ test.describe("Messages", () => {
 test.describe("Mode badge", () => {
   test("renders when currentMode fact exists", async ({ page }) => {
     await gotoApp(page);
-    await insertFacts(page, [
-      ["session", "s1", "agent", "claude"],
-      ["session", "s1", "status", "active"],
-      ["session", "s1", "currentMode", "architect"],
-    ]);
+    await seedSession(page);
+    await insertFacts(page, [["session", "s1", "currentMode", "architect"]]);
     await expect(page.getByText("[architect]")).toBeVisible();
   });
 });

@@ -15,6 +15,16 @@ import {
 } from "@jam/ui";
 import "./app.css";
 import { SessionManager } from "./networking/session-manager";
+import {
+  createWorkspace,
+  getActiveWorkspaceId,
+  getSelectedSessionForActiveWorkspace,
+  getSessionWorkspaceId,
+  getTerminalWorkspaceId,
+  getWorkspaces,
+  selectSessionInWorkspace,
+  setActiveWorkspace,
+} from "./models/workspace";
 
 function setTerminalHost(terminalId: string, host: HTMLElement | null) {
   const refKey = `terminal:${terminalId}:host`;
@@ -156,10 +166,12 @@ function ConnectionBar() {
 }
 
 function SessionList() {
+  const activeWorkspaceId = getActiveWorkspaceId();
+  const workspaces = getWorkspaces();
   const sessions = when(
     ["session", $.sid, "agent", $.agent],
     ["session", $.sid, "status", $.status],
-  );
+  ).filter(({ sid }) => getSessionWorkspaceId(sid as string) === activeWorkspaceId);
   const connection = when(["connection", "status", $.status]);
 
   const isConnected =
@@ -167,6 +179,59 @@ function SessionList() {
 
   return (
     <YStack class="sidebar" width={300} minWidth={300} backgroundColor="$color.bgSidebar" data-testid="sidebar">
+      <Text
+        padding="$space.4"
+        paddingTop="$space.5"
+        paddingBottom="$space.3"
+        fontWeight="600"
+        fontSize={11}
+        color="$color.textMuted"
+        textTransform="uppercase"
+        letterSpacing={1.5}
+      >
+        Workspaces
+      </Text>
+      <Separator />
+
+      <YStack gap="$space.1" padding="$space.2" class="workspace-list" data-testid="workspace-list">
+        {workspaces.map((workspace, index) => (
+          <Button
+            key={workspace.id}
+            class={
+              workspace.id === activeWorkspaceId
+                ? "workspace-row workspace-row-active hstack gap-8"
+                : "workspace-row hstack gap-8"
+            }
+            variant="ghost"
+            justifyContent="flex-start"
+            data-testid={`workspace-${index}`}
+            title={`Alt+${index + 1}`}
+            onClick={() => setActiveWorkspace(workspace.id)}
+          >
+            <Text fontSize={13} color="$color.textBright" flex={1} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+              {workspace.name}
+            </Text>
+            {index < 9 ? (
+              <Text class="shortcut-badge" fontSize={11} color="$color.textMuted" flexShrink={0}>
+                {`Alt+${index + 1}`}
+              </Text>
+            ) : null}
+          </Button>
+        ))}
+        <Button
+          class="workspace-row workspace-create"
+          variant="ghost"
+          justifyContent="center"
+          data-testid="new-workspace"
+          title="Alt+N"
+          onClick={() => createWorkspace()}
+        >
+          + Workspace
+        </Button>
+      </YStack>
+
+      {WorkspaceItems(activeWorkspaceId)}
+
       <Text
         padding="$space.4"
         paddingTop="$space.5"
@@ -198,7 +263,9 @@ function SessionList() {
               class="session-row hstack gap-8"
               variant="ghost"
               justifyContent="flex-start"
-              onClick={() => replace("ui", "selectedSession", sid)}
+              onClick={() =>
+                selectSessionInWorkspace(activeWorkspaceId, sid as string)
+              }
             >
               <StatusDot backgroundColor={dotColor} />
               <Text fontSize={13} color="$color.textBright" flex={1} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
@@ -223,7 +290,7 @@ function SessionList() {
           onClick={() => {
             try {
               const id = sessionManager.createNewSession();
-              replace("ui", "selectedSession", id);
+              selectSessionInWorkspace(activeWorkspaceId, id);
             } catch (err: any) {
               console.error("Failed to create session:", err.message ?? err);
             }
@@ -236,12 +303,49 @@ function SessionList() {
   );
 }
 
-function ModeBadge() {
-  const modes = when(["session", $.sid, "currentMode", $.mode]);
+function WorkspaceItems(workspaceId: string) {
+  const items = when(
+    ["workspaceItem", $.itemId, "workspace", workspaceId],
+    ["workspaceItem", $.itemId, "label", $.label],
+  );
 
-  return modes.map(({ sid, mode }) => (
+  return (
+    <YStack
+      id={`workspace-doodads-${workspaceId}`}
+      class="workspace-doodads"
+      data-testid="workspace-doodads"
+    >
+      {items.length > 0 ? (
+        <YStack gap="$space.1" padding="$space.2" paddingTop={0}>
+          {items.map(({ itemId, label }) => (
+            <XStack
+              key={itemId as string}
+              class="workspace-item hstack gap-8"
+              data-testid="workspace-item"
+            >
+              <Text fontSize={12} color="$color.textMuted" flexShrink={0}>
+                #
+              </Text>
+              <Text fontSize={12} color="$color.text" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+                {label as string}
+              </Text>
+            </XStack>
+          ))}
+        </YStack>
+      ) : null}
+    </YStack>
+  );
+}
+
+function ModeBadge() {
+  const selectedId = getSelectedSessionForActiveWorkspace();
+  const modes = selectedId
+    ? when(["session", selectedId, "currentMode", $.mode])
+    : [];
+
+  return modes.map(({ mode }) => (
         <XStack
-          key={`mode-${sid}`}
+          key={`mode-${selectedId}-${mode}`}
           class="mode-badge hstack gap-8"
           gap="$space.2"
           padding="$space.2"
@@ -254,9 +358,7 @@ function ModeBadge() {
 }
 
 function PlanList() {
-  const selection = when(["ui", "selectedSession", $.selectedId]);
-  const selectedId =
-    selection.length > 0 ? (selection[0].selectedId as string) : "";
+  const selectedId = getSelectedSessionForActiveWorkspace();
   const plans = selectedId
     ? when([
         "plan",
@@ -307,9 +409,7 @@ function PlanList() {
 }
 
 function MessageList() {
-  const selection = when(["ui", "selectedSession", $.selectedId]);
-  const selectedId =
-    selection.length > 0 ? (selection[0].selectedId as string) : "";
+  const selectedId = getSelectedSessionForActiveWorkspace();
   const messages = selectedId
     ? when([
         "message",
@@ -384,9 +484,7 @@ function MessageList() {
 }
 
 function StreamingIndicators() {
-  const selection = when(["ui", "selectedSession", $.selectedId]);
-  const selectedId =
-    selection.length > 0 ? (selection[0].selectedId as string) : "";
+  const selectedId = getSelectedSessionForActiveWorkspace();
   const thinking = selectedId
     ? when(["session", selectedId, "thinking", $.val])
     : [];
@@ -454,14 +552,14 @@ function StreamingIndicators() {
 }
 
 function TerminalPanel() {
-  const selection = when(["ui", "selectedSession", $.selectedId]);
-  const selectedId =
-    selection.length > 0 ? (selection[0].selectedId as string) : "";
+  const selectedId = getSelectedSessionForActiveWorkspace();
   if (!selectedId) return null;
 
   const terminals = when(
     ["terminal", $.tid, "session", selectedId],
     ["terminal", $.tid, "status", $.status],
+  ).filter(
+    ({ tid }) => getTerminalWorkspaceId(tid as string) === getActiveWorkspaceId(),
   );
   if (terminals.length === 0) return null;
 
@@ -514,9 +612,7 @@ function TerminalPanel() {
 }
 
 function SessionDetail() {
-  const selection = when(["ui", "selectedSession", $.selectedId]);
-  const selectedId =
-    selection.length > 0 ? (selection[0].selectedId as string) : "";
+  const selectedId = getSelectedSessionForActiveWorkspace();
 
   return (
     <YStack flex={1} overflow="hidden" backgroundColor="$color.bg" class="detail" data-testid="detail">
