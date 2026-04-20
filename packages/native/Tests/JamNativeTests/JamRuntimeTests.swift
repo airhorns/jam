@@ -63,13 +63,13 @@ final class JamRuntimeTests: XCTestCase {
     func testLoadProgramReplacesExisting() throws {
         let runtime = JamRuntime()
         runtime.loadProgram(id: "data", source: """
-            remember("counter", "value", 1);
+            claim("counter", "value", 1);
         """)
         XCTAssertTrue(runtime.getCurrentFacts().contains("1"))
 
         // Reload same ID with different logic
         runtime.loadProgram(id: "data", source: """
-            remember("counter", "value", 99);
+            claim("counter", "value", 99);
         """)
         let facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("99"), "Should have new value")
@@ -79,7 +79,7 @@ final class JamRuntimeTests: XCTestCase {
     func testDisposeProgramRemovesTopLevelFactsAndReactiveClaims() throws {
         let runtime = JamRuntime()
         runtime.loadProgram(id: "decorator", source: """
-            remember("program", "decorator", "loaded");
+            claim("program", "decorator", "loaded");
             whenever([["todo", $.id, "done", true]], function(matches) {
                 for (const match of matches) {
                     claim("todo-" + match.id, "class", "strikethrough");
@@ -141,11 +141,11 @@ final class JamRuntimeTests: XCTestCase {
         XCTAssertTrue(runtime.getCurrentFacts().contains("first"))
 
         runtime.loadProgram(id: "s2", source: """
-            remember("item", "name", "second");
+            replace("item", "name", "second");
         """)
         let facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("second"))
-        XCTAssertFalse(facts.contains("first"), "Old value should be removeed by remember()")
+        XCTAssertFalse(facts.contains("first"), "Old value should be removed by replace()")
     }
 
     func testRetractFact() throws {
@@ -181,7 +181,7 @@ final class JamRuntimeTests: XCTestCase {
             remember("counter", "value", 0);
             whenever([["counter", "value", $.v]], function(matches) {
                 if (matches.length > 0) {
-                    remember("display", "text", "Count is " + matches[0].v);
+                    claim("display", "text", "Count is " + matches[0].v);
                 }
             });
         """)
@@ -189,7 +189,7 @@ final class JamRuntimeTests: XCTestCase {
         XCTAssertTrue(facts.contains("Count is 0"), "Initial whenever fire")
 
         runtime.loadProgram(id: "update", source: """
-            remember("counter", "value", 5);
+            replace("counter", "value", 5);
         """)
         facts = runtime.getCurrentFacts()
         XCTAssertTrue(facts.contains("Count is 5"), "whenever should react to change")
@@ -299,7 +299,7 @@ final class JamRuntimeTests: XCTestCase {
 
         // Change the name fact — component should re-render
         runtime.loadProgram(id: "change-name", source: """
-            remember("name", "value", "Bob");
+            replace("name", "value", "Bob");
         """)
 
         facts = runtime.getCurrentFacts()

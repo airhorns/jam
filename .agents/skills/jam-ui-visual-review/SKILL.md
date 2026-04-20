@@ -54,3 +54,50 @@ For branch PRs that touch `@jam/ui` appearance or interaction, upload captured
 screenshot/video through GitHub-hosted media tooling when available and link to
 that uploaded asset. Do not commit PR media files to the branch or embed
 committed media in the PR body.
+
+## Native Catalog
+
+Use `examples/ui-catalog-native` when validating the same `@jam/ui` primitives
+through the SwiftUI renderer. Build the native runtime bundle first so the Swift
+resource file reflects current TypeScript source:
+
+```bash
+corepack pnpm --dir packages/native build
+corepack pnpm --dir examples/ui-catalog-native build:program
+swift build --package-path examples/ui-catalog-native
+```
+
+For broader native coverage, also run:
+
+```bash
+swift test --package-path packages/native
+swift build --package-path examples/counter-ios
+swift build --package-path examples/spatial-counter
+```
+
+On Linux, first check whether the Swift compiler is available directly or through
+the repeatable Docker image:
+
+```bash
+swift --version
+docker run --rm -v "$PWD":/workspace -w /workspace swift:5.9-jammy swift --version
+docker run --rm -v "$PWD":/workspace -w /workspace swift:5.9-jammy swift build --package-path packages/native
+```
+
+The current native package imports Apple frameworks (`JavaScriptCore` and
+`SwiftUI`), so Linux Swift images can prove compiler availability but cannot
+compile or render the Apple-platform targets. If that build fails with missing
+Apple modules, record the exact failure and still run the local native-mode VDOM
+contract test, web catalog, generated native catalog program, and
+`packages/native` JavaScript bundle build:
+
+```bash
+corepack pnpm --dir examples/ui-catalog-native build:program
+corepack pnpm --dir packages/ui exec vitest run src/__tests__/native-mode.test.ts
+corepack pnpm --dir examples/ui-catalog build
+corepack pnpm --dir packages/native build
+```
+
+The native catalog source remains the handoff artifact for macOS validation. CI
+should run the Swift package and native example builds on macOS when this
+surface changes.

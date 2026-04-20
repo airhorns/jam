@@ -50,9 +50,11 @@ export function Switch(props: {
     onClick: disabled ? undefined : () => onCheckedChange?.(!checked),
     opacity: disabled ? 0.5 : 1,
     cursor: disabled ? "not-allowed" : "pointer",
-    children: h("div", {
-      class: "switch-thumb",
-      style: `width:${dims.thumb}px;height:${dims.thumb}px;border-radius:50%;background:white;transform:translateX(${checked ? dims.w - dims.thumb - 4 : 2}px);transition:transform 0.15s ease`,
+    children: children ?? h(Switch.Thumb, {
+      width: dims.thumb,
+      height: dims.thumb,
+      transform: `translateX(${checked ? dims.w - dims.thumb - 4 : 2}px)`,
+      transition: "transform 0.15s ease",
     }),
   });
 }
