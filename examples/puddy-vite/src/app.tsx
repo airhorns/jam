@@ -3,6 +3,11 @@
 import { h, ImperativeHost } from "@jam/core/jsx";
 import { $, _, db, forget, replace, when } from "@jam/core";
 import {
+  createLocalStorageJamFileSystem,
+  createMetaAgent,
+  MetaAgentPanel,
+} from "@jam/meta-agent";
+import {
   createJamUI,
   XStack,
   YStack,
@@ -86,8 +91,19 @@ createJamUI({
 
 // --- Session manager (singleton) ---
 export const sessionManager = new SessionManager();
+export const metaAgent = createMetaAgent({
+  id: "puddy-meta-agent",
+  fs: createLocalStorageJamFileSystem("puddy-vite", {
+    "/programs/puddy-meta-note.js": [
+      `claim("puddy-meta-note", "status", "ready");`,
+      `claim("puddy-meta-note", "description", "Editable browser-side Jam program file.");`,
+    ].join("\n"),
+  }),
+});
+
 if (typeof window !== "undefined") {
   (window as any).sessionManager = sessionManager;
+  (window as any).metaAgent = metaAgent;
 }
 
 // --- Initial state ---
@@ -602,6 +618,7 @@ export function App() {
     <XStack height="100vh" class="split-view" data-testid="split-view">
       {SessionList()}
       {SessionDetail()}
+      {MetaAgentPanel({ agent: metaAgent, title: "Puddy Meta Agent" })}
     </XStack>
   );
 }
