@@ -1,0 +1,16 @@
+{
+  "name": "@jam/ui-catalog-native",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:program": "tsc -p tsconfig.build.json && node scripts/write-catalog-program.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@jam/core": "workspace:*",
+    "@jam/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

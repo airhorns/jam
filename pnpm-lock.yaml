@@ -126,6 +126,19 @@ importers:
         specifier: ^6.0.0
         version: 6.4.2(@types/node@25.6.0)(tsx@4.21.0)
 
+  examples/ui-catalog-native:
+    dependencies:
+      '@jam/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@jam/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   packages/core:
     dependencies:
       mobx:
