@@ -6,31 +6,27 @@ The core idea: programs don't call each other. They make **claims** into a share
 
 ## Quick start
 
+Install dependencies and start the default example:
+
 ```bash
-corepack pnpm install
-corepack pnpm dev
+npm install
+npm run dev
 ```
 
-The repository pins pnpm in `package.json`. If you have `mise`, run commands
-through the pinned Node/pnpm toolchain:
+Or, with pnpm:
 
 ```bash
-mise exec -- corepack pnpm install
-mise exec -- corepack pnpm dev
+pnpm install
+pnpm dev
 ```
 
-`just` recipes are available as conveniences, but the canonical commands are
-the root `corepack pnpm ...` scripts so a fresh worktree does not depend on a
-globally installed `pnpm` or `just`.
-
-Useful setup and validation commands:
+Useful commands:
 
 ```bash
-corepack pnpm install       # Install all workspace dependencies
-corepack pnpm dev           # Run the folk-todo example dev server
-corepack pnpm test          # Run unit tests for packages/examples that define them
-corepack pnpm test:e2e      # Run folk-todo Playwright tests
-corepack pnpm typecheck     # TypeScript check all packages and examples
+npm run dev         # Run the folk-todo example dev server
+npm test            # Run unit tests for packages/examples that define them
+npm run test:e2e    # Run Playwright tests for examples with e2e coverage
+npm run typecheck   # TypeScript check all packages and examples
 ```
 
 Playwright configs derive their default server ports from the current worktree
