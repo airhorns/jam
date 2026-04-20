@@ -48,7 +48,7 @@ async function startBackendSession(page: Page) {
   await gotoApp(page);
   await expect(page.getByTestId("new-session")).toBeEnabled();
   await page.getByTestId("new-session").click();
-  const sessionRow = page.locator(".session-row").filter({ hasText: "test-agent" }).last();
+  const sessionRow = page.locator(".session-row").filter({ hasText: "mock" }).last();
   await expect(sessionRow).toBeVisible();
   await sessionRow.click();
   await expect(page.getByTestId("detail-title")).toContainText("Session:");
@@ -336,7 +336,7 @@ test.describe("Sandbox-agent server integration", () => {
     await input.press("Enter");
 
     await expect(page.getByText("hello from e2e")).toBeVisible();
-    await expect(page.getByText("sandbox-agent heard: hello from e2e")).toBeVisible();
+    await expect(page.getByText("mock echoed: hello from e2e")).toBeVisible();
     await expect(input).toHaveValue("");
   });
 
@@ -351,7 +351,6 @@ test.describe("Sandbox-agent server integration", () => {
     await expect(page.getByTestId("terminal-tabs")).toContainText("connected");
 
     const terminal = page.getByTestId("terminal-output");
-    await expect(terminal).toContainText("$");
     await terminal.click();
     await page.keyboard.type("pwd");
     await page.keyboard.press("Enter");

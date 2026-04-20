@@ -415,7 +415,15 @@ export class SessionManager {
   }
 
   private decodeTerminalData(data: MessageEvent["data"]): string {
-    if (typeof data === "string") return data;
+    if (typeof data === "string") {
+      try {
+        const frame = JSON.parse(data);
+        if (frame && typeof frame.type === "string") return "";
+      } catch {
+        // Plain text frames are terminal output.
+      }
+      return data;
+    }
     if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
     if (ArrayBuffer.isView(data)) {
       return new TextDecoder().decode(data);

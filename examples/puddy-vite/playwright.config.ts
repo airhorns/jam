@@ -14,7 +14,10 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `SANDBOX_AGENT_TEST_PORT=${sandboxAgentPort} corepack pnpm exec tsx e2e/sandbox-agent-server.ts`,
+      command: [
+        "corepack pnpm exec sandbox-agent install-agent mock --no-token",
+        `corepack pnpm exec sandbox-agent server --no-token --no-telemetry --host 127.0.0.1 --port ${sandboxAgentPort}`,
+      ].join(" && "),
       url: `${sandboxAgentURL}/v1/health`,
       reuseExistingServer: false,
     },

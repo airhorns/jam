@@ -75,9 +75,9 @@ importers:
       '@playwright/test':
         specifier: ^1.58.2
         version: 1.59.1
-      '@types/ws':
-        specifier: ^8.18.1
-        version: 8.18.1
+      '@sandbox-agent/cli':
+        specifier: 0.4.2
+        version: 0.4.2
       msw:
         specifier: ^2.12.14
         version: 2.13.4(@types/node@25.6.0)(typescript@5.9.3)
@@ -96,9 +96,6 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.4(@types/node@25.6.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.21.0)
-      ws:
-        specifier: ^8.20.0
-        version: 8.20.0
 
   examples/trello-clone:
     dependencies:
@@ -871,6 +868,38 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@sandbox-agent/cli-darwin-arm64@0.4.2':
+    resolution: {integrity: sha512-+L1O8SI7k/LLhyB4dG0ghmz1cJHa0WtVjuRTrEE2gw/5EbGLWopPBsCVCmQ7snrQ4fPwtaiZDhfExcEj1VI7aw==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@sandbox-agent/cli-darwin-x64@0.4.2':
+    resolution: {integrity: sha512-dDg/EwWsdgVVbJiiCX1scSNRRA48u77SsC7Tuqrfzx4fIJMLuLiIcmEtXQyCBWysSyQNV2Cr+PYXXQfCb3xg8g==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@sandbox-agent/cli-linux-arm64@0.4.2':
+    resolution: {integrity: sha512-TGmTUexMoubmWQyTeaOJu0rDVl2h0Ifh1pZ0ceZy7u/6Eoqs2n46CbfQtasUxZJf10uxPgRyzEDhcdDrTYVQUA==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@sandbox-agent/cli-linux-x64@0.4.2':
+    resolution: {integrity: sha512-H9Rbqq0DRkCHvakzefJUDrDa2y+vJjlYd5/tefzKbQ34locE13TGNygRLxdEVXpBECjK9wVdBwTVEphQNsOcjw==}
+    cpu: [x64]
+    os: [linux]
+
+  '@sandbox-agent/cli-shared@0.4.2':
+    resolution: {integrity: sha512-sjZXRkKeFXCSKR6hHzF2Af8CCRO3F3WFwVQJ22+sLTXJ2xskV8lkUE4egknQU9B5BC1Zumts/YiNCFQWG85awQ==}
+
+  '@sandbox-agent/cli-win32-x64@0.4.2':
+    resolution: {integrity: sha512-lZNfHWPwQe/VH51Yvrl/ATCUvBZ3a+c8mwovojhQcmZlv4QuUQPkuvxhPqHRh9AyBx78L5J/ha46es2doa34nQ==}
+    cpu: [x64]
+    os: [win32]
+
+  '@sandbox-agent/cli@0.4.2':
+    resolution: {integrity: sha512-trO//ypJBSt5xkewuol9LOykvDgHwUXq8R+yQVS+0CmpN3lYUtewHkb+At9RVGRhDMmJZY2oasaXDnhfurQ33w==}
+    hasBin: true
+
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
 
@@ -888,9 +917,6 @@ packages:
 
   '@types/statuses@2.0.6':
     resolution: {integrity: sha512-xMAgYwceFhRA2zY+XbEA7mxYbA093wdiW8Vu6gZPGWy9cmOyU9XesH1tNcEWsKFd5Vzrqx5T3D38PWx1FIIXkA==}
-
-  '@types/ws@8.18.1':
-    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@vitest/expect@3.2.4':
     resolution: {integrity: sha512-Io0yyORnB6sikFlt8QW5K7slY4OjqNX9jmJQ02QDda8lyM6B5oNgVWoSoKPac8/kgnCUzuHQKrSLtu/uOqqrig==}
@@ -1416,18 +1442,6 @@ packages:
     resolution: {integrity: sha512-YVGIj2kamLSTxw6NsZjoBxfSwsn0ycdesmc4p+Q21c5zPuZ1pl+NfxVdxPtdHvmNVOQ6XSYG4AUtyt/Fi7D16Q==}
     engines: {node: '>=10'}
 
-  ws@8.20.0:
-    resolution: {integrity: sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
   xml-name-validator@5.0.0:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
     engines: {node: '>=18'}
@@ -1840,6 +1854,33 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.60.2':
     optional: true
 
+  '@sandbox-agent/cli-darwin-arm64@0.4.2':
+    optional: true
+
+  '@sandbox-agent/cli-darwin-x64@0.4.2':
+    optional: true
+
+  '@sandbox-agent/cli-linux-arm64@0.4.2':
+    optional: true
+
+  '@sandbox-agent/cli-linux-x64@0.4.2':
+    optional: true
+
+  '@sandbox-agent/cli-shared@0.4.2': {}
+
+  '@sandbox-agent/cli-win32-x64@0.4.2':
+    optional: true
+
+  '@sandbox-agent/cli@0.4.2':
+    dependencies:
+      '@sandbox-agent/cli-shared': 0.4.2
+    optionalDependencies:
+      '@sandbox-agent/cli-darwin-arm64': 0.4.2
+      '@sandbox-agent/cli-darwin-x64': 0.4.2
+      '@sandbox-agent/cli-linux-arm64': 0.4.2
+      '@sandbox-agent/cli-linux-x64': 0.4.2
+      '@sandbox-agent/cli-win32-x64': 0.4.2
+
   '@types/chai@5.2.3':
     dependencies:
       '@types/deep-eql': 4.0.2
@@ -1858,10 +1899,6 @@ snapshots:
       '@types/node': 25.6.0
 
   '@types/statuses@2.0.6': {}
-
-  '@types/ws@8.18.1':
-    dependencies:
-      '@types/node': 25.6.0
 
   '@vitest/expect@3.2.4':
     dependencies:
@@ -2441,8 +2478,6 @@ snapshots:
       ansi-styles: 4.3.0
       string-width: 4.2.3
       strip-ansi: 6.0.1
-
-  ws@8.20.0: {}
 
   xml-name-validator@5.0.0: {}
 
