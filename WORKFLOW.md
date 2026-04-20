@@ -83,7 +83,7 @@ Tooling guidance:
 - If `mise.toml` is present, prefer `mise exec -- <command>` so the pinned Node/pnpm toolchain is used.
 - Typical validation commands live in `AGENTS.md` and include `just test`, `just typecheck`, package-level `pnpm test`, and Playwright e2e for relevant examples.
 - For browser automation, prefer the repo's documented agent/browser workflow when applicable.
-- If you need repo-local Codex skills and `.codex` is missing in the workspace, inspect the repo root carefully before assuming the skill exists.
+- If you need repo-local agent skills and `.agents` is missing in the workspace, inspect the repo root carefully before assuming the skill exists.
 
 The following Symphony workflow contract remains authoritative; follow it exactly, and treat the repository-specific guidance above as additional constraints rather than a replacement.
 
@@ -150,7 +150,7 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 - `commit`: produce clean, logical commits during implementation.
 - `push`: keep remote branch current and publish updates.
 - `pull`: keep branch updated with latest `origin/main` before handoff.
-- `land`: when ticket reaches `Merging`, explicitly open and follow `.codex/skills/land/SKILL.md`, which includes the `land` loop.
+- `land`: when ticket reaches `Merging`, explicitly open and follow `.agents/skills/land/SKILL.md`, which includes the `land` loop.
 
 ## Status map
 
@@ -173,7 +173,7 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
      - If PR is already attached, start by reviewing all open PR comments and deciding required changes vs explicit pushback responses.
    - `In Progress` -> continue execution flow from current scratchpad comment.
    - `Human Review` -> wait and poll for decision/review updates.
-   - `Merging` -> on entry, open and follow `.codex/skills/land/SKILL.md`; do not call `gh pr merge` directly.
+   - `Merging` -> on entry, open and follow `.agents/skills/land/SKILL.md`; do not call `gh pr merge` directly.
    - `Rework` -> run rework flow.
    - `Done` -> do nothing and shut down.
 4. Check whether a PR already exists for the current branch and whether it is closed.
@@ -303,7 +303,7 @@ Use this only when completion is blocked by missing required tools or missing au
 3. If either Linear or GitHub feedback indicates additional changes are needed, move the issue to `Rework` and follow the rework flow.
    - After the requested follow-up is complete, replace the `👀` reaction on those comments with `🟢`.
 4. If approved, human moves the issue to `Merging`.
-5. When the issue is in `Merging`, open and follow `.codex/skills/land/SKILL.md`, then run the `land` skill in a loop until the PR is merged. Do not call `gh pr merge` directly.
+5. When the issue is in `Merging`, open and follow `.agents/skills/land/SKILL.md`, then run the `land` skill in a loop until the PR is merged. Do not call `gh pr merge` directly.
 6. After merge is complete, move the issue to `Done`.
 
 ## Step 4: Rework handling
