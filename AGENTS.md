@@ -4,7 +4,7 @@
 corepack pnpm install       # Install all dependencies
 corepack pnpm dev           # Run folk-todo example dev server
 corepack pnpm test          # Run package/example unit tests where present
-corepack pnpm test:e2e      # Run folk-todo e2e tests (Playwright)
+corepack pnpm test:e2e      # Run folk-todo and puddy-vite e2e tests (Playwright)
 corepack pnpm typecheck     # TypeScript check all packages
 
 # Optional just conveniences, if just is installed
@@ -72,6 +72,11 @@ All application state — including the VDOM — lives in a shared **fact databa
 - `examples/counter/` — Minimal counter (good for testing core changes)
 - `examples/folk-todo/` — Full todo app with external programs, has unit + e2e tests
 - `examples/puddy-vite/` — Chat app with session management, VCR testing (MSW), unit + e2e tests
+- `examples/trello-clone/` — Kanban board example with unit + e2e tests
+- `examples/obsidian-clone/` — Linked-note workspace example with unit + e2e tests
+- `examples/ui-catalog/` — Browser catalog for `@jam/ui` component review
+- `examples/ui-catalog-native/` — Native catalog source for SwiftUI renderer coverage
+- `examples/counter-ios/` and `examples/spatial-counter/` — Swift native examples
 
 ### Two-Phase Rendering Pipeline
 
@@ -92,7 +97,7 @@ All packages use a custom JSX factory — **not React**:
 
 - **Unit tests**: Vitest, files in `src/__tests__/`. Run a single test file: `cd packages/core && corepack pnpm exec vitest run src/__tests__/db.test.ts`
 - **E2E tests**: Playwright (Chromium). Test servers use per-worktree default ports to avoid cross-worktree collisions; set `PLAYWRIGHT_PORT` or the example-specific `*_PLAYWRIGHT_PORT` variable to override.
-- **CI** runs: install → typecheck → unit tests → folk-todo e2e
+- **CI** runs: install → typecheck → UI tests → unit tests → folk-todo and puddy-vite e2e. Separate CI jobs run core benchmarks and macOS native Swift builds.
 
 ## Browser Automation
 
@@ -143,6 +148,8 @@ just test-swift
 just build-native
 swift test --package-path packages/native
 swift build --package-path examples/counter-ios
+swift build --package-path examples/spatial-counter
+swift build --package-path examples/ui-catalog-native
 ```
 
 Before native work, probe the host:

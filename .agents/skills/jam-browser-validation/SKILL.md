@@ -24,6 +24,8 @@ Use package-specific dev commands when the changed surface is another example:
 corepack pnpm --dir examples/counter dev
 corepack pnpm --dir examples/puddy-vite dev
 corepack pnpm --dir examples/trello-clone dev
+corepack pnpm --dir examples/obsidian-clone dev
+corepack pnpm --dir examples/ui-catalog dev
 ```
 
 If multiple worktrees are active, set a package-specific port or use the port
@@ -48,6 +50,10 @@ For folk-todo, a useful smoke path is:
 3. Press Enter.
 4. Toggle the created item.
 5. Verify item text, class/state, and item count.
+
+For docs or skills changes that only alter guidance, static validation is
+usually enough. Use browser validation when the change affects an app, renderer
+output, example behavior, or UI component appearance.
 
 Useful evidence commands:
 

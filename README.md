@@ -6,33 +6,46 @@ The core idea: programs don't call each other. They make **claims** into a share
 
 ## Quick start
 
-Install dependencies and start the default example:
+Install dependencies and start the default example with the repo-pinned
+package manager:
 
 ```bash
-npm install
-npm run dev
+corepack pnpm install
+corepack pnpm dev
 ```
 
-Or, with pnpm:
+When `mise` is available, prefer the tool versions pinned in `mise.toml`:
 
 ```bash
-pnpm install
-pnpm dev
+mise install
+mise exec -- corepack pnpm install
+mise exec -- corepack pnpm dev
 ```
 
 Useful commands:
 
 ```bash
-npm run dev         # Run the folk-todo example dev server
-npm test            # Run unit tests for packages/examples that define them
-npm run test:e2e    # Run Playwright tests for examples with e2e coverage
-npm run typecheck   # TypeScript check all packages and examples
+corepack pnpm dev             # Run the folk-todo example dev server
+corepack pnpm test            # Run unit tests for packages/examples that define them
+corepack pnpm test:e2e        # Run folk-todo and puddy-vite Playwright suites
+corepack pnpm typecheck       # TypeScript check all packages and examples
+corepack pnpm run dev:ui      # Run the @jam/ui catalog example
 ```
 
 Playwright configs derive their default server ports from the current worktree
 path so multiple Codex worktrees can run e2e tests without accidentally reusing
 another app's dev server. Set `PLAYWRIGHT_PORT` or the example-specific
 `*_PLAYWRIGHT_PORT` variable when you need a fixed port.
+
+## Examples
+
+- `examples/counter` — minimal counter for core rendering and state checks
+- `examples/folk-todo` — todo app with external-program customization and e2e coverage
+- `examples/trello-clone` — kanban workflow example with ordered board state
+- `examples/obsidian-clone` — linked-note workspace with graph-derived views
+- `examples/puddy-vite` — chat/session app with VCR-style network tests
+- `examples/ui-catalog` — browser catalog for `@jam/ui` components
+- `examples/counter-ios`, `examples/spatial-counter`, and `examples/ui-catalog-native` — SwiftUI/native runtime examples
 
 ## Core API
 
@@ -170,6 +183,8 @@ The fact database is a shared space. Any program can observe any fact and claim 
 
 **Component renders a todo item:**
 ```tsx
+import { h } from "@jam/core/jsx";
+
 function TodoItem({ todoId, title, done }) {
   return <li id={`todo-${todoId}`} class={done ? "todo-item done" : "todo-item"}>
     <span class="title">{title}</span>

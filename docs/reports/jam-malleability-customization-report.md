@@ -323,7 +323,7 @@ That set covers:
 - linked-document state
 - dense streaming/session state
 
-which is a much better test surface than the current smaller trio alone.
+which is a much better test surface than a minimal smoke-test trio alone.
 
 ## Concrete suggestions for Jam itself
 

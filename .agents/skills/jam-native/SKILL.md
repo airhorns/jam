@@ -26,13 +26,13 @@ Still run TypeScript/package checks for any changed JS bridge code.
 ```bash
 just test-swift
 just build-native
+corepack pnpm --dir packages/native build
+corepack pnpm --dir examples/ui-catalog-native build:program
 swift test --package-path packages/native
 swift build --package-path packages/native
 swift build --package-path examples/counter-ios
 swift build --package-path examples/spatial-counter
-corepack pnpm --dir examples/ui-catalog-native build:program
 swift build --package-path examples/ui-catalog-native
-corepack pnpm --dir packages/native build
 corepack pnpm --dir packages/ui exec vitest run src/__tests__/native-mode.test.ts
 ```
 
