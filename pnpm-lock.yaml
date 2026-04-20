@@ -65,6 +65,9 @@ importers:
       '@jam/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@jam/meta-agent':
+        specifier: workspace:*
+        version: link:../../packages/meta-agent
       '@jam/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -154,6 +157,28 @@ importers:
         specifier: ^1.0.0
         version: 1.0.0
     devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vite:
+        specifier: ^6.0.0
+        version: 6.4.2(@types/node@25.6.0)(tsx@4.21.0)
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/node@25.6.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.21.0)
+
+  packages/meta-agent:
+    dependencies:
+      '@jam/core':
+        specifier: workspace:*
+        version: link:../core
+      '@jam/ui':
+        specifier: workspace:*
+        version: link:../ui
+    devDependencies:
+      jsdom:
+        specifier: ^29.0.2
+        version: 29.0.2
       typescript:
         specifier: ^5.9.0
         version: 5.9.3

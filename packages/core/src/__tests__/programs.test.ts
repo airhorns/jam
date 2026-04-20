@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { $, db, when, remember } from "../index";
+import { createJamProgramFileSystem } from "../program-files";
 import { loadProgramSource, listPrograms, program, registerProgram, removeProgram } from "../programs";
 
 describe("program registry", () => {
@@ -79,5 +80,27 @@ describe("program registry", () => {
 
     expect(listPrograms()).not.toContain("helper");
     expect(when(["helper-program", "active", $.value])).toEqual([]);
+  });
+
+  it("loads dynamic programs from shared Jam program files", () => {
+    const fs = createJamProgramFileSystem();
+
+    fs.writeFile("/programs/shared.js", `claim("shared-program", "status", "loaded");`);
+    expect(when(["jamProgramFile", "/programs/shared.js", "content", $.content])).toEqual([
+      { content: `claim("shared-program", "status", "loaded");` },
+    ]);
+
+    fs.loadProgramFile("/programs/shared.js", "shared-program");
+
+    expect(listPrograms()).toContain("shared-program");
+    expect(when(["shared-program", "status", $.status])).toEqual([{ status: "loaded" }]);
+    expect(when(["jamProgramFile", "/programs/shared.js", "programId", $.id])).toEqual([
+      { id: "shared-program" },
+    ]);
+
+    fs.writeFile("/programs/shared.js", `claim("shared-program", "status", "reloaded");`);
+    fs.loadProgramFile("/programs/shared.js", "shared-program");
+
+    expect(when(["shared-program", "status", $.status])).toEqual([{ status: "reloaded" }]);
   });
 });
