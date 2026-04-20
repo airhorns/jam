@@ -89,6 +89,57 @@ body {
   font-size: 13px;
 }
 
+/* Workspace row */
+.workspace-list {
+  flex-shrink: 0;
+}
+
+.workspace-row {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 8px 12px;
+  width: 100%;
+  transition: background 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-row:hover {
+  background: #161b22;
+  border-color: #30363d;
+}
+
+.workspace-row-active {
+  background: rgba(88, 166, 255, 0.1);
+  border-color: #58a6ff;
+}
+
+.workspace-create {
+  color: #8b949e;
+  justify-content: center;
+}
+
+.shortcut-badge {
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+}
+
+.workspace-doodads {
+  flex-shrink: 0;
+}
+
+.workspace-item {
+  padding: 6px 12px;
+  min-height: 30px;
+  border-radius: 6px;
+  background: #0d1117;
+  border: 1px solid #21262d;
+}
+
 /* Session row */
 .session-row {
   background: transparent;
