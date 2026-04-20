@@ -335,7 +335,7 @@ test.describe("Sandbox-agent server integration", () => {
     await input.fill("hello from e2e");
     await input.press("Enter");
 
-    await expect(page.getByText("hello from e2e")).toBeVisible();
+    await expect(page.getByText("hello from e2e", { exact: true })).toBeVisible();
     await expect(page.getByText("mock echoed: hello from e2e")).toBeVisible();
     await expect(input).toHaveValue("");
   });
