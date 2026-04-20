@@ -7,9 +7,15 @@ import {
   healthEntry, agentsEntry, createSessionEntry, sseStreamEntry,
   promptAckEntry, destroySessionEntry,
   sseMessageChunk, sseThoughtChunk, sseToolCall, sseToolCallUpdate, sseSessionEnd,
-  type Cassette,
+  type Cassette, type VCRFixture,
 } from "./cassette";
-import { db, $ } from "@jam/core";
+import { db, $, listPrograms, removeProgram } from "@jam/core";
+import {
+  createMemoryJamFileSystem,
+  createMetaAgent,
+  type MetaAgentDriver,
+  type MetaAgentDriverPlan,
+} from "@jam/meta-agent";
 import helloCassetteRaw from "./cassettes/hello.json";
 
 const helloCassette = helloCassetteRaw as unknown as Cassette;
@@ -34,6 +40,63 @@ function sessionCassette(sseData: string[]): Cassette {
     promptAckEntry(SID),
     destroySessionEntry(SID),
   ];
+}
+
+function extractJsonPlan(text: string): MetaAgentDriverPlan {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end < start) {
+    throw new Error(`Recorded provider did not return a JSON plan: ${text}`);
+  }
+
+  const plan = JSON.parse(text.slice(start, end + 1)) as MetaAgentDriverPlan;
+  if (!Array.isArray(plan.toolCalls) || typeof plan.response !== "string") {
+    throw new Error("Recorded provider returned an invalid meta-agent plan");
+  }
+  return plan;
+}
+
+function createRecordedProviderDriver(vcr: VCRFixture): MetaAgentDriver {
+  return {
+    async plan(input) {
+      const sessionId = "meta-agent-provider";
+      await vcr.client.createSession(sessionId, AGENT);
+
+      const chunks: string[] = [];
+      let rejectStream: (error: Error) => void = () => {};
+      const done = new Promise<string>((resolve, reject) => {
+        rejectStream = reject;
+        vcr.client.startEventStream(
+          sessionId,
+          (event) => {
+            if (event.payload.type === "agentMessageChunk") {
+              chunks.push(event.payload.text);
+            }
+            if (event.payload.type === "sessionEnd") {
+              resolve(chunks.join(""));
+            }
+          },
+          reject,
+        );
+      });
+
+      vcr.client.sendPrompt(
+        sessionId,
+        JSON.stringify({
+          kind: "jam-meta-agent-plan",
+          prompt: input.prompt,
+          tools: input.tools.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+          })),
+        }),
+        undefined,
+        rejectStream,
+      );
+
+      return extractJsonPlan(await done);
+    },
+  };
 }
 
 // --- Tests ---
@@ -165,6 +228,73 @@ describe("VCR: recorded hello cassette (real server interaction)", () => {
     // Session ended
     const statuses = db.query(["session", SID, "status", $.status] as any);
     expect(statuses).toContainEqual(expect.objectContaining({ status: "ended" }));
+  });
+});
+
+describe("VCR: recorded provider meta-agent plan", () => {
+  const programPath = "/programs/recorded-provider-meta-agent.js";
+  const programId = "recorded-provider-meta-agent";
+  const providerPlan: MetaAgentDriverPlan = {
+    toolCalls: [
+      { toolName: "appSummary" },
+      { toolName: "inspectFacts", input: { prefix: "session", limit: 10 } },
+      {
+        toolName: "writeFile",
+        input: {
+          path: programPath,
+          content: [
+            `claim("${programId}", "status", "loaded");`,
+            `claim("${programId}", "source", "recorded-provider");`,
+          ].join("\n"),
+        },
+      },
+      { toolName: "loadProgram", input: { path: programPath, id: programId } },
+    ],
+    response: "The recorded ACP provider selected Jam inspection and program-loading tools.",
+  };
+  const cassette: Cassette = [
+    createSessionEntry("meta-agent-provider", AGENT, "acp-meta-agent"),
+    sseStreamEntry("meta-agent-provider", [
+      sseMessageChunk(JSON.stringify(providerPlan)),
+      sseSessionEnd(),
+    ]),
+    promptAckEntry("meta-agent-provider"),
+  ];
+
+  test("recorded provider drives the meta-agent loop and tools", async ({ vcr }) => {
+    vcr.load(cassette);
+    if (listPrograms().includes(programId)) removeProgram(programId);
+
+    db.insert("session", "recorded-session", "agent", AGENT);
+    db.insert("session", "recorded-session", "status", "active");
+
+    const agent = createMetaAgent({
+      id: "recorded-provider-test-agent",
+      fs: createMemoryJamFileSystem(),
+      driver: createRecordedProviderDriver(vcr),
+    });
+
+    try {
+      await agent.runPrompt("inspect the current Jam session state and add a small program");
+
+      const transcript = db
+        .query(["metaAgentMessage", "recorded-provider-test-agent", $.messageId, "text", $.text] as any)
+        .map((message) => String(message.text))
+        .join("\n");
+
+      expect(transcript).toContain("Jam app summary");
+      expect(transcript).toContain("Jam facts");
+      expect(transcript).toContain("Wrote program file");
+      expect(transcript).toContain("Loaded program");
+      expect(transcript).toContain("recorded ACP provider");
+      expect(agent.fs.readFile(programPath)).toEqual(
+        expect.objectContaining({ path: programPath }),
+      );
+      expect(db.query([programId, "status", "loaded"] as any)).toHaveLength(1);
+      expect(db.query([programId, "source", "recorded-provider"] as any)).toHaveLength(1);
+    } finally {
+      if (listPrograms().includes(programId)) removeProgram(programId);
+    }
   });
 });
 
