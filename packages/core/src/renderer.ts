@@ -55,6 +55,21 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
 
   // --- Phase 2: Patch DOM from all VDOM claims ---
   const managed = new Map<string, HTMLElement | Text>();
+  const mountedRefs = new Map<
+    string,
+    {
+      element: HTMLElement;
+      refKey: string;
+      callback: (element: HTMLElement | null) => void;
+    }
+  >();
+
+  function releaseElementRef(entityId: string) {
+    const mounted = mountedRefs.get(entityId);
+    if (!mounted) return;
+    mounted.callback(null);
+    mountedRefs.delete(entityId);
+  }
 
   const patchDisposer = autorun(() => {
     const allFacts = Array.from(db.facts.values());
@@ -64,6 +79,8 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
     const props = new Map<string, Map<string, Term>>();
     const texts = new Map<string, string>();
     const handlers = new Map<string, Map<string, string>>();
+    const elementRefs = new Map<string, string>();
+    const childModes = new Map<string, string>();
     const children = new Map<string, [number, string][]>();
 
     for (const fact of allFacts) {
@@ -83,6 +100,10 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       } else if (attr === "handler") {
         if (!handlers.has(entity)) handlers.set(entity, new Map());
         handlers.get(entity)!.set(String(fact[2]), String(fact[3]));
+      } else if (attr === "elementRef") {
+        elementRefs.set(entity, String(fact[2]));
+      } else if (attr === "childMode") {
+        childModes.set(entity, String(fact[2]));
       } else if (attr === "child") {
         if (!children.has(entity)) children.set(entity, []);
         children.get(entity)!.push([fact[2] as number, String(fact[3])]);
@@ -92,6 +113,29 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
     for (const [, list] of children) list.sort((a, b) => a[0] - b[0]);
 
     const visited = new Set<string>();
+
+    function syncElementRef(entityId: string, el: HTMLElement) {
+      const refKey = elementRefs.get(entityId);
+      const mounted = mountedRefs.get(entityId);
+
+      if (!refKey) {
+        releaseElementRef(entityId);
+        return;
+      }
+
+      const callback = db.getRef(refKey) as
+        | ((element: HTMLElement | null) => void)
+        | undefined;
+      if (!callback) {
+        releaseElementRef(entityId);
+        return;
+      }
+
+      if (mounted?.refKey === refKey && mounted.element === el) return;
+      if (mounted) mounted.callback(null);
+      callback(el);
+      mountedRefs.set(entityId, { element: el, refKey, callback });
+    }
 
     function reconcile(entityId: string): Node | null {
       const tag = tags.get(entityId);
@@ -158,19 +202,24 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       }
       (el as any).__handlers = newHandlers;
 
-      const childList = children.get(entityId) ?? [];
-      const childNodes: Node[] = [];
-      for (const [, childId] of childList) {
-        const node = reconcile(childId);
-        if (node) childNodes.push(node);
-      }
-      for (let i = 0; i < childNodes.length; i++) {
-        if (el.childNodes[i] !== childNodes[i]) {
-          el.insertBefore(childNodes[i], el.childNodes[i] || null);
+      syncElementRef(entityId, el);
+
+      const ownsChildren = childModes.get(entityId) !== "imperative";
+      if (ownsChildren) {
+        const childList = children.get(entityId) ?? [];
+        const childNodes: Node[] = [];
+        for (const [, childId] of childList) {
+          const node = reconcile(childId);
+          if (node) childNodes.push(node);
         }
-      }
-      while (el.childNodes.length > childNodes.length) {
-        el.removeChild(el.lastChild!);
+        for (let i = 0; i < childNodes.length; i++) {
+          if (el.childNodes[i] !== childNodes[i]) {
+            el.insertBefore(childNodes[i], el.childNodes[i] || null);
+          }
+        }
+        while (el.childNodes.length > childNodes.length) {
+          el.removeChild(el.lastChild!);
+        }
       }
 
       return el;
@@ -192,7 +241,10 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
     }
 
     for (const id of managed.keys()) {
-      if (!visited.has(id)) managed.delete(id);
+      if (!visited.has(id)) {
+        releaseElementRef(id);
+        managed.delete(id);
+      }
     }
   });
 
@@ -202,5 +254,6 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       db.revokeOwner(mountOwner);
     });
     patchDisposer();
+    for (const id of Array.from(mountedRefs.keys())) releaseElementRef(id);
   };
 }

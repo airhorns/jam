@@ -100,6 +100,30 @@ export function parseACPMessage(
     return { type: "skip" };
   }
 
+  // The built-in sandbox-agent mock agent echoes prompts as mock/echo notifications.
+  if (json.method === "mock/echo") {
+    const echoed = json.params?.message;
+    if (echoed?.method !== "session/prompt") return { type: "skip" };
+    const prompt = echoed.params?.prompt;
+    const text = Array.isArray(prompt)
+      ? prompt
+          .filter((part: any) => part?.type === "text" && typeof part.text === "string")
+          .map((part: any) => part.text)
+          .join("\n")
+      : "";
+    if (!text) return { type: "skip" };
+
+    eventIndex.value += 1;
+    return {
+      type: "event",
+      event: {
+        id: `evt-${_nextEventId++}`,
+        eventIndex: eventIndex.value,
+        payload: { type: "agentMessageChunk", text: `mock echoed: ${text}` },
+      },
+    };
+  }
+
   // JSON-RPC notification — must be session/update
   if (
     json.method !== "session/update" ||

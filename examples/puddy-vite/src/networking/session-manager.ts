@@ -13,6 +13,15 @@ import {
 
 let _nextMsgId = 0;
 let _nextUserMsgId = 0;
+let _nextTerminalId = 0;
+
+type TerminalStatus = "starting" | "connected" | "closed" | "failed";
+
+interface TerminalHandle {
+  sessionId: string;
+  processId?: string;
+  socket?: WebSocket;
+}
 
 export class SessionManager {
   private client: SandboxAgentClient;
@@ -22,6 +31,9 @@ export class SessionManager {
   private streamingThought: Map<string, string> = new Map();
   // Track session IDs and their current status for singleton replacement
   private sessionStatuses: Map<string, string> = new Map();
+  private terminalStatuses: Map<string, TerminalStatus> = new Map();
+  private terminalOutputs: Map<string, string> = new Map();
+  private terminalHandles: Map<string, TerminalHandle> = new Map();
 
   isConnected = false;
   connectionError?: string;
@@ -139,6 +151,51 @@ export class SessionManager {
         this.clearStreaming(sessionId);
       },
     );
+  }
+
+  // --- Terminal Lifecycle ---
+
+  createTerminalSession(sessionId: string, cwd: string = "/"): string {
+    if (!sessionId) {
+      throw new SandboxAgentError("NO_SESSION", "Select a session before starting a terminal");
+    }
+
+    const terminalId = `term-${Date.now()}-${_nextTerminalId++}`;
+    this.terminalHandles.set(terminalId, { sessionId });
+    this.terminalStatuses.set(terminalId, "starting");
+    this.terminalOutputs.set(terminalId, "");
+
+    transaction(() => {
+      remember("terminal", terminalId, "session", sessionId);
+      replace("terminal", terminalId, "cwd", cwd);
+      replace("terminal", terminalId, "status", "starting");
+      replace("terminal", terminalId, "output", "");
+    });
+
+    this.connectTerminalSession(terminalId, cwd);
+
+    return terminalId;
+  }
+
+  async sendTerminalInput(terminalId: string, input: string): Promise<void> {
+    const handle = this.terminalHandles.get(terminalId);
+    if (!handle?.processId) {
+      throw new SandboxAgentError("NO_TERMINAL_PROCESS", "Terminal process is not ready");
+    }
+
+    try {
+      await this.client.sendProcessInput(handle.processId, input);
+    } catch (err: any) {
+      this.setTerminalStatus(terminalId, "failed");
+      replace("terminal", terminalId, "statusDetail", err.message ?? String(err));
+      throw err;
+    }
+  }
+
+  closeTerminalSession(terminalId: string): void {
+    const handle = this.terminalHandles.get(terminalId);
+    handle?.socket?.close();
+    this.setTerminalStatus(terminalId, "closed");
   }
 
   private handleEvent(sessionId: string, event: AgentEvent): void {
@@ -278,11 +335,23 @@ export class SessionManager {
     this.streamingText.delete(id);
     this.streamingThought.delete(id);
     this.sessionStatuses.delete(id);
+    const terminals = Array.from(this.terminalHandles.entries())
+      .filter(([, handle]) => handle.sessionId === id)
+      .map(([terminalId]) => terminalId);
 
     transaction(() => {
       forget("plan", id, _, _, _, _);
       forget("command", id, _, _);
+      for (const terminalId of terminals) {
+        this.forgetTerminalFacts(terminalId);
+      }
     });
+    for (const terminalId of terminals) {
+      this.terminalHandles.get(terminalId)?.socket?.close();
+      this.terminalHandles.delete(terminalId);
+      this.terminalStatuses.delete(terminalId);
+      this.terminalOutputs.delete(terminalId);
+    }
 
     try {
       await this.client.destroySession(id);
@@ -292,6 +361,84 @@ export class SessionManager {
   }
 
   // --- Helpers ---
+
+  private async connectTerminalSession(
+    terminalId: string,
+    cwd: string,
+  ): Promise<void> {
+    try {
+      const process = await this.client.createTerminalProcess(cwd);
+      replace("terminal", terminalId, "processId", process.id);
+
+      const handle = this.terminalHandles.get(terminalId);
+      if (!handle) return;
+      handle.processId = process.id;
+
+      const socket = this.client.openTerminalSocket(process.id);
+      if (!socket) {
+        this.setTerminalStatus(terminalId, "connected");
+        return;
+      }
+
+      handle.socket = socket;
+      socket.onopen = () => this.setTerminalStatus(terminalId, "connected");
+      socket.onmessage = (event) => {
+        this.appendTerminalOutput(terminalId, this.decodeTerminalData(event.data));
+      };
+      socket.onerror = () => {
+        this.setTerminalStatus(terminalId, "failed");
+        replace("terminal", terminalId, "statusDetail", "Terminal socket error");
+      };
+      socket.onclose = () => {
+        if (this.terminalStatuses.get(terminalId) !== "failed") {
+          this.setTerminalStatus(terminalId, "closed");
+        }
+      };
+    } catch (err: any) {
+      this.setTerminalStatus(terminalId, "failed");
+      replace("terminal", terminalId, "statusDetail", err.message ?? String(err));
+    }
+  }
+
+  private setTerminalStatus(terminalId: string, status: TerminalStatus): void {
+    const old = this.terminalStatuses.get(terminalId);
+    if (old === status) return;
+    replace("terminal", terminalId, "status", status);
+    this.terminalStatuses.set(terminalId, status);
+  }
+
+  private appendTerminalOutput(terminalId: string, chunk: string): void {
+    if (!chunk) return;
+    const output = (this.terminalOutputs.get(terminalId) ?? "") + chunk;
+    this.terminalOutputs.set(terminalId, output);
+    replace("terminal", terminalId, "output", output);
+  }
+
+  private decodeTerminalData(data: MessageEvent["data"]): string {
+    if (typeof data === "string") {
+      try {
+        const frame = JSON.parse(data);
+        if (frame && typeof frame.type === "string") return "";
+      } catch {
+        // Plain text frames are terminal output.
+      }
+      return data;
+    }
+    if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
+    if (ArrayBuffer.isView(data)) {
+      return new TextDecoder().decode(data);
+    }
+    return String(data ?? "");
+  }
+
+  private forgetTerminalFacts(terminalId: string): void {
+    forget("terminal", terminalId, "session", _);
+    forget("terminal", terminalId, "processId", _);
+    forget("terminal", terminalId, "cwd", _);
+    forget("terminal", terminalId, "status", _);
+    forget("terminal", terminalId, "statusDetail", _);
+    forget("terminal", terminalId, "output", _);
+  }
 
   private setStatus(sessionId: string, status: string): void {
     const old = this.sessionStatuses.get(sessionId);

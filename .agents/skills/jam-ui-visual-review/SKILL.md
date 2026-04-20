@@ -50,9 +50,10 @@ corepack pnpm exec agent-browser close
 ```
 
 Record the log path and any screenshot path in the ticket or PR notes when used as validation evidence.
-For branch PRs that touch `@jam/ui` appearance or interaction, upload or attach
-the screenshot/video in the PR description so reviewers can inspect the rendered
-component state directly.
+For branch PRs that touch `@jam/ui` appearance or interaction, upload captured
+screenshot/video through GitHub-hosted media tooling when available and link to
+that uploaded asset. Do not commit PR media files to the branch or embed
+committed media in the PR body.
 
 ## Native Catalog
 

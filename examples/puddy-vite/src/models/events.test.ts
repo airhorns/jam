@@ -158,6 +158,34 @@ describe("parseACPMessage", () => {
     expect(result.type).toBe("skip");
   });
 
+  it("parses sandbox-agent mock echo prompts", () => {
+    const idx = { value: 0 };
+    const result = parseACPMessage(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "mock/echo",
+        params: {
+          message: {
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/prompt",
+            params: {
+              prompt: [{ type: "text", text: "hello from e2e" }],
+            },
+          },
+        },
+      }),
+      idx,
+    );
+
+    expect(result.type).toBe("event");
+    if (result.type !== "event") return;
+    expect(result.event.payload.type).toBe("agentMessageChunk");
+    if (result.event.payload.type !== "agentMessageChunk") return;
+    expect(result.event.payload.text).toBe("mock echoed: hello from e2e");
+    expect(idx.value).toBe(1);
+  });
+
   it("skips JSON-RPC error", () => {
     const idx = { value: 0 };
     const result = parseACPMessage(

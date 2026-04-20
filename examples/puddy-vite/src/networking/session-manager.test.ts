@@ -1,10 +1,49 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { SessionManager } from "./session-manager";
-import { db } from "@jam/core";
+import { db, $ } from "@jam/core";
+import type { SandboxAgentClient } from "./client";
 
 beforeEach(() => {
   db.clear();
 });
+
+class FakeTerminalSocket {
+  onopen: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  close = vi.fn(() => this.onclose?.({} as CloseEvent));
+
+  open() {
+    this.onopen?.({} as Event);
+  }
+
+  message(data: string | ArrayBuffer) {
+    this.onmessage?.({ data } as MessageEvent);
+  }
+}
+
+function fakeTerminalClient(socket = new FakeTerminalSocket()) {
+  return {
+    createTerminalProcess: vi.fn().mockResolvedValue({
+      id: "proc-1",
+      command: "bash",
+      args: [],
+      cwd: "/workspace",
+      interactive: true,
+      tty: true,
+      status: "running",
+      pid: 123,
+    }),
+    openTerminalSocket: vi.fn(() => socket as unknown as WebSocket),
+    sendProcessInput: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+async function flushAsyncWork() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 describe("SessionManager readiness", () => {
   it("hasReadyAgent is false with no agents", () => {
@@ -71,5 +110,70 @@ describe("SessionManager readiness", () => {
   it("hostname comes from client", () => {
     const mgr = new SessionManager();
     expect(mgr.hostname).toBe("localhost");
+  });
+});
+
+describe("SessionManager terminal sessions", () => {
+  it("creates terminal facts and connects the process socket", async () => {
+    const socket = new FakeTerminalSocket();
+    const client = fakeTerminalClient(socket);
+    const mgr = new SessionManager(client as unknown as SandboxAgentClient);
+
+    const terminalId = mgr.createTerminalSession("s1", "/workspace");
+
+    expect(
+      db.query(["terminal", terminalId, "session", "s1"] as any),
+    ).toHaveLength(1);
+    expect(
+      db.query(["terminal", terminalId, "cwd", "/workspace"] as any),
+    ).toHaveLength(1);
+    expect(
+      db.query(["terminal", terminalId, "status", "starting"] as any),
+    ).toHaveLength(1);
+
+    await flushAsyncWork();
+    expect(client.createTerminalProcess).toHaveBeenCalledWith("/workspace");
+    expect(client.openTerminalSocket).toHaveBeenCalledWith("proc-1");
+    expect(
+      db.query(["terminal", terminalId, "processId", "proc-1"] as any),
+    ).toHaveLength(1);
+
+    socket.open();
+    expect(
+      db.query(["terminal", terminalId, "status", "connected"] as any),
+    ).toHaveLength(1);
+
+    socket.message("hello");
+    socket.message(" world");
+    expect(
+      db.query(["terminal", terminalId, "output", $.output] as any),
+    ).toContainEqual(expect.objectContaining({ output: "hello world" }));
+  });
+
+  it("sends terminal input to the backing process", async () => {
+    const client = fakeTerminalClient();
+    const mgr = new SessionManager(client as unknown as SandboxAgentClient);
+    const terminalId = mgr.createTerminalSession("s1");
+
+    await flushAsyncWork();
+    await mgr.sendTerminalInput(terminalId, "pwd\n");
+
+    expect(client.sendProcessInput).toHaveBeenCalledWith("proc-1", "pwd\n");
+  });
+
+  it("marks terminal creation failures in facts", async () => {
+    const client = fakeTerminalClient();
+    client.createTerminalProcess.mockRejectedValueOnce(new Error("no pty"));
+    const mgr = new SessionManager(client as unknown as SandboxAgentClient);
+
+    const terminalId = mgr.createTerminalSession("s1");
+    await flushAsyncWork();
+
+    expect(
+      db.query(["terminal", terminalId, "status", "failed"] as any),
+    ).toHaveLength(1);
+    expect(
+      db.query(["terminal", terminalId, "statusDetail", $.detail] as any),
+    ).toContainEqual(expect.objectContaining({ detail: "no pty" }));
   });
 });

@@ -18,6 +18,16 @@ export type VNode = {
   children: VChild[];
 };
 
+export type ElementRef<T extends HTMLElement = HTMLElement> = (
+  element: T | null,
+) => void;
+
+export type ImperativeHostProps<T extends HTMLElement = HTMLElement> = {
+  as?: string;
+  onElement: ElementRef<T>;
+  children?: never;
+} & Record<string, unknown>;
+
 export type VChild =
   | VNode
   | string
@@ -50,6 +60,25 @@ export function Fragment(
     props: {},
     children: children.flat(10) as VChild[],
   };
+}
+
+/**
+ * Render a DOM element whose subtree is owned by imperative code.
+ *
+ * The renderer creates and updates the host element, then calls onElement when
+ * the real DOM element is available and again with null when it is released.
+ * Children are intentionally not reconciled so libraries like terminal
+ * emulators can own the host subtree.
+ */
+export function ImperativeHost<T extends HTMLElement = HTMLElement>(
+  props: ImperativeHostProps<T>,
+): VNode {
+  const { as = "div", onElement, children: _children, ...rest } = props;
+  return h(as, {
+    ...rest,
+    __jamElementRef: onElement,
+    __jamChildMode: "imperative",
+  });
 }
 
 /** Flatten VChild arrays, fragments, and components into a flat list. */
@@ -181,6 +210,18 @@ export function emitVdom(
   // Props
   for (const [key, value] of Object.entries(vnode.props)) {
     if (key === "key") continue;
+    if (key === "__jamElementRef") {
+      if (typeof value === "function") {
+        const refKey = `${elId}:element-ref`;
+        db.setRef(refKey, value);
+        db.assert(elId, "elementRef", refKey);
+      }
+      continue;
+    }
+    if (key === "__jamChildMode") {
+      if (value === "imperative") db.assert(elId, "childMode", "imperative");
+      continue;
+    }
     // Skip internal native-mode props
     if (
       key === "__nativeStyles" ||
