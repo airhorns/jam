@@ -42,7 +42,7 @@ export function MetaAgentPanel(props: {
   const status = statusFor(agent.id);
   const messages = messagesFor(agent.id);
   const inputId = `${agent.id}-prompt`;
-  const files = when(["metaAgentFile", $.path, "size", $.size]);
+  const files = when(["jamProgramFile", $.path, "size", $.size]);
 
   return (
     <YStack

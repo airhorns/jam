@@ -122,10 +122,17 @@ test.describe("Meta agent", () => {
       return {
         fileWritten: facts.some(
           (fact) =>
-            fact[0] === "metaAgentFile" &&
+            fact[0] === "jamProgramFile" &&
             fact[1] === "/programs/meta-agent-demo.js" &&
             fact[2] === "size" &&
             Number(fact[3]) > 0,
+        ),
+        programFileLoaded: facts.some(
+          (fact) =>
+            fact[0] === "jamProgramFile" &&
+            fact[1] === "/programs/meta-agent-demo.js" &&
+            fact[2] === "programId" &&
+            fact[3] === "meta-agent-demo",
         ),
         programLoaded: facts.some(
           (fact) =>
@@ -144,6 +151,7 @@ test.describe("Meta agent", () => {
 
     expect(proof).toEqual({
       fileWritten: true,
+      programFileLoaded: true,
       programLoaded: true,
       promptCaptured: true,
     });

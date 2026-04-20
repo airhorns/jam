@@ -10,3 +10,15 @@ export { persist } from "./persist";
 export type { PersistOptions } from "./persist";
 export { createProgramAPI, listPrograms, loadProgramSource, program, registerProgram, removeProgram } from "./programs";
 export type { ProgramAPI, ProgramRunner } from "./programs";
+export {
+  JAM_PROGRAM_FILE_FACT,
+  createJamProgramFileSystem,
+  deleteJamProgramFile,
+  listJamProgramFiles,
+  loadJamProgramFile,
+  normalizeJamProgramPath,
+  programIdFromPath,
+  readJamProgramFile,
+  writeJamProgramFile,
+} from "./program-files";
+export type { JamProgramFileEntry, JamProgramFileSystem, JamProgramPath, LoadedJamProgramFile } from "./program-files";

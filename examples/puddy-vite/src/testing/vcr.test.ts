@@ -290,6 +290,7 @@ describe("VCR: recorded provider meta-agent plan", () => {
       expect(agent.fs.readFile(programPath)).toEqual(
         expect.objectContaining({ path: programPath }),
       );
+      expect(db.query(["jamProgramFile", programPath, "programId", programId] as any)).toHaveLength(1);
       expect(db.query([programId, "status", "loaded"] as any)).toHaveLength(1);
       expect(db.query([programId, "source", "recorded-provider"] as any)).toHaveLength(1);
     } finally {

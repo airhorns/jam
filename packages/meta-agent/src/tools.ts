@@ -1,4 +1,4 @@
-import { db, listPrograms, loadProgramSource, select } from "@jam/core";
+import { db, listPrograms, programIdFromPath, select } from "@jam/core";
 import type { MetaAgentTool, MetaAgentToolContext, MetaAgentToolResult } from "./types";
 
 interface InspectFactsInput {
@@ -125,11 +125,17 @@ export function createLoadProgramTool(): MetaAgentTool<FilePathInput & { id?: st
         });
       }
 
-      const id = input.id ?? input.path.replace(/^\//, "").replace(/[^\w/-]/g, "-");
-      loadProgramSource(id, entry.content);
+      const id = input.id ?? programIdFromPath(entry.path);
+      const loaded = context.fs.loadProgramFile(entry.path, id);
+      if (!loaded) {
+        return summarizeResult("Program load failed", {
+          path: input.path,
+          error: "File not found",
+        });
+      }
       return summarizeResult("Loaded program", {
         id,
-        path: entry.path,
+        path: loaded.entry.path,
       });
     },
   };

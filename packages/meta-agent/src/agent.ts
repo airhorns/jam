@@ -1,10 +1,9 @@
-import { remember, replace, transaction } from "@jam/core";
+import { remember, replace, transaction, type JamProgramFileSystem } from "@jam/core";
 import {
   createDefaultMetaAgentTools,
 } from "./tools";
 import { createMemoryJamFileSystem } from "./filesystem";
 import type {
-  JamFileSystem,
   MetaAgent,
   MetaAgentDriver,
   MetaAgentDriverInput,
@@ -98,7 +97,7 @@ function publishAgent(agentId: string): void {
 
 export function createMetaAgent(options: MetaAgentOptions = {}): MetaAgent {
   const id = options.id ?? makeAgentId();
-  const fs: JamFileSystem = options.fs ?? createMemoryJamFileSystem();
+  const fs: JamProgramFileSystem = options.fs ?? createMemoryJamFileSystem();
   const tools = [...createDefaultMetaAgentTools(), ...(options.tools ?? [])];
   const driver = options.driver ?? createHeuristicMetaAgentDriver();
   const toolMap = new Map<string, MetaAgentTool>(tools.map((tool) => [tool.name, tool]));

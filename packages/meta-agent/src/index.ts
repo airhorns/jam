@@ -12,10 +12,12 @@ export {
 } from "./tools";
 export { MetaAgentPanel } from "./ui";
 export type {
-  FactSnapshot,
-  JamFileEntry,
-  JamFileSystem,
+  JamProgramFileEntry as JamFileEntry,
+  JamProgramFileSystem as JamFileSystem,
   JamProgramPath,
+} from "@jam/core";
+export type {
+  FactSnapshot,
   MetaAgent,
   MetaAgentDriver,
   MetaAgentDriverInput,

@@ -1,19 +1,4 @@
-import type { Term } from "@jam/core";
-
-export type JamProgramPath = `/${string}`;
-
-export interface JamFileEntry {
-  path: JamProgramPath;
-  content: string;
-  updatedAt: number;
-}
-
-export interface JamFileSystem {
-  listFiles(): JamFileEntry[];
-  readFile(path: JamProgramPath): JamFileEntry | undefined;
-  writeFile(path: JamProgramPath, content: string): JamFileEntry;
-  deleteFile(path: JamProgramPath): boolean;
-}
+import type { JamProgramFileSystem, Term } from "@jam/core";
 
 export interface MetaAgentToolResult {
   title: string;
@@ -23,7 +8,7 @@ export interface MetaAgentToolResult {
 
 export interface MetaAgentToolContext {
   agentId: string;
-  fs: JamFileSystem;
+  fs: JamProgramFileSystem;
 }
 
 export interface MetaAgentTool<Input = unknown> {
@@ -54,14 +39,14 @@ export interface MetaAgentDriver {
 
 export interface MetaAgentOptions {
   id?: string;
-  fs?: JamFileSystem;
+  fs?: JamProgramFileSystem;
   tools?: MetaAgentTool[];
   driver?: MetaAgentDriver;
 }
 
 export interface MetaAgent {
   id: string;
-  fs: JamFileSystem;
+  fs: JamProgramFileSystem;
   tools: MetaAgentTool[];
   runPrompt(prompt: string): Promise<void>;
   addTool(tool: MetaAgentTool): void;

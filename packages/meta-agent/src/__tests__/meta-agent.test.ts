@@ -40,12 +40,12 @@ describe("@jam/meta-agent", () => {
 
     fs.writeFile("/programs/hello.js", "claim('hello', 'status', 'loaded')");
 
-    expect(when(["metaAgentFile", "/programs/hello.js", "size", $.size])).toEqual([
+    expect(when(["jamProgramFile", "/programs/hello.js", "size", $.size])).toEqual([
       { size: "claim('hello', 'status', 'loaded')".length },
     ]);
 
     fs.deleteFile("/programs/hello.js");
 
-    expect(when(["metaAgentFile", "/programs/hello.js", "size", $.size])).toEqual([]);
+    expect(when(["jamProgramFile", "/programs/hello.js", "size", $.size])).toEqual([]);
   });
 });

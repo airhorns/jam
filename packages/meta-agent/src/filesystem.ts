@@ -1,62 +1,17 @@
-import { forget, remember, transaction, _ } from "@jam/core";
-import type { JamFileEntry, JamFileSystem, JamProgramPath } from "./types";
+import {
+  createJamProgramFileSystem,
+  normalizeJamProgramPath,
+  type JamProgramFileSystem,
+} from "@jam/core";
 
-function normalizePath(path: string): JamProgramPath {
-  if (!path.startsWith("/")) return `/${path}`;
-  return path as JamProgramPath;
-}
-
-function publishFileFact(entry: JamFileEntry): void {
-  transaction(() => {
-    forget("metaAgentFile", entry.path, _, _);
-    remember("metaAgentFile", entry.path, "updatedAt", entry.updatedAt);
-    remember("metaAgentFile", entry.path, "size", entry.content.length);
-  });
-}
-
-function forgetFileFact(path: JamProgramPath): void {
-  forget("metaAgentFile", path, _, _);
-}
-
-export function createMemoryJamFileSystem(initialFiles: Record<string, string> = {}): JamFileSystem {
-  const files = new Map<JamProgramPath, JamFileEntry>();
-
-  const fs: JamFileSystem = {
-    listFiles() {
-      return Array.from(files.values()).sort((a, b) => a.path.localeCompare(b.path));
-    },
-    readFile(path) {
-      return files.get(normalizePath(path));
-    },
-    writeFile(path, content) {
-      const entry = {
-        path: normalizePath(path),
-        content,
-        updatedAt: Date.now(),
-      };
-      files.set(entry.path, entry);
-      publishFileFact(entry);
-      return entry;
-    },
-    deleteFile(path) {
-      const normalized = normalizePath(path);
-      const deleted = files.delete(normalized);
-      if (deleted) forgetFileFact(normalized);
-      return deleted;
-    },
-  };
-
-  for (const [path, content] of Object.entries(initialFiles)) {
-    fs.writeFile(normalizePath(path), content);
-  }
-
-  return fs;
+export function createMemoryJamFileSystem(initialFiles: Record<string, string> = {}): JamProgramFileSystem {
+  return createJamProgramFileSystem(initialFiles);
 }
 
 export function createLocalStorageJamFileSystem(
   namespace: string,
   initialFiles: Record<string, string> = {},
-): JamFileSystem {
+): JamProgramFileSystem {
   const storageKey = `jam:meta-agent:${namespace}:files`;
   const memory = createMemoryJamFileSystem();
 
@@ -66,7 +21,7 @@ export function createLocalStorageJamFileSystem(
     if (!raw) return;
     const parsed = JSON.parse(raw) as Record<string, string>;
     for (const [path, content] of Object.entries(parsed)) {
-      memory.writeFile(normalizePath(path), content);
+      memory.writeFile(normalizeJamProgramPath(path), content);
     }
   }
 
@@ -80,24 +35,25 @@ export function createLocalStorageJamFileSystem(
 
   load();
   for (const [path, content] of Object.entries(initialFiles)) {
-    if (!memory.readFile(normalizePath(path))) {
-      memory.writeFile(normalizePath(path), content);
+    if (!memory.readFile(normalizeJamProgramPath(path))) {
+      memory.writeFile(normalizeJamProgramPath(path), content);
     }
   }
   save();
 
   return {
     listFiles: () => memory.listFiles(),
-    readFile: (path) => memory.readFile(normalizePath(path)),
+    readFile: (path) => memory.readFile(normalizeJamProgramPath(path)),
     writeFile(path, content) {
-      const entry = memory.writeFile(normalizePath(path), content);
+      const entry = memory.writeFile(normalizeJamProgramPath(path), content);
       save();
       return entry;
     },
     deleteFile(path) {
-      const deleted = memory.deleteFile(normalizePath(path));
+      const deleted = memory.deleteFile(normalizeJamProgramPath(path));
       save();
       return deleted;
     },
+    loadProgramFile: (path, id) => memory.loadProgramFile(normalizeJamProgramPath(path), id),
   };
 }
