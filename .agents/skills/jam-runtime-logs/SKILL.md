@@ -1,7 +1,7 @@
 ---
 name: jam-runtime-logs
 description: Start, monitor, and hand off logs for Jam dev servers or backend-like processes. Use whenever a long-running process is needed for validation or debugging.
-allowed-tools: Bash(mkdir:*), Bash(corepack pnpm:*), Bash(tail:*), Bash(ps:*), Bash(kill:*), Bash(lsof:*), Bash(cat:*), Bash(rg:*)
+allowed-tools: Bash(mkdir:*), Bash(pnpm:*), Bash(tail:*), Bash(ps:*), Bash(kill:*), Bash(lsof:*), Bash(cat:*), Bash(rg:*)
 ---
 
 # Jam Runtime Logs
@@ -13,14 +13,14 @@ inspect failures after the fact. Use the ignored `scratch/` directory.
 
 ```bash
 mkdir -p scratch/logs
-corepack pnpm --dir examples/folk-todo dev 2>&1 | tee scratch/logs/folk-todo.log
+pnpm --dir examples/folk-todo dev 2>&1 | tee scratch/logs/folk-todo.log
 ```
 
 ## Background Process
 
 ```bash
 mkdir -p scratch/logs
-nohup corepack pnpm --dir examples/folk-todo dev > scratch/logs/folk-todo.log 2>&1 &
+nohup pnpm --dir examples/folk-todo dev > scratch/logs/folk-todo.log 2>&1 &
 echo $! > scratch/logs/folk-todo.pid
 tail -f scratch/logs/folk-todo.log
 ```

@@ -1,12 +1,12 @@
 ---
 name: agent-browser
 description: Browser automation CLI for AI agents. Use when the user needs to interact with websites, including navigating pages, filling forms, clicking buttons, taking screenshots, extracting data, testing web apps, or automating any browser task. Triggers include requests to "open a website", "fill out a form", "click a button", "take a screenshot", "scrape data from a page", "test this web app", "login to a site", "automate browser actions", or any task requiring programmatic web interaction.
-allowed-tools: Bash(corepack pnpm exec agent-browser:*), Bash(npx agent-browser:*), Bash(agent-browser:*)
+allowed-tools: Bash(pnpm exec agent-browser:*), Bash(npx agent-browser:*), Bash(agent-browser:*)
 ---
 
 # Browser Automation with agent-browser
 
-The CLI uses Chrome/Chromium via CDP directly. In this repo, prefer the pinned dependency with `corepack pnpm exec agent-browser ...`. Outside this repo, install via `npm i -g agent-browser`, `brew install agent-browser`, or `cargo install agent-browser`. Run `agent-browser install` to download Chrome. Existing Chrome, Brave, Playwright, and Puppeteer installations are detected automatically. Run `agent-browser upgrade` to update to the latest version.
+The CLI uses Chrome/Chromium via CDP directly. In this repo, prefer the pinned dependency with `pnpm exec agent-browser ...`. Outside this repo, install via `npm i -g agent-browser`, `brew install agent-browser`, or `cargo install agent-browser`. Run `agent-browser install` to download Chrome. Existing Chrome, Brave, Playwright, and Puppeteer installations are detected automatically. Run `agent-browser upgrade` to update to the latest version.
 
 ## Core Workflow
 
@@ -29,22 +29,26 @@ agent-browser wait 2000
 agent-browser snapshot -i  # Check result
 ```
 
-## Command Chaining
+## Running Multiple Commands
 
-Commands can be chained with `&&` in a single shell invocation. The browser persists between commands via a background daemon, so chaining is safe and more efficient than separate calls.
+Prefer `agent-browser batch` for two or more sequential browser commands. Batch
+executes commands in order through the same session and keeps the shell command
+readable.
 
 ```bash
-# Chain open + snapshot in one call (open already waits for page load)
-agent-browser open https://example.com && agent-browser snapshot -i
+# Open + snapshot in one call (open already waits for page load)
+agent-browser batch "open https://example.com" "snapshot -i"
 
-# Chain multiple interactions
-agent-browser fill @e1 "user@example.com" && agent-browser fill @e2 "password123" && agent-browser click @e3
+# Multiple interactions
+agent-browser batch "fill @e1 user@example.com" "fill @e2 password123" "click @e3"
 
 # Navigate and capture
-agent-browser open https://example.com && agent-browser screenshot
+agent-browser batch "open https://example.com" "screenshot"
 ```
 
-**When to chain:** Use `&&` when you don't need to read the output of an intermediate command before proceeding (e.g., open + wait + screenshot). Run commands separately when you need to parse the output first (e.g., snapshot to discover refs, then interact using those refs).
+Run commands separately when you need to read an intermediate result before
+choosing the next action, for example taking `snapshot -i` to discover refs
+before deciding which element to click.
 
 ## Handling Authentication
 
