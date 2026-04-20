@@ -1,17 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { db } from "@jam/core";
+import { $, db, replace, when } from "@jam/core";
 import { emitVdom } from "@jam/core/jsx";
 import { h } from "@jam/core/jsx";
 import {
   Button,
   Card,
   Checkbox,
+  Circle,
   H1,
   Input,
+  Label,
+  Paragraph,
   Progress,
   RadioGroup,
   ScrollView,
+  Separator,
   Slider,
+  Square,
   Switch,
   Tabs,
   Text,
@@ -25,6 +30,49 @@ import { setNativeMode } from "../native-mode";
 import { createTokens } from "../tokens";
 import { createThemes, setTheme } from "../themes";
 import { runInAction } from "mobx";
+import {
+  catalogMountSource,
+  catalogSetupSource,
+} from "../../../../examples/ui-catalog-native/src/catalog-program";
+
+const nativeCatalogApi = {
+  $,
+  Button,
+  Card,
+  Checkbox,
+  Circle,
+  H1,
+  Input,
+  Label,
+  Paragraph,
+  Progress,
+  RadioGroup,
+  ScrollView,
+  Separator,
+  Slider,
+  Square,
+  Switch,
+  Tabs,
+  Text,
+  TextArea,
+  XStack,
+  YStack,
+  createJamUI,
+  h,
+  replace,
+  when,
+};
+
+function runNativeCatalogSetup(source: string) {
+  new Function("jam", `with (jam) { ${source} }`)(nativeCatalogApi);
+}
+
+function runNativeCatalogMount(source: string) {
+  const lines = source.trim().split("\n");
+  const lastLine = lines.pop();
+  const setup = lines.join("\n");
+  return new Function("jam", `with (jam) { ${setup}\n return (${lastLine}); }`)(nativeCatalogApi);
+}
 
 describe("native mode", () => {
   beforeEach(() => {
@@ -198,71 +246,12 @@ describe("native mode", () => {
     expect(childFact).toBeDefined();
   });
 
-  it("emits catalog-level component tags and resolved styles for Swift native rendering", () => {
-    createJamUI({
-      tokens: {
-        size: { "2": 16, "3": 24, "4": 32 },
-        space: { "2": 8, "3": 12, "4": 16 },
-        radius: { "2": 8, "3": 12 },
-        color: {
-          surface: "#ffffff",
-          text: "#172033",
-          teal: "#007f73",
-          border: "#d7dee8",
-        },
-        zIndex: { "1": 10 },
-      },
-      themes: {
-        light: {
-          background: "#f8fafc",
-          backgroundHover: "#edf2f7",
-          backgroundPress: "#e2e8f0",
-          backgroundFocus: "#2f6fcb",
-          borderColor: "#d7dee8",
-          borderColorHover: "#95a3b8",
-          borderColorFocus: "#2f6fcb",
-          color: "#172033",
-          outlineColor: "#2f6fcb",
-        },
-      },
-      defaultTheme: "light",
-    });
+  it("executes the native catalog source and emits the Swift rendering contract", () => {
     setNativeMode(true);
 
-    const vnode = h(ScrollView, { id: "catalog-root", flex: 1, backgroundColor: "$background" },
-      h(YStack, { gap: "$space.4", padding: "$space.4" },
-        h(Card, { id: "foundation-card", backgroundColor: "$color.surface", borderColor: "$color.border" },
-          h(H1, { color: "$color.text" }, "@jam/ui native contract"),
-          h(Text, { color: "$color.teal" }, "Catalog proof"),
-        ),
-        h(XStack, { gap: "$space.3", alignItems: "center" },
-          h(Button, { id: "primary-button", onClick: () => undefined }, h(Text, {}, "Primary")),
-          h(Input, { id: "name-input", placeholder: "Ada Lovelace" }),
-          h(TextArea, { id: "notes-input", placeholder: "Native notes" }),
-        ),
-        h(XStack, { gap: "$space.3", alignItems: "center" },
-          h(Checkbox, { id: "accepted", checked: true }, h(Checkbox.Indicator, {}, h(Text, {}, "ok"))),
-          h(Switch, { id: "notifications", checked: true }),
-          h(Slider, { id: "progress-slider", value: [82], min: 0, max: 100 }),
-        ),
-        h(RadioGroup, { value: "native", orientation: "horizontal" },
-          h(RadioGroup.Item, { id: "radio-web", value: "web", checked: false }),
-          h(RadioGroup.Item, { id: "radio-native", value: "native", checked: true },
-            h(RadioGroup.Indicator, {}),
-          ),
-        ),
-        h(Progress, { id: "progress", value: 82, max: 100 },
-          h(Progress.Indicator, { width: "82%" }),
-        ),
-        h(Tabs, { value: "overview" },
-          h(Tabs.List, {},
-            h(Tabs.Tab, { id: "tab-overview" }, h(Text, {}, "Overview")),
-            h(Tabs.Tab, { id: "tab-native" }, h(Text, {}, "Native")),
-          ),
-          h(Tabs.Content, {}, h(Text, {}, "Native mode emits style facts.")),
-        ),
-      ),
-    );
+    // Execute through the same `with(jam)` bridge shape used by JamNative.
+    runNativeCatalogSetup(catalogSetupSource);
+    const vnode = runNativeCatalogMount(catalogMountSource);
 
     runInAction(() => {
       db.emitCollector = new Set();
@@ -302,12 +291,17 @@ describe("native mode", () => {
     expect(buttonFacts).toContainEqual(["primary-button", "handler", "click", "primary-button:handler:click"]);
 
     const sliderProps = facts.filter(f => f[0] === "progress-slider" && f[1] === "prop");
-    expect(sliderProps).toContainEqual(["progress-slider", "prop", "aria-valuenow", "82"]);
+    expect(sliderProps).toContainEqual(["progress-slider", "prop", "aria-valuenow", "48"]);
     expect(sliderProps).toContainEqual(["progress-slider", "prop", "aria-valuemax", "100"]);
 
     const progressProps = facts.filter(f => f[0] === "progress" && f[1] === "prop");
-    expect(progressProps).toContainEqual(["progress", "prop", "aria-valuenow", "82"]);
+    expect(progressProps).toContainEqual(["progress", "prop", "aria-valuenow", "48"]);
     expect(progressProps).toContainEqual(["progress", "prop", "role", "progressbar"]);
+
+    const notificationHandler = db.getRef("notifications:handler:click") as (() => void) | undefined;
+    expect(notificationHandler).toBeDefined();
+    notificationHandler?.();
+    expect(when(["catalog", "notifications", $.value])[0]?.value).toBe(true);
 
     const classFacts = facts.filter(f => f[1] === "class");
     expect(classFacts).toHaveLength(0);

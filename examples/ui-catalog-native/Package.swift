@@ -13,7 +13,8 @@ let package = Package(
             dependencies: [
                 .product(name: "JamNative", package: "native"),
             ],
-            path: "JamUICatalogNative"
+            path: "JamUICatalogNative",
+            resources: [.process("Resources")]
         ),
     ]
 )

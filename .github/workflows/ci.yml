@@ -66,6 +66,8 @@ jobs:
       - run: corepack pnpm install --frozen-lockfile
       - name: Build native JavaScript runtime bundle
         run: corepack pnpm --dir packages/native build
+      - name: Build Jam UI native catalog program
+        run: corepack pnpm --dir examples/ui-catalog-native build:program
       - name: Test JamNative Swift package
         run: swift test --package-path packages/native
       - name: Build counter native example

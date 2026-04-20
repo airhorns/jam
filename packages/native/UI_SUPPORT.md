@@ -25,22 +25,32 @@ style facts and native display names such as `Button`, `SwitchFrame`, and
   content but are not yet promoted into native modal, sheet, popover, toast, or
   tooltip presentation APIs.
 - The Linux development host used for this ticket does not have `swift`, `xcrun`,
-  or `mise` installed in `PATH`, so Swift package compile validation must run on
-  a macOS or Swift-enabled host.
+  or `mise` installed in `PATH`. A repeatable Linux Swift compiler probe works
+  through `docker run --rm -v \"$PWD\":/workspace -w /workspace swift:5.9-jammy
+  swift --version`, but `swift build --package-path packages/native` fails in
+  that image because the package imports Apple-only `JavaScriptCore` and
+  `SwiftUI` modules. Swift package/native rendering validation therefore runs on
+  macOS CI.
 
 ## Validation Entry Points
 
 ```bash
 corepack pnpm --dir packages/native build
+corepack pnpm --dir examples/ui-catalog-native build:program
 swift test --package-path packages/native
 swift build --package-path examples/counter-ios
 swift build --package-path examples/spatial-counter
 swift build --package-path examples/ui-catalog-native
 ```
 
-On Linux without Swift, run the JavaScript bundle build and web catalog build:
+On Linux, run the repeatable Swift compiler probe, record the expected
+Apple-module compile failure, then run the JavaScript bundle, generated native
+catalog program, and web catalog builds:
 
 ```bash
+docker run --rm -v "$PWD":/workspace -w /workspace swift:5.9-jammy swift --version
+docker run --rm -v "$PWD":/workspace -w /workspace swift:5.9-jammy swift build --package-path packages/native
+corepack pnpm --dir examples/ui-catalog-native build:program
 corepack pnpm --dir packages/ui exec vitest run src/__tests__/native-mode.test.ts
 corepack pnpm --dir packages/native build
 corepack pnpm --dir examples/ui-catalog build
