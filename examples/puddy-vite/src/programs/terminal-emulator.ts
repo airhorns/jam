@@ -1,4 +1,4 @@
-import { $, when, whenever } from "@jam/core";
+import { $, db, when, whenever } from "@jam/core";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { SessionManager } from "../networking/session-manager";
@@ -21,13 +21,14 @@ export function startTerminalEmulator(sessionManager: SessionManager) {
     const terminalFacts = when(
       ["terminal", $.terminalId, "status", $.status],
       ["terminal", $.terminalId, "output", $.output],
+      ["terminal", $.terminalId, "hostRef", $.hostRef],
     );
     const activeTerminalIds = new Set<string>();
 
-    for (const { terminalId, output } of terminalFacts) {
+    for (const { terminalId, output, hostRef } of terminalFacts) {
       const id = terminalId as string;
       activeTerminalIds.add(id);
-      const host = document.getElementById(`terminal-host-${id}`);
+      const host = db.getRef(hostRef as string) as HTMLElement | undefined;
       if (!host) continue;
 
       let entry = terminals.get(id);
@@ -86,6 +87,7 @@ export function startTerminalEmulator(sessionManager: SessionManager) {
       [
         ["terminal", $.terminalId, "status", $.status],
         ["terminal", $.terminalId, "output", $.output],
+        ["terminal", $.terminalId, "hostRef", $.hostRef],
       ],
       syncSoon,
     ),

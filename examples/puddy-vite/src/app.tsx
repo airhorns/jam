@@ -1,7 +1,7 @@
 // Puddy — reactive chat app built on Jam's fact database + @jam/ui design system.
 
-import { h } from "@jam/core/jsx";
-import { $, replace, when } from "@jam/core";
+import { h, ImperativeHost } from "@jam/core/jsx";
+import { $, _, db, forget, replace, when } from "@jam/core";
 import {
   createJamUI,
   XStack,
@@ -15,6 +15,18 @@ import {
 } from "@jam/ui";
 import "./app.css";
 import { SessionManager } from "./networking/session-manager";
+
+function setTerminalHost(terminalId: string, host: HTMLElement | null) {
+  const refKey = `terminal:${terminalId}:host`;
+  if (host) {
+    db.setRef(refKey, host);
+    replace("terminal", terminalId, "hostRef", refKey);
+    return;
+  }
+
+  db.deleteRef(refKey);
+  forget("terminal", terminalId, "hostRef", _);
+}
 
 // --- Design system setup ---
 createJamUI({
@@ -491,11 +503,11 @@ function TerminalPanel() {
         </Text>
       </XStack>
 
-      <YStack
+      <ImperativeHost
         id={`terminal-host-${activeTerminalId}`}
         class="terminal-output"
         data-testid="terminal-output"
-        data-jam-unmanaged-children="true"
+        onElement={(host) => setTerminalHost(activeTerminalId, host)}
       />
     </YStack>
   );

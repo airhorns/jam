@@ -58,9 +58,11 @@ corepack pnpm exec agent-browser errors
 corepack pnpm exec agent-browser screenshot scratch/browser-proof.png
 ```
 
-For branch PRs that change UI or app behavior, upload or attach the captured
-screenshot/video in the PR description. For low-level non-UI changes, state in
-the PR description that media was omitted and why there is no UI-visible effect.
+For branch PRs that change UI or app behavior, upload captured screenshot/video
+through GitHub-hosted media tooling when available and link to that uploaded
+asset. Do not commit PR media files to the branch or embed committed media in
+the PR body. For low-level non-UI changes, state in the PR description that
+media was omitted and why there is no UI-visible effect.
 
 Close browser sessions you opened:
 
