@@ -44,6 +44,16 @@ async function seedSession(page: Page, sessionId = "s1") {
   await replaceFacts(page, [["ui", "selectedSession", sessionId]]);
 }
 
+async function startBackendSession(page: Page) {
+  await gotoApp(page);
+  await expect(page.getByTestId("new-session")).toBeEnabled();
+  await page.getByTestId("new-session").click();
+  const sessionRow = page.locator(".session-row").filter({ hasText: "mock" }).last();
+  await expect(sessionRow).toBeVisible();
+  await sessionRow.click();
+  await expect(page.getByTestId("detail-title")).toContainText("Session:");
+}
+
 test.describe("App loads", () => {
   test("renders without error", async ({ page }) => {
     await gotoApp(page);
@@ -312,5 +322,40 @@ test.describe("Input", () => {
 
     await expect(page.getByText("Hello from the browser")).toBeVisible();
     await expect(input).toHaveValue("");
+  });
+});
+
+test.describe("Sandbox-agent server integration", () => {
+  test("sends a normal agent prompt and renders the streamed response", async ({
+    page,
+  }) => {
+    await startBackendSession(page);
+
+    const input = page.getByTestId("message-input");
+    await input.fill("hello from e2e");
+    await input.press("Enter");
+
+    await expect(page.getByText("hello from e2e", { exact: true })).toBeVisible();
+    await expect(page.getByText("mock echoed: hello from e2e")).toBeVisible();
+    await expect(input).toHaveValue("");
+  });
+
+  test("starts a terminal through sandbox-agent process endpoints", async ({
+    page,
+  }) => {
+    await startBackendSession(page);
+
+    await page.getByTestId("new-terminal").click();
+
+    await expect(page.getByTestId("terminal-panel")).toBeVisible();
+    await expect(page.getByTestId("terminal-tabs")).toContainText("connected");
+
+    const terminal = page.getByTestId("terminal-output");
+    await terminal.click();
+    await page.keyboard.type("pwd");
+    await page.keyboard.press("Enter");
+
+    await expect(terminal).toContainText("pwd");
+    await expect(terminal).toContainText("/");
   });
 });

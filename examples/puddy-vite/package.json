@@ -15,10 +15,12 @@
   },
   "dependencies": {
     "@jam/core": "workspace:*",
-    "@jam/ui": "workspace:*"
+    "@jam/ui": "workspace:*",
+    "@xterm/xterm": "^6.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
+    "@sandbox-agent/cli": "0.4.2",
     "msw": "^2.12.14",
     "oxlint": "^1.60.0",
     "tsx": "^4.8.1",

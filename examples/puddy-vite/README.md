@@ -6,6 +6,15 @@ Web-based prototype of the Puddy chat app, built on a simplified Jam fact databa
 
 ```bash
 corepack pnpm install
+corepack pnpm --dir examples/puddy-vite exec sandbox-agent install-agent mock --no-token
+```
+
+The Playwright e2e config installs the built-in `mock` agent and starts a real
+local sandbox-agent server automatically. For manual development, run the same
+server the app proxies to:
+
+```bash
+corepack pnpm --dir examples/puddy-vite exec sandbox-agent server --no-token --no-telemetry --host 127.0.0.1 --port 2468
 ```
 
 ## Development
