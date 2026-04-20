@@ -92,6 +92,64 @@ test.describe("App loads", () => {
   });
 });
 
+test.describe("Meta agent", () => {
+  test("meta-agent smoke: inspects Jam state and loads a browser program", async ({
+    page,
+  }) => {
+    await gotoApp(page);
+
+    const panel = page.getByTestId("meta-agent-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("/programs/puddy-meta-note.js");
+
+    await page
+      .getByTestId("meta-agent-input")
+      .fill("inspect facts and the UI, then write a Jam program");
+    await page.getByTestId("meta-agent-send").click();
+
+    await expect(panel).toContainText("Jam app summary");
+    await expect(panel).toContainText("Jam facts");
+    await expect(panel).toContainText("Jam VDOM");
+    await expect(panel).toContainText("Wrote program file");
+    await expect(panel).toContainText("Loaded program");
+    await expect(panel).toContainText("/programs/meta-agent-demo.js");
+    await expect(panel).toContainText(
+      "I inspected the Jam app from inside the browser",
+    );
+
+    const proof = await page.evaluate(() => {
+      const facts = Array.from((window as any).__db.facts.values()) as Fact[];
+      return {
+        fileWritten: facts.some(
+          (fact) =>
+            fact[0] === "metaAgentFile" &&
+            fact[1] === "/programs/meta-agent-demo.js" &&
+            fact[2] === "size" &&
+            Number(fact[3]) > 0,
+        ),
+        programLoaded: facts.some(
+          (fact) =>
+            fact[0] === "meta-agent-demo" &&
+            fact[1] === "status" &&
+            fact[2] === "loaded",
+        ),
+        promptCaptured: facts.some(
+          (fact) =>
+            fact[0] === "meta-agent-demo" &&
+            fact[1] === "prompt" &&
+            String(fact[2]).includes("inspect facts"),
+        ),
+      };
+    });
+
+    expect(proof).toEqual({
+      fileWritten: true,
+      programLoaded: true,
+      promptCaptured: true,
+    });
+  });
+});
+
 test.describe("Connection status", () => {
   test("shows Disconnected when not connected", async ({ page }) => {
     await gotoApp(page);
