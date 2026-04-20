@@ -1,7 +1,7 @@
 ---
 name: jam-ui-visual-review
 description: Launch and inspect the @jam/ui visual component catalog for on-demand agent review.
-allowed-tools: Bash(corepack pnpm:*), Bash(corepack pnpm exec agent-browser:*), Bash(agent-browser:*), Bash(mkdir:*), Bash(tee:*), Bash(tail:*), Bash(kill:*), Bash(cat:*)
+allowed-tools: Bash(pnpm:*), Bash(pnpm exec agent-browser:*), Bash(agent-browser:*), Bash(mkdir:*), Bash(tee:*), Bash(tail:*), Bash(kill:*), Bash(cat:*)
 ---
 
 # Jam UI Visual Review
@@ -18,14 +18,14 @@ session while you drive the browser from a second shell:
 
 ```bash
 mkdir -p scratch/logs
-corepack pnpm --dir examples/ui-catalog dev 2>&1 | tee scratch/logs/ui-catalog.log
+pnpm --dir examples/ui-catalog dev 2>&1 | tee scratch/logs/ui-catalog.log
 ```
 
 Open the printed Vite URL, usually `http://127.0.0.1:5173`:
 
 ```bash
-corepack pnpm exec agent-browser open http://127.0.0.1:5173
-corepack pnpm exec agent-browser snapshot -i
+pnpm exec agent-browser open http://127.0.0.1:5173
+pnpm exec agent-browser snapshot -i
 ```
 
 ## Review Path
@@ -37,16 +37,16 @@ corepack pnpm exec agent-browser snapshot -i
 5. Capture evidence with text, console, errors, or a screenshot:
 
 ```bash
-corepack pnpm exec agent-browser get text body
-corepack pnpm exec agent-browser console
-corepack pnpm exec agent-browser errors
-corepack pnpm exec agent-browser screenshot scratch/ui-catalog.png
+pnpm exec agent-browser get text body
+pnpm exec agent-browser console
+pnpm exec agent-browser errors
+pnpm exec agent-browser screenshot scratch/ui-catalog.png
 ```
 
 ## Cleanup
 
 ```bash
-corepack pnpm exec agent-browser close
+pnpm exec agent-browser close
 ```
 
 Record the log path and any screenshot path in the ticket or PR notes when used as validation evidence.
@@ -62,8 +62,8 @@ through the SwiftUI renderer. Build the native runtime bundle first so the Swift
 resource file reflects current TypeScript source:
 
 ```bash
-corepack pnpm --dir packages/native build
-corepack pnpm --dir examples/ui-catalog-native build:program
+pnpm --dir packages/native build
+pnpm --dir examples/ui-catalog-native build:program
 swift build --package-path examples/ui-catalog-native
 ```
 
@@ -92,10 +92,10 @@ contract test, web catalog, generated native catalog program, and
 `packages/native` JavaScript bundle build:
 
 ```bash
-corepack pnpm --dir examples/ui-catalog-native build:program
-corepack pnpm --dir packages/ui exec vitest run src/__tests__/native-mode.test.ts
-corepack pnpm --dir examples/ui-catalog build
-corepack pnpm --dir packages/native build
+pnpm --dir examples/ui-catalog-native build:program
+pnpm --dir packages/ui exec vitest run src/__tests__/native-mode.test.ts
+pnpm --dir examples/ui-catalog build
+pnpm --dir packages/native build
 ```
 
 The native catalog source remains the handoff artifact for macOS validation. CI
