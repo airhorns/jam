@@ -1,11 +1,11 @@
 ## Build & Development Commands
 
 ```bash
-corepack pnpm install       # Install all dependencies
-corepack pnpm dev           # Run folk-todo example dev server
-corepack pnpm test          # Run package/example unit tests where present
-corepack pnpm test:e2e      # Run folk-todo and puddy-vite e2e tests (Playwright)
-corepack pnpm typecheck     # TypeScript check all packages
+pnpm install       # Install all dependencies
+pnpm dev           # Run folk-todo example dev server
+pnpm test          # Run package/example unit tests where present
+pnpm test:e2e      # Run folk-todo and puddy-vite e2e tests (Playwright)
+pnpm typecheck     # TypeScript check all packages
 
 # Optional just conveniences, if just is installed
 just dev
@@ -14,10 +14,10 @@ just test-e2e
 just typecheck
 
 # Per-package commands (run from package directory)
-corepack pnpm test          # Unit tests (vitest run)
-corepack pnpm test:watch    # Watch mode tests
-corepack pnpm test:e2e      # E2e tests (Playwright, in examples that have them)
-corepack pnpm run bench     # Benchmarks (packages/core only)
+pnpm test          # Unit tests (vitest run)
+pnpm test:watch    # Watch mode tests
+pnpm test:e2e      # E2e tests (Playwright, in examples that have them)
+pnpm run bench     # Benchmarks (packages/core only)
 ```
 
 ## New Worktree Setup With Mise
@@ -35,17 +35,21 @@ export PATH="$HOME/.local/bin:$PATH"
 ```
 
 For each new Jam worktree, verify `mise` is available and then install/use the
-repo-pinned tools:
+repo-pinned tools. Activate `mise` in the shell so `pnpm`, `node`, and `just`
+are on `PATH` like normal commands:
 
 ```bash
 command -v mise
 mise install
-mise exec -- corepack pnpm install
+eval "$(mise activate bash)"
+pnpm install
 ```
 
-After setup, prefer `mise exec -- <command>` for repo commands, for example
-`mise exec -- corepack pnpm typecheck`. This keeps Node, pnpm, and just aligned
-with `mise.toml` instead of whatever happens to be installed globally.
+After setup, use normal repo commands such as `pnpm typecheck` and `just test`.
+If shell activation is not practical in an unattended environment, use
+`mise exec -- pnpm typecheck` as a one-command fallback. Both forms keep Node,
+pnpm, and just aligned with `mise.toml` instead of whatever happens to be
+installed globally.
 
 ## Architecture
 
@@ -95,7 +99,7 @@ All packages use a custom JSX factory — **not React**:
 
 ## Testing
 
-- **Unit tests**: Vitest, files in `src/__tests__/`. Run a single test file: `cd packages/core && corepack pnpm exec vitest run src/__tests__/db.test.ts`
+- **Unit tests**: Vitest, files in `src/__tests__/`. Run a single test file: `cd packages/core && pnpm exec vitest run src/__tests__/db.test.ts`
 - **E2E tests**: Playwright (Chromium). Test servers use per-worktree default ports to avoid cross-worktree collisions; set `PLAYWRIGHT_PORT` or the example-specific `*_PLAYWRIGHT_PORT` variable to override.
 - **CI** runs: install → typecheck → UI tests → unit tests → folk-todo and puddy-vite e2e. Separate CI jobs run core benchmarks and macOS native Swift builds.
 
@@ -104,19 +108,19 @@ All packages use a custom JSX factory — **not React**:
 Use the repo-local `agent-browser` dependency for web automation:
 
 ```bash
-corepack pnpm exec agent-browser --help
+pnpm exec agent-browser --help
 ```
 
 If a global `agent-browser` exists, it is fine to use it, but prefer
-`corepack pnpm exec agent-browser` in unattended sessions so the CLI version is
+`pnpm exec agent-browser` in unattended sessions so the CLI version is
 pinned by the repo lockfile.
 
 Core workflow:
 
-1. `corepack pnpm dev` or a package-level `corepack pnpm --dir <example> dev` - launch the app
-2. `corepack pnpm exec agent-browser open <url>` - navigate to the running app
-3. `corepack pnpm exec agent-browser snapshot -i` - get interactive elements with refs (@e1, @e2)
-4. `corepack pnpm exec agent-browser click @e1` / `fill @e2 "text"` - interact using refs
+1. `pnpm dev` or a package-level `pnpm --dir <example> dev` - launch the app
+2. `pnpm exec agent-browser open <url>` - navigate to the running app
+3. `pnpm exec agent-browser snapshot -i` - get interactive elements with refs (@e1, @e2)
+4. `pnpm exec agent-browser click @e1` / `fill @e2 "text"` - interact using refs
 5. Re-snapshot after page changes
 
 For Jam app changes, browser validation should touch the actual running app:
@@ -171,14 +175,14 @@ directory for transient logs:
 
 ```bash
 mkdir -p scratch/logs
-corepack pnpm --dir examples/folk-todo dev 2>&1 | tee scratch/logs/folk-todo.log
+pnpm --dir examples/folk-todo dev 2>&1 | tee scratch/logs/folk-todo.log
 ```
 
 For background processes, write both a log and PID file:
 
 ```bash
 mkdir -p scratch/logs
-nohup corepack pnpm --dir examples/folk-todo dev > scratch/logs/folk-todo.log 2>&1 &
+nohup pnpm --dir examples/folk-todo dev > scratch/logs/folk-todo.log 2>&1 &
 echo $! > scratch/logs/folk-todo.pid
 tail -f scratch/logs/folk-todo.log
 ```

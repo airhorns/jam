@@ -6,30 +6,31 @@ The core idea: programs don't call each other. They make **claims** into a share
 
 ## Quick start
 
-Install dependencies and start the default example with the repo-pinned
-package manager:
+Install dependencies and start the default example:
 
 ```bash
-corepack pnpm install
-corepack pnpm dev
+pnpm install
+pnpm dev
 ```
 
-When `mise` is available, prefer the tool versions pinned in `mise.toml`:
+If `pnpm` is not already on `PATH`, use the tool versions pinned in
+`mise.toml` and activate them in your shell:
 
 ```bash
 mise install
-mise exec -- corepack pnpm install
-mise exec -- corepack pnpm dev
+eval "$(mise activate bash)"
+pnpm install
+pnpm dev
 ```
 
 Useful commands:
 
 ```bash
-corepack pnpm dev             # Run the folk-todo example dev server
-corepack pnpm test            # Run unit tests for packages/examples that define them
-corepack pnpm test:e2e        # Run folk-todo and puddy-vite Playwright suites
-corepack pnpm typecheck       # TypeScript check all packages and examples
-corepack pnpm run dev:ui      # Run the @jam/ui catalog example
+pnpm dev             # Run the folk-todo example dev server
+pnpm test            # Run unit tests for packages/examples that define them
+pnpm test:e2e        # Run folk-todo and puddy-vite Playwright suites
+pnpm typecheck       # TypeScript check all packages and examples
+pnpm run dev:ui      # Run the @jam/ui catalog example
 ```
 
 Playwright configs derive their default server ports from the current worktree

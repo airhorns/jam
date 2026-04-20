@@ -1,7 +1,7 @@
 ---
 name: jam-native
 description: Work on Jam's Swift/native runtime and native examples. Use when touching packages/native, examples/counter-ios, examples/spatial-counter, examples/ui-catalog-native, SwiftUI bridge behavior, or native build/test validation.
-allowed-tools: Bash(swift:*), Bash(xcrun:*), Bash(corepack pnpm:*), Bash(just:*)
+allowed-tools: Bash(swift:*), Bash(xcrun:*), Bash(pnpm:*), Bash(just:*)
 ---
 
 # Jam Native / Swift
@@ -26,19 +26,19 @@ Still run TypeScript/package checks for any changed JS bridge code.
 ```bash
 just test-swift
 just build-native
-corepack pnpm --dir packages/native build
-corepack pnpm --dir examples/ui-catalog-native build:program
+pnpm --dir packages/native build
+pnpm --dir examples/ui-catalog-native build:program
 swift test --package-path packages/native
 swift build --package-path packages/native
 swift build --package-path examples/counter-ios
 swift build --package-path examples/spatial-counter
 swift build --package-path examples/ui-catalog-native
-corepack pnpm --dir packages/ui exec vitest run src/__tests__/native-mode.test.ts
+pnpm --dir packages/ui exec vitest run src/__tests__/native-mode.test.ts
 ```
 
-Run `corepack pnpm --dir packages/native build` before Swift builds when the
+Run `pnpm --dir packages/native build` before Swift builds when the
 native runtime resource bundle must reflect TypeScript source changes.
-Run `corepack pnpm --dir examples/ui-catalog-native build:program` before
+Run `pnpm --dir examples/ui-catalog-native build:program` before
 building the native catalog so its generated Swift resource reflects the
 TypeScript catalog source.
 

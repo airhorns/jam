@@ -46,13 +46,14 @@ cd /home/airhorns/code/jam
 
 git worktree add /home/airhorns/code/jam-wt-<name> -b hermes/<name> HEAD
 cd /home/airhorns/code/jam-wt-<name>
-corepack pnpm install --ignore-scripts
+pnpm install --ignore-scripts
 cd examples/<app>
-corepack pnpm exec vite --host 127.0.0.1 --port <port>
+pnpm exec vite --host 127.0.0.1 --port <port>
 curl -I http://127.0.0.1:<port>
 ```
 
-Important environment note: `pnpm` is not directly on PATH in this environment, so `corepack pnpm ...` is the reliable form.
+If `pnpm` is not on `PATH`, run `mise install` and activate `mise` before using
+the workflow above so the repo-pinned package manager is available as `pnpm`.
 
 ## The two new base examples
 

@@ -1,7 +1,7 @@
 ---
 name: jam-browser-validation
 description: Validate Jam web examples by launching the real app and driving it with the repo-pinned agent-browser CLI. Use for UI changes, app behavior checks, screenshots, console/error inspection, or any browser proof in this repository.
-allowed-tools: Bash(corepack pnpm:*), Bash(corepack pnpm exec agent-browser:*), Bash(agent-browser:*)
+allowed-tools: Bash(pnpm:*), Bash(pnpm exec agent-browser:*), Bash(agent-browser:*)
 ---
 
 # Jam Browser Validation
@@ -15,17 +15,17 @@ JSX and a fact database, so validate through the app UI plus any relevant
 Prefer the repo-pinned toolchain:
 
 ```bash
-corepack pnpm --dir examples/folk-todo dev
+pnpm --dir examples/folk-todo dev
 ```
 
 Use package-specific dev commands when the changed surface is another example:
 
 ```bash
-corepack pnpm --dir examples/counter dev
-corepack pnpm --dir examples/puddy-vite dev
-corepack pnpm --dir examples/trello-clone dev
-corepack pnpm --dir examples/obsidian-clone dev
-corepack pnpm --dir examples/ui-catalog dev
+pnpm --dir examples/counter dev
+pnpm --dir examples/puddy-vite dev
+pnpm --dir examples/trello-clone dev
+pnpm --dir examples/obsidian-clone dev
+pnpm --dir examples/ui-catalog dev
 ```
 
 If multiple worktrees are active, set a package-specific port or use the port
@@ -36,11 +36,11 @@ shown by Vite.
 Use the repo-pinned `agent-browser` dependency:
 
 ```bash
-corepack pnpm exec agent-browser open http://127.0.0.1:5173
-corepack pnpm exec agent-browser snapshot -i
-corepack pnpm exec agent-browser fill @e1 "Browser proof"
-corepack pnpm exec agent-browser press Enter
-corepack pnpm exec agent-browser snapshot -i
+pnpm exec agent-browser open http://127.0.0.1:5173
+pnpm exec agent-browser snapshot -i
+pnpm exec agent-browser fill @e1 "Browser proof"
+pnpm exec agent-browser press Enter
+pnpm exec agent-browser snapshot -i
 ```
 
 For folk-todo, a useful smoke path is:
@@ -58,10 +58,10 @@ output, example behavior, or UI component appearance.
 Useful evidence commands:
 
 ```bash
-corepack pnpm exec agent-browser get text body
-corepack pnpm exec agent-browser console
-corepack pnpm exec agent-browser errors
-corepack pnpm exec agent-browser screenshot scratch/browser-proof.png
+pnpm exec agent-browser get text body
+pnpm exec agent-browser console
+pnpm exec agent-browser errors
+pnpm exec agent-browser screenshot scratch/browser-proof.png
 ```
 
 For branch PRs that change UI or app behavior, upload or attach the captured
@@ -71,5 +71,5 @@ the PR description that media was omitted and why there is no UI-visible effect.
 Close browser sessions you opened:
 
 ```bash
-corepack pnpm exec agent-browser close
+pnpm exec agent-browser close
 ```
