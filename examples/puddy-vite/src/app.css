@@ -45,6 +45,10 @@ body {
   display: none !important;
 }
 
+.mobile-session-tabs {
+  display: none !important;
+}
+
 .sidebar {
   width: 300px;
   min-width: 300px;
@@ -569,6 +573,33 @@ input[type="text"]:focus {
     background: rgba(88, 166, 255, 0.1);
   }
 
+  .mobile-session-tabs {
+    display: flex !important;
+    gap: 6px;
+    padding: 8px 12px;
+    background: #0d1117;
+    border-bottom: 1px solid #21262d;
+    flex-shrink: 0;
+  }
+
+  .mobile-session-tab {
+    flex: 1;
+    min-width: 0;
+    min-height: 38px;
+    padding: 8px 10px;
+    justify-content: center;
+    text-align: center;
+    border-radius: 6px;
+    color: #8b949e;
+    background: transparent;
+  }
+
+  .mobile-session-tab-active {
+    color: #3fb950;
+    border-color: #3fb950;
+    background: rgba(63, 185, 80, 0.1);
+  }
+
   .split-view {
     height: auto;
     min-width: 0;
@@ -629,10 +660,21 @@ input[type="text"]:focus {
     padding: 10px 12px;
   }
 
+  .detail.mobile-session-chat > .terminal-panel {
+    display: none;
+  }
+
+  .detail.mobile-session-terminal > .chat-panel,
+  .detail.mobile-session-terminal > .composer-panel {
+    display: none;
+  }
+
   .terminal-panel {
-    height: 34dvh;
-    min-height: 180px;
-    max-height: 280px;
+    flex: 1;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    border-top: 0;
   }
 
   .terminal-header {

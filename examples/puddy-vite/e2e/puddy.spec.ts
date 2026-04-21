@@ -333,12 +333,26 @@ test.describe("Mobile layout", () => {
     await expectNoHorizontalOverflow(page);
 
     await page.getByTestId("mobile-panel-session").click();
+    await expect(page.getByTestId("mobile-session-tabs")).toBeVisible();
+    await expect(page.getByTestId("mobile-session-chat")).toBeVisible();
+    await expect(page.getByTestId("mobile-session-terminal")).toBeVisible();
     await expect(page.getByText("Mobile ready")).toBeVisible();
-    await expect(page.getByTestId("terminal-panel")).toContainText("/mobile");
+    await expect(page.getByTestId("terminal-panel")).not.toBeVisible();
     const input = page.getByTestId("message-input");
     await input.fill("hello from mobile");
     await input.press("Enter");
     await expect(page.getByText("hello from mobile")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    await page.getByTestId("mobile-session-terminal").click();
+    await expect(page.getByTestId("terminal-panel")).toBeVisible();
+    await expect(page.getByTestId("terminal-panel")).toContainText("/mobile");
+    await expect(page.getByTestId("message-input")).not.toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    await page.getByTestId("mobile-session-chat").click();
+    await expect(page.getByText("Mobile ready")).toBeVisible();
+    await expect(page.getByTestId("message-input")).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     await page.getByTestId("mobile-panel-meta").click();

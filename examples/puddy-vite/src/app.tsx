@@ -146,6 +146,7 @@ const MonoText = styled(Text, {
 });
 
 type MobilePanel = "workspaces" | "session" | "meta";
+type MobileSessionTab = "chat" | "terminal";
 
 function getMobilePanel(): MobilePanel {
   const selected = when(["ui", "mobilePanel", $.panel]);
@@ -173,6 +174,38 @@ function MobilePanelTabs() {
           }
           data-testid={`mobile-panel-${id}`}
           onClick={() => replace("ui", "mobilePanel", id)}
+        >
+          {label}
+        </Button>
+      ))}
+    </XStack>
+  );
+}
+
+function getMobileSessionTab(): MobileSessionTab {
+  const selected = when(["ui", "mobileSessionTab", $.tab]);
+  return selected[0]?.tab === "terminal" ? "terminal" : "chat";
+}
+
+function MobileSessionTabs() {
+  const activeTab = getMobileSessionTab();
+  const tabs: { id: MobileSessionTab; label: string }[] = [
+    { id: "chat", label: "Chat" },
+    { id: "terminal", label: "Terminal" },
+  ];
+
+  return (
+    <XStack class="mobile-session-tabs" data-testid="mobile-session-tabs">
+      {tabs.map(({ id, label }) => (
+        <Button
+          key={id}
+          class={
+            id === activeTab
+              ? "mobile-session-tab mobile-session-tab-active"
+              : "mobile-session-tab"
+          }
+          data-testid={`mobile-session-${id}`}
+          onClick={() => replace("ui", "mobileSessionTab", id)}
         >
           {label}
         </Button>
@@ -665,13 +698,21 @@ function TerminalPanel() {
 
 function SessionDetail() {
   const selectedId = getSelectedSessionForActiveWorkspace();
+  const mobileSessionTab = getMobileSessionTab();
 
   return (
-    <YStack flex={1} overflow="hidden" backgroundColor="$color.bg" class="detail" data-testid="detail">
+    <YStack
+      flex={1}
+      overflow="hidden"
+      backgroundColor="$color.bg"
+      class={`detail mobile-session-${mobileSessionTab}`}
+      data-testid="detail"
+    >
       {ConnectionBar()}
       <Separator />
 
       {ModeBadge()}
+      {selectedId ? MobileSessionTabs() : null}
 
       <XStack
         id="detail-header"
@@ -695,6 +736,7 @@ function SessionDetail() {
               try {
                 const id = sessionManager.createTerminalSession(selectedId);
                 replace("ui", "selectedTerminal", id);
+                replace("ui", "mobileSessionTab", "terminal");
               } catch (err: any) {
                 console.error("Failed to create terminal:", err.message ?? err);
               }
@@ -705,40 +747,44 @@ function SessionDetail() {
         ) : null}
       </XStack>
 
-      {PlanList()}
+      <YStack class="chat-panel" flex={1} minHeight={0} overflow="hidden">
+        {PlanList()}
 
-      <YStack flex={1} overflow="auto" class="scroll-area">
-        {MessageList()}
+        <YStack flex={1} overflow="auto" class="scroll-area">
+          {MessageList()}
+        </YStack>
+
+        {StreamingIndicators()}
       </YStack>
-
-      {StreamingIndicators()}
 
       {TerminalPanel()}
 
-      {selectedId ? [
-        <Separator />,
-        <XStack gap="$space.2" padding="$space.4" paddingHorizontal="$space.6" backgroundColor="$color.bgSidebar" class="input-bar">
-          <Input
-            size="3"
-            flex={1}
-            placeholder="Type a message..."
-            backgroundColor="$color.bgInput"
-            borderColor="$color.btnBorder"
-            color="$color.text"
-            data-testid="message-input"
-            onKeyDown={(e: KeyboardEvent) => {
-              if (e.key === "Enter") {
-                const input = e.target as HTMLInputElement;
-                const text = input.value.trim();
-                if (text && sessionManager.hasSession(selectedId)) {
-                  sessionManager.sendMessage(selectedId, text);
-                  input.value = "";
+      {selectedId ? (
+        <YStack class="composer-panel">
+          <Separator />
+          <XStack gap="$space.2" padding="$space.4" paddingHorizontal="$space.6" backgroundColor="$color.bgSidebar" class="input-bar">
+            <Input
+              size="3"
+              flex={1}
+              placeholder="Type a message..."
+              backgroundColor="$color.bgInput"
+              borderColor="$color.btnBorder"
+              color="$color.text"
+              data-testid="message-input"
+              onKeyDown={(e: KeyboardEvent) => {
+                if (e.key === "Enter") {
+                  const input = e.target as HTMLInputElement;
+                  const text = input.value.trim();
+                  if (text && sessionManager.hasSession(selectedId)) {
+                    sessionManager.sendMessage(selectedId, text);
+                    input.value = "";
+                  }
                 }
-              }
-            }}
-          />,
-        </XStack>,
-      ] : null}
+              }}
+            />
+          </XStack>
+        </YStack>
+      ) : null}
     </YStack>
   );
 }
