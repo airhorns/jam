@@ -25,6 +25,18 @@ async function replaceFacts(page: Page, facts: Fact[]) {
   }, facts);
 }
 
+async function expectNoHorizontalOverflow(page: Page) {
+  const widths = await page.evaluate(() => ({
+    documentClient: document.documentElement.clientWidth,
+    documentScroll: document.documentElement.scrollWidth,
+    bodyClient: document.body.clientWidth,
+    bodyScroll: document.body.scrollWidth,
+  }));
+
+  expect(widths.documentScroll).toBeLessThanOrEqual(widths.documentClient + 1);
+  expect(widths.bodyScroll).toBeLessThanOrEqual(widths.bodyClient + 1);
+}
+
 async function seedConnection(
   page: Page,
   status: "connected" | "disconnected" | "checking",
@@ -80,7 +92,7 @@ test.describe("App loads", () => {
 
   test("shows workspace controls", async ({ page }) => {
     await gotoApp(page);
-    await expect(page.getByText("Workspaces")).toBeVisible();
+    await expect(page.getByTestId("sidebar").getByText("Workspaces")).toBeVisible();
     await expect(page.getByTestId("workspace-list")).toBeVisible();
     await expect(page.getByTestId("new-workspace")).toHaveText("+ Workspace");
     await expect(page.getByTestId("workspace-0")).toContainText("Alt+1");
@@ -269,6 +281,73 @@ test.describe("Workspaces", () => {
     await expect(page.getByText("Project B notes")).toBeVisible();
     await expect(page.getByText("Default notes")).not.toBeVisible();
     await expect(page.getByTestId("terminal-panel")).toContainText("/project-b");
+  });
+});
+
+test.describe("Mobile layout", () => {
+  test("switches between workspaces, session, terminal, and meta panels without horizontal overflow", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await gotoApp(page);
+    await seedConnection(page, "connected", "mobile-sandbox.local");
+    await insertFacts(page, [
+      ["session", "s-mobile", "agent", "mock"],
+      ["session", "s-mobile", "workspace", "default"],
+      ["session", "s-mobile", "status", "active"],
+      ["message", "s-mobile", "msg-1", "assistant", "text", "Mobile ready"],
+      ["terminal", "term-mobile", "session", "s-mobile"],
+      ["terminal", "term-mobile", "workspace", "default"],
+      ["terminal", "term-mobile", "status", "connected"],
+    ]);
+    await replaceFacts(page, [
+      ["ui", "selectedSession", "s-mobile"],
+      ["workspace", "default", "selectedSession", "s-mobile"],
+      ["terminal", "term-mobile", "cwd", "/mobile"],
+    ]);
+    await page.evaluate(() => {
+      const manager = (window as any).sessionManager;
+      manager.sessionStatuses.set("s-mobile", "active");
+      manager.sendMessage = (sessionId: string, text: string) => {
+        (window as any).__db.insert(
+          "message",
+          sessionId,
+          "mobile-submitted-message",
+          "user",
+          "text",
+          text,
+        );
+      };
+    });
+
+    await expect(page.getByTestId("mobile-panel-tabs")).toBeVisible();
+    await expect(page.getByTestId("detail")).toBeVisible();
+    await expect(page.getByTestId("detail-title")).toHaveText("Session: s-mobile");
+    await expectNoHorizontalOverflow(page);
+
+    await page.getByTestId("mobile-panel-workspaces").click();
+    await expect(page.getByTestId("sidebar")).toBeVisible();
+    await page.getByTestId("new-workspace").click();
+    await expect(page.getByTestId("workspace-1")).toContainText("Workspace 2");
+    await page.getByTestId("workspace-0").click();
+    await expectNoHorizontalOverflow(page);
+
+    await page.getByTestId("mobile-panel-session").click();
+    await expect(page.getByText("Mobile ready")).toBeVisible();
+    await expect(page.getByTestId("terminal-panel")).toContainText("/mobile");
+    const input = page.getByTestId("message-input");
+    await input.fill("hello from mobile");
+    await input.press("Enter");
+    await expect(page.getByText("hello from mobile")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    await page.getByTestId("mobile-panel-meta").click();
+    await expect(page.getByTestId("meta-agent-panel")).toBeVisible();
+    await expect(page.getByTestId("meta-agent-input")).toBeVisible();
+    await page.getByTestId("meta-agent-input").fill("inspect mobile layout");
+    await page.getByTestId("meta-agent-send").click();
+    await expect(page.getByTestId("meta-agent-panel")).toContainText("Jam app summary");
+    await expectNoHorizontalOverflow(page);
   });
 });
 

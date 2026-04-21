@@ -145,6 +145,42 @@ const MonoText = styled(Text, {
   },
 });
 
+type MobilePanel = "workspaces" | "session" | "meta";
+
+function getMobilePanel(): MobilePanel {
+  const selected = when(["ui", "mobilePanel", $.panel]);
+  const panel = selected[0]?.panel;
+  return panel === "workspaces" || panel === "meta" ? panel : "session";
+}
+
+function MobilePanelTabs() {
+  const activePanel = getMobilePanel();
+  const tabs: { id: MobilePanel; label: string }[] = [
+    { id: "workspaces", label: "Workspaces" },
+    { id: "session", label: "Session" },
+    { id: "meta", label: "Meta" },
+  ];
+
+  return (
+    <XStack class="mobile-panel-tabs" data-testid="mobile-panel-tabs">
+      {tabs.map(({ id, label }) => (
+        <Button
+          key={id}
+          class={
+            id === activePanel
+              ? "mobile-panel-tab mobile-panel-tab-active"
+              : "mobile-panel-tab"
+          }
+          data-testid={`mobile-panel-${id}`}
+          onClick={() => replace("ui", "mobilePanel", id)}
+        >
+          {label}
+        </Button>
+      ))}
+    </XStack>
+  );
+}
+
 function ConnectionBar() {
   const statuses = when(["connection", "status", $.status]);
   const hosts = when(["connection", "hostname", $.host]);
@@ -710,11 +746,19 @@ function SessionDetail() {
 // --- Main App ---
 
 export function App() {
+  const mobilePanel = getMobilePanel();
+
   return (
-    <XStack height="100vh" class="split-view" data-testid="split-view">
-      {SessionList()}
-      {SessionDetail()}
-      {MetaAgentPanel({ agent: metaAgent, title: "Puddy Meta Agent" })}
-    </XStack>
+    <YStack height="100vh" class="app-shell">
+      {MobilePanelTabs()}
+      <XStack
+        class={`split-view mobile-panel-${mobilePanel}`}
+        data-testid="split-view"
+      >
+        {SessionList()}
+        {SessionDetail()}
+        {MetaAgentPanel({ agent: metaAgent, title: "Puddy Meta Agent" })}
+      </XStack>
+    </YStack>
   );
 }
