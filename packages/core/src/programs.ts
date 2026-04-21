@@ -95,7 +95,9 @@ export function registerProgram(id: string, runner: ProgramRunner, options: Prog
     for (const disposer of Array.from(disposers).reverse()) {
       disposer();
     }
-    db.revokeOwner(ownerId);
+    transaction(() => {
+      db.revokeOwner(ownerId);
+    });
     throw error;
   }
 
@@ -105,7 +107,9 @@ export function registerProgram(id: string, runner: ProgramRunner, options: Prog
     for (const disposer of Array.from(disposers).reverse()) {
       disposer();
     }
-    db.revokeOwner(ownerId);
+    transaction(() => {
+      db.revokeOwner(ownerId);
+    });
     programRegistry.delete(id);
   };
 
