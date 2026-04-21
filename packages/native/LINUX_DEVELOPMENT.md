@@ -90,6 +90,129 @@ bridge behavior, native app targets, and simulator availability. They cannot be
 made equivalent on the current Linux host without changing Jam Native's platform
 surface.
 
+## Concrete Progress Options
+
+The path forward is not "develop native blind on Linux." Use Linux for fast
+source edits, then choose one of these macOS execution paths depending on what
+kind of Swift/native confidence is needed.
+
+### Option 1: Treat GitHub-hosted macOS CI as the default Mac
+
+Use this for every normal PR. It is the lowest-ops option because Jam already has
+a `Native Swift` GitHub Actions job that runs on macOS and proves the Swift
+package and native examples build with real Apple SDKs.
+
+Make this option stronger by keeping the native job required and adding focused
+Swift tests whenever Swift behavior changes:
+
+```bash
+swift test --package-path packages/native
+swift build --package-path examples/counter-ios
+swift build --package-path examples/spatial-counter
+swift build --package-path examples/ui-catalog-native
+```
+
+How Linux agents use it:
+
+1. Edit on Linux.
+2. Run the Linux-validatable checks from this document.
+3. Push the PR branch.
+4. Use `gh run watch` / `gh run view --log-failed` from Linux to inspect the
+   macOS result and patch based on the failing Swift compiler/test output.
+
+This is enough for non-interactive Swift quality: compile errors, Swift unit
+tests, generated bundle regressions, native example build breakage, and most
+JavaScriptCore bridge failures that can be covered by tests.
+
+Cost profile:
+
+- Public repositories can use standard GitHub-hosted runners without Actions
+  minute charges.
+- Private repositories pay for macOS runner minutes after included quota; the
+  current GitHub pricing page lists standard macOS runners at a per-minute rate:
+  <https://docs.github.com/en/billing/reference/actions-minute-multipliers>
+
+### Option 2: Add a manual native smoke workflow
+
+Use this when a change is native-adjacent but does not need a full PR cycle yet.
+Add or keep a `workflow_dispatch` macOS workflow that runs the same native
+commands on demand and uploads logs/artifacts. A Linux agent can trigger it with
+`gh workflow run`, wait with `gh run watch`, and inspect the result with
+`gh run view --log-failed`.
+
+This gives fast remote feedback without giving the Linux host Xcode. It is also
+the best place to add one-off matrices when Jam needs to compare Xcode or macOS
+runner labels.
+
+### Option 3: Put one Mac mini on the network for interactive failures
+
+Use this when the team needs simulator inspection, SwiftUI previews, screen
+recordings, or iterative debugging that cannot be understood from CI logs.
+
+Concrete setup:
+
+1. Put a Mac mini on Tailscale or another private network.
+2. Install Xcode, Homebrew, mise, Node, pnpm, and the GitHub CLI.
+3. Enable SSH and Screen Sharing.
+4. Register the Mac as a self-hosted GitHub Actions runner with labels such as
+   `self-hosted`, `macos`, `xcode`, and `jam-native`.
+5. Keep the same repo commands as the contract: `just test-swift`,
+   `just build-native`, and the native example `swift build` commands.
+
+Linux agents still do most work locally, then SSH to the Mac only to run the
+native command, inspect the simulator, or capture reviewer media. This is the
+lowest-latency option once simulator debugging happens more than occasionally.
+
+Cost profile: usually the lowest sustained cost if the team already owns or can
+buy/borrow one Apple silicon Mac. It has a one-time hardware cost plus power and
+maintenance, instead of per-hour cloud rental.
+
+### Option 4: Use Xcode Cloud if the team already has Apple membership
+
+Use this when Jam needs Apple-managed build/test infrastructure or TestFlight
+packaging but does not need interactive shell access. Apple Developer Program
+membership includes Xcode Cloud compute hours:
+<https://developer.apple.com/programs/whats-included/>
+
+Xcode Cloud is not a replacement for an SSH-able Mac because agents cannot use
+it as a terminal. It is useful as another CI gate for archive/test workflows,
+especially if the project grows toward signed app distribution or TestFlight.
+
+### Option 5: Rent Mac capacity only for bursts
+
+Use this for short periods when the team needs a real Mac but does not want to
+own one yet.
+
+- AWS EC2 Mac works for dedicated-host automation, but EC2 Mac Dedicated Hosts
+  have a 24-hour minimum allocation period, so it is not a cheap per-test
+  option: <https://aws.amazon.com/ec2/instance-types/mac/faqs/>
+- MacStadium and similar Mac hosting providers are better for sustained or
+  team-shared Mac capacity than occasional PR validation:
+  <https://macstadium.com/pricing>
+
+Prefer this only when Option 3 is unavailable and the debugging need is too
+interactive for GitHub-hosted macOS CI.
+
+### Option 6: Split a Linux-buildable Swift core
+
+Use this if Jam wants more Swift correctness directly on Linux. This is the only
+option that changes the code architecture.
+
+The split would be:
+
+- `JamNativeCore`: pure Swift target with no `SwiftUI` or `JavaScriptCore`.
+  It owns VDOM fact decoding, style normalization, event/action data models, and
+  renderer planning decisions that can be unit-tested on Linux Swift.
+- `JamNativeApple`: Apple-only target that imports `SwiftUI` and
+  `JavaScriptCore`, hosts the JS runtime, and applies the planned rendering to
+  SwiftUI.
+
+That would let Linux agents run meaningful Swift tests with the official Swift
+Docker image while macOS CI remains responsible for the Apple UI/runtime layer.
+Do this only when the native renderer logic is large enough that CI-only Mac
+feedback is slowing feature work; it is more engineering work than just adding
+Mac execution capacity.
+
 ## Recommended Workflow
 
 For normal agentic development:
@@ -133,6 +256,20 @@ For deeper or interactive native work:
   <https://macstadium.com/pricing>
 
 ## Decision For Jam
+
+Use this sequence:
+
+1. Keep GitHub-hosted macOS CI as the default correctness gate and make native
+   PR failures actionable from Linux with `gh run watch` and failed logs.
+2. Add a manual macOS native smoke workflow if native work needs on-demand
+   checks before PR review.
+3. Buy, borrow, or repurpose one Apple silicon Mac mini as the interactive
+   debug box when SwiftUI/simulator issues start blocking more than one-off
+   changes.
+4. Consider a pure Swift `JamNativeCore` split only if the Swift renderer grows
+   enough that agents need Linux-run Swift unit tests for most native logic.
+5. Use Xcode Cloud or rented Mac capacity for distribution or burst capacity,
+   not as the first-line development loop.
 
 Keep Jam's native development split in two:
 
