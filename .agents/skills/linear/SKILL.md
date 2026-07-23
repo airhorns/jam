@@ -100,11 +100,12 @@ query IssueByKey($key: String!) {
     url
     description
     updatedAt
-    links {
+    attachments {
       nodes {
         id
         url
         title
+        sourceType
       }
     }
   }
@@ -180,6 +181,11 @@ query IssueDetails($id: String!) {
   }
 }
 ```
+
+Schema caveats discovered in this workspace:
+
+- Prefer `attachments { nodes { ... } }` on `Issue`; do **not** query `links`, which is not available in this Linear schema.
+- `Comment.reactions` is a plain list, not a connection. Query subfields directly (for example `reactions { emoji }`) and never request `reactions { nodes { ... } }`.
 
 ### Query team workflow states for an issue
 
