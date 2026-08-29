@@ -88,6 +88,8 @@ export function computePosition(anchor: Rect, floating: Rect, options: ComputePo
     x: Math.round(pos.x),
     y: Math.round(pos.y),
     placement: align === "center" ? side : `${side}-${align}`,
+    anchorWidth: Math.round(anchor.width),
+    anchorHeight: Math.round(anchor.height),
   };
   if (vertical) {
     result.arrowX = Math.round(clamp(anchor.x + anchor.width / 2 - pos.x, 8, floating.width - 8));
@@ -102,13 +104,18 @@ export function rectOf(el: Element): Rect {
   return { x: r.left, y: r.top, width: r.width, height: r.height };
 }
 
+/** The element a layer floats next to: an explicit anchor, else its trigger. */
+export function anchorElement(id: string): Element | null {
+  return document.querySelector(`[data-layer-anchor="${id}"]`) ?? document.querySelector(`[data-layer-trigger="${id}"]`);
+}
+
 /**
  * Measure the layer's anchor and content in the DOM and store the resulting
  * position as a fact. Used as a layer's `onReposition`.
  */
 export function repositionLayer(id: string, options: Omit<ComputePositionOptions, "viewport">): void {
   if (typeof document === "undefined") return;
-  const anchor = document.querySelector(`[data-layer-anchor="${id}"]`);
+  const anchor = anchorElement(id);
   const content = document.querySelector(`[data-layer="${id}"]`);
   if (!anchor || !content) return;
   const position = computePosition(rectOf(anchor), rectOf(content), {
@@ -130,20 +137,42 @@ export function floatingStyle(id: string): { position: FloatingPosition | undefi
   return { position, style: { position: "fixed", top: `${position.y}px`, left: `${position.x}px` } };
 }
 
-/** Where the arrow sits on the content for a resolved placement. */
-export function arrowStyle(position: FloatingPosition | undefined, size = 8): Record<string, string | number> {
-  if (!position) return { display: "none" };
+export type ArrowStyles = {
+  /** Clipping box hung off the content edge facing the anchor. */
+  outer: Record<string, string | number>;
+  /** The rotated square inside it; only the half pointing at the anchor shows. */
+  inner: Record<string, string | number>;
+};
+
+/**
+ * Inline styles for an arrow of `size` px on the content edge facing the
+ * anchor. The outer box overlaps the content by `overlap` px so the arrow
+ * covers the content's border where they meet.
+ */
+export function arrowStyle(position: FloatingPosition | undefined, size = 8, overlap = 1): ArrowStyles {
+  if (!position) return { outer: { display: "none" }, inner: {} };
   const { side } = splitPlacement(position.placement as Placement);
   const half = size / 2;
-  const base: Record<string, string | number> = { position: "absolute", width: `${size}px`, height: `${size}px`, transform: "rotate(45deg)" };
+  const outer: Record<string, string | number> = { position: "absolute", overflow: "hidden", pointerEvents: "none" };
+  const inner: Record<string, string | number> = { position: "absolute", width: `${size}px`, height: `${size}px`, transform: "rotate(45deg)" };
+  const along = (side === "top" || side === "bottom" ? position.arrowX : position.arrowY) ?? 0;
   switch (side) {
     case "bottom":
-      return { ...base, top: `${-half}px`, left: `${(position.arrowX ?? 0) - half}px` };
+      Object.assign(outer, { width: `${size * 2}px`, height: `${size}px`, top: `${overlap - size}px`, left: `${along - size}px` });
+      Object.assign(inner, { left: `${half}px`, top: `${half}px` });
+      break;
     case "top":
-      return { ...base, bottom: `${-half}px`, left: `${(position.arrowX ?? 0) - half}px` };
+      Object.assign(outer, { width: `${size * 2}px`, height: `${size}px`, bottom: `${overlap - size}px`, left: `${along - size}px` });
+      Object.assign(inner, { left: `${half}px`, top: `${-half}px` });
+      break;
     case "right":
-      return { ...base, left: `${-half}px`, top: `${(position.arrowY ?? 0) - half}px` };
+      Object.assign(outer, { width: `${size}px`, height: `${size * 2}px`, left: `${overlap - size}px`, top: `${along - size}px` });
+      Object.assign(inner, { top: `${half}px`, left: `${half}px` });
+      break;
     case "left":
-      return { ...base, right: `${-half}px`, top: `${(position.arrowY ?? 0) - half}px` };
+      Object.assign(outer, { width: `${size}px`, height: `${size * 2}px`, right: `${overlap - size}px`, top: `${along - size}px` });
+      Object.assign(inner, { top: `${half}px`, left: `${-half}px` });
+      break;
   }
+  return { outer, inner };
 }

@@ -16,6 +16,7 @@ import { getMediaPrecedence, getMediaQuery, isMediaKey, useMedia } from "./media
 import { getFont, getFontFamily, getFontValue, hasFont, type ResolvedFont } from "./fonts";
 import { getAnimation, getDefaultFont } from "./settings";
 import {
+  camelToKebab,
   expandShorthand,
   fontPropertyMap,
   isMediaProp,
@@ -25,7 +26,7 @@ import {
   stylesToCSS,
   tokenCategoryMap,
 } from "./style-props";
-import { injectAtomic } from "./css";
+import { atomicClassName, injectAtomic, injectRule } from "./css";
 import { isNativeMode } from "./native-mode";
 
 type StyleObject = Record<string, unknown>;
@@ -92,7 +93,8 @@ export type StyledProps = Partial<AllStyleProps> &
   };
 
 export type StyledComponent<P = {}> = {
-  (props: P & StyledProps): VNode;
+  /** `P` wins over `StyledProps`, so a component can narrow or repurpose a style prop such as `position`. */
+  (props: Omit<StyledProps, keyof P> & P): VNode;
   displayName?: string;
   /** The merged configuration, so `styled(Component, …)` can extend it. */
   staticConfig: ResolvedStyledConfig;
@@ -278,7 +280,7 @@ function matchVariant(spec: VariantSpec, value: unknown, extras: VariantExtras):
 const domVariantProps = new Set(["disabled", "checked", "open", "hidden", "readOnly", "required", "selected"]);
 
 const controlProps = new Set([
-  "theme", "themeInverse", "unstyled", "asChild", "tag", "animation", "className", "class", "style", "children",
+  "theme", "themeInverse", "unstyled", "asChild", "tag", "animation", "animateOnly", "className", "class", "style", "children",
 ]);
 
 // ---- Rendering ----
@@ -481,10 +483,17 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
     if (staticConfig.name) classes.push(`is_${staticConfig.name}`);
 
     const animation = typeof merged.animation === "string" ? getAnimation(merged.animation) : undefined;
-    if (animation && resolvedBase.transition === undefined) resolvedBase.transition = `all ${animation}`;
+    if (animation && resolvedBase.transition === undefined) {
+      const only = Array.isArray(merged.animateOnly) ? (merged.animateOnly as string[]) : ["all"];
+      resolvedBase.transition = only.map((prop) => `${camelToKebab(prop)} ${animation}`).join(", ");
+    }
 
     for (const [prop, value] of Object.entries(stylesToCSS(resolvedBase))) {
       classes.push(injectAtomic(prop, value));
+    }
+    if (animation && acc.pseudo.enterStyle) {
+      const enter = enterAnimation(stylesToCSS(resolveStyles(acc.pseudo.enterStyle, ctx)), animation);
+      if (enter) classes.push(enter);
     }
     for (const [pseudoProp, styles] of Object.entries(acc.pseudo)) {
       const selector = pseudoSelectorMap[pseudoProp];
@@ -560,6 +569,18 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
       : `Styled(${(base as { displayName?: string }).displayName ?? (base as Function).name ?? "Component"})`);
 
   return component;
+}
+
+// `enterStyle` plays as a keyframe animation from those values to the element's
+// own styles when it mounts, so it needs no lifecycle hook.
+function enterAnimation(enterCSS: Record<string, string>, animation: string): string | undefined {
+  const declarations = Object.entries(enterCSS)
+    .map(([prop, value]) => `${prop}: ${value}`)
+    .join("; ");
+  if (!declarations) return undefined;
+  const name = atomicClassName("animation-name", declarations).replace(/^_/, "enter_");
+  injectRule(`@keyframes ${name}`, `@keyframes ${name} { from { ${declarations} } }`);
+  return injectAtomic("animation", `${name} ${animation}`);
 }
 
 // `asChild`: the child element takes this component's classes, attributes and handlers.

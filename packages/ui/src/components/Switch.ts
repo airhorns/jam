@@ -1,85 +1,221 @@
-import { h } from "@jam/core/jsx";
+import { createContext, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
-import { styled } from "../styled";
+import { createStyledContext, styled } from "../styled";
+import type { StyledProps, VariantExtras } from "../styled";
+import { tokenValue } from "../variants";
+import { useControllableState } from "../state";
+
+/** Size flows from the Switch to its Thumb so the thumb and its travel scale together. */
+export const SwitchContext = createStyledContext<{ size?: string | number }>({ size: undefined });
+
+const SwitchState = createContext<{ checked: boolean }>({ checked: false });
+
+/** tamagui's ratio: the track is 65% of the size token tall and twice that wide. */
+function trackHeight(value: unknown, tokens: VariantExtras["tokens"]): number {
+  const token = tokenValue(tokens, "size", value ?? "$true") ?? tokenValue(tokens, "size", "$true") ?? 44;
+  return Math.round(token * 0.65);
+}
 
 /**
- * Switch: toggle switch control.
- *
- * Usage:
- *   <Switch checked={isOn} onCheckedChange={(v) => setOn(v)}>
- *     <Switch.Thumb />
- *   </Switch>
+ * The thumb sits `THUMB_INSET` inside the track's 1px border on every side,
+ * which leaves it exactly one track height of travel.
  */
-export function Switch(props: {
+const THUMB_INSET = 2;
+const thumbSide = (height: number) => height - 2 * THUMB_INSET - 2;
+
+export const SwitchFrame = styled("button", {
+  name: "Switch",
+  context: SwitchContext,
+  defaultProps: {
+    type: "button",
+    role: "switch",
+    position: "relative",
+    boxSizing: "border-box",
+    animation: "quick",
+  },
+  variants: {
+    unstyled: {
+      true: {
+        borderWidth: 0,
+        outlineWidth: 0,
+        backgroundColor: "transparent",
+        padding: 0,
+      },
+      false: {
+        size: "$true",
+        display: "inline-flex",
+        alignItems: "center",
+        flexShrink: 0,
+        padding: 0,
+        borderRadius: 100_000,
+        borderWidth: 1,
+        borderStyle: "solid",
+        borderColor: "$borderColor",
+        backgroundColor: "$background",
+        cursor: "pointer",
+        userSelect: "none",
+        hoverStyle: {
+          borderColor: "$borderColorHover",
+        },
+        focusVisibleStyle: {
+          outlineColor: "$outlineColor",
+          outlineStyle: "solid",
+          outlineWidth: 2,
+          outlineOffset: 2,
+        },
+        disabledStyle: {
+          opacity: 0.5,
+          cursor: "not-allowed",
+        },
+      },
+    },
+
+    size: {
+      "...size": (value, { tokens }) => {
+        const height = trackHeight(value, tokens);
+        return { height, width: height * 2, minWidth: height * 2 };
+      },
+      ":number": (value: number) => {
+        const height = Math.round(value * 0.65);
+        return { height, width: height * 2, minWidth: height * 2 };
+      },
+    },
+
+    checkedState: {
+      true: {
+        backgroundColor: "$color10",
+        borderColor: "$color10",
+        hoverStyle: {
+          backgroundColor: "$color11",
+          borderColor: "$color11",
+        },
+      },
+    },
+  },
+  defaultVariants: {
+    unstyled: false,
+  },
+});
+
+const SwitchThumbFrame = styled("span", {
+  name: "SwitchThumb",
+  context: SwitchContext,
+  defaultProps: {
+    // resolveThemeName only appends component names to the parent chain, so the
+    // SwitchThumb theme has to be asked for by name from inside light_Switch.
+    theme: "SwitchThumb",
+    position: "absolute",
+    boxSizing: "border-box",
+    animation: "quick",
+  },
+  variants: {
+    unstyled: {
+      false: {
+        size: "$true",
+        display: "block",
+        borderRadius: 100_000,
+        backgroundColor: "$background",
+        pointerEvents: "none",
+      },
+    },
+
+    size: {
+      "...size": (value, { tokens }) => {
+        const side = thumbSide(trackHeight(value, tokens));
+        return { width: side, height: side, left: THUMB_INSET, top: "50%", y: "-50%" };
+      },
+      ":number": (value: number) => {
+        const side = thumbSide(Math.round(value * 0.65));
+        return { width: side, height: side, left: THUMB_INSET, top: "50%", y: "-50%" };
+      },
+    },
+
+    checkedState: {
+      true: (_value: boolean, { props, tokens }) => ({
+        x: typeof props.size === "number" ? Math.round(props.size * 0.65) : trackHeight(props.size, tokens),
+        backgroundColor: "$color",
+      }),
+    },
+  },
+  defaultVariants: {
+    unstyled: false,
+  },
+});
+
+export type SwitchThumbProps = StyledProps & {
+  size?: string | number;
+  unstyled?: boolean;
+};
+
+/** The sliding knob; reads `checked` from the Switch so it can translate itself. */
+function SwitchThumbComponent(props: SwitchThumbProps): VNode {
+  const { checked } = useContext(SwitchState);
+  return h(SwitchThumbFrame, {
+    ...(props as Record<string, unknown>),
+    checkedState: checked || undefined,
+    "data-state": checked ? "checked" : "unchecked",
+  });
+}
+SwitchThumbComponent.displayName = "Switch.Thumb";
+
+export type SwitchProps = StyledProps & {
   checked?: boolean;
   defaultChecked?: boolean;
   onCheckedChange?: (checked: boolean) => void;
   disabled?: boolean;
-  size?: string;
+  size?: string | number;
+  unstyled?: boolean;
   id?: string;
   children?: VChild | VChild[];
-  class?: string;
-  [key: string]: unknown;
-}): VNode | null {
-  const {
-    checked = false,
-    onCheckedChange,
-    disabled = false,
-    size = "3",
-    children,
-    ...rest
-  } = props;
-
-  const sizeMap: Record<string, { w: number; h: number; thumb: number }> = {
-    "1": { w: 28, h: 16, thumb: 12 },
-    "2": { w: 36, h: 20, thumb: 16 },
-    "3": { w: 44, h: 24, thumb: 20 },
-    "4": { w: 52, h: 28, thumb: 24 },
-    "5": { w: 60, h: 32, thumb: 28 },
-  };
-  const dims = sizeMap[size] ?? sizeMap["3"];
-
-  return SwitchFrame({
-    ...rest,
-    role: "switch",
-    "aria-checked": checked ? "true" : "false",
-    "aria-disabled": disabled ? "true" : undefined,
-    width: dims.w,
-    height: dims.h,
-    backgroundColor: checked ? "$backgroundFocus" : "$borderColor",
-    onClick: disabled ? undefined : () => onCheckedChange?.(!checked),
-    opacity: disabled ? 0.5 : 1,
-    cursor: disabled ? "not-allowed" : "pointer",
-    children: children ?? h(Switch.Thumb, {
-      width: dims.thumb,
-      height: dims.thumb,
-      transform: `translateX(${checked ? dims.w - dims.thumb - 4 : 2}px)`,
-      transition: "transform 0.15s ease",
-    }),
-  });
-}
-Switch.displayName = "Switch";
-
-const SwitchFrame = styled("div", {
-  name: "SwitchFrame",
-  defaultProps: {
-    display: "flex",
-    alignItems: "center",
-    borderRadius: 100000,
-    position: "relative",
-    padding: 2,
-    userSelect: "none",
-    transition: "background-color 0.15s ease",
-  },
-});
+  onClick?: (event: MouseEvent) => void;
+  onKeyDown?: (event: KeyboardEvent) => void;
+};
 
 /**
- * Switch.Thumb: the sliding thumb indicator.
+ * Switch: a `role="switch"` button whose `Switch.Thumb` child slides between
+ * the two ends of the track. Space and Enter toggle it natively; the arrow keys
+ * set it off and on explicitly.
  */
-Switch.Thumb = styled("div", {
-  name: "SwitchThumb",
-  defaultProps: {
-    borderRadius: 100000,
-    backgroundColor: "white",
-  },
+function SwitchComponent(props: SwitchProps): VNode {
+  const { defaultChecked, onCheckedChange, children, onClick, onKeyDown, ...frameProps } = props;
+  const [checked, setChecked] = useControllableState<boolean>("checked", {
+    value: props.checked,
+    defaultValue: defaultChecked ?? false,
+    onChange: onCheckedChange,
+  });
+  const on = checked === true;
+  const size = props.size ?? (props.unstyled ? undefined : "$true");
+
+  return h(
+    SwitchFrame,
+    {
+      ...(frameProps as Record<string, unknown>),
+      size,
+      checked: undefined,
+      checkedState: on || undefined,
+      "aria-checked": String(on),
+      "data-state": on ? "checked" : "unchecked",
+      onClick: (event: MouseEvent) => {
+        onClick?.(event);
+        if (props.disabled) return;
+        setChecked(!on);
+      },
+      onKeyDown: (event: KeyboardEvent) => {
+        onKeyDown?.(event);
+        if (props.disabled) return;
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        setChecked(event.key === "ArrowRight");
+      },
+    },
+    h(SwitchState.Provider, { value: { checked: on } }, ...(([] as VChild[]).concat(children ?? []))),
+  );
+}
+SwitchComponent.displayName = "Switch";
+
+export const Switch = Object.assign(SwitchComponent, {
+  Frame: SwitchFrame,
+  Thumb: SwitchThumbComponent,
+  /** Provide `size` to every Switch beneath. */
+  Apply: SwitchContext.Provider,
 });

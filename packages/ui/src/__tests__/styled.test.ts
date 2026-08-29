@@ -22,6 +22,7 @@ beforeEach(() => {
     dark: { background: "#000", backgroundHover: "#222", color: "#eee", borderColor: "#333", shadowColor: "rgba(0,0,0,0.6)" },
     light_blue: { background: "#e6f4ff", color: "#003" },
     light_Button: { background: "#f4f4f4" },
+    light_Card: { background: "#fafafa" },
   });
   setTheme("light");
 });
@@ -54,13 +55,31 @@ describe("styled basics", () => {
     const Box = styled("div");
     const r = render(h(Box, { p: 10, bg: "red", paddingHorizontal: 4, inset: 0 }));
     expect(css(r.root)).toMatchObject({
-      padding: "10px",
+      "padding-top": "10px",
+      "padding-bottom": "10px",
       "background-color": "red",
       "padding-left": "4px",
       "padding-right": "4px",
       top: "0px",
       left: "0px",
     });
+    expect(css(r.root).padding).toBeUndefined();
+  });
+
+  it("expands shorthands so later longhands win regardless of class injection order", () => {
+    const Line = styled("div", { defaultProps: { borderBottomWidth: 1, borderStyle: "solid" } });
+    render(h(Line, {}));
+    const Reset = styled("div", {
+      defaultProps: { borderWidth: 0, borderStyle: "solid" },
+      variants: { line: { true: { borderBottomWidth: 1 } } },
+    });
+    const r = render(h(Reset, { line: true }));
+    expect(css(r.root)).toMatchObject({
+      "border-top-width": "0px",
+      "border-bottom-width": "1px",
+      "border-top-style": "solid",
+    });
+    expect(css(r.root)["border-width"]).toBeUndefined();
   });
 
   it("merges class/className props with generated classes", () => {
@@ -68,7 +87,7 @@ describe("styled basics", () => {
     const r = render(h(Box, { class: "custom", className: "other" }));
     expect(r.root.classList.contains("custom")).toBe(true);
     expect(r.root.classList.contains("other")).toBe(true);
-    expect(Array.from(r.root.classList).some((c) => c.startsWith("_pad-"))).toBe(true);
+    expect(Array.from(r.root.classList).some((c) => c.startsWith("_padtop-"))).toBe(true);
   });
 
   it("passes an inline style prop through untouched", () => {
@@ -142,6 +161,9 @@ describe("token and theme resolution", () => {
     setAnimations({ quick: "150ms ease-out" });
     const Box = styled("div");
     expect(css(render(h(Box, { animation: "quick" })).root).transition).toBe("all 150ms ease-out");
+    const el = render(h(Box, { animation: "quick", animateOnly: ["opacity", "backgroundColor"] })).root;
+    expect(css(el).transition).toBe("opacity 150ms ease-out, background-color 150ms ease-out");
+    expect(el.hasAttribute("animateOnly")).toBe(false);
   });
 });
 
@@ -167,6 +189,16 @@ describe("themes on elements", () => {
     expect(Array.from(r.root.classList)).toEqual(expect.arrayContaining(["t_light", "t_light_Button", "is_Button"]));
     const Plain = styled("div", { name: "Nope" });
     expect(render(h(Plain, null)).root.className).not.toContain("t_");
+  });
+
+  it("never nests one component theme inside another", () => {
+    const Card = styled("div", { name: "Card" });
+    const Button = styled("button", { name: "Button" });
+    const r = render(h(Card, null, h(Button, null), h(Button, { theme: "blue" })));
+    const [plain, blue] = Array.from(r.container.querySelectorAll("button"));
+    expect(Array.from(plain.classList)).toEqual(expect.arrayContaining(["t_light", "t_light_Button"]));
+    expect(plain.className).not.toContain("t_light_Card");
+    expect(Array.from(blue.classList)).toEqual(expect.arrayContaining(["t_light", "t_light_blue"]));
   });
 
   it("the Theme component wraps children in a display: contents span", () => {

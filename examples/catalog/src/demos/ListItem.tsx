@@ -5,11 +5,12 @@ import type { ComponentDemos } from "../types";
 export const ListItemDemos: ComponentDemos = {
   name: "ListItem",
   group: "Content",
+  description: "A list row with an optional leading icon, a title/subtitle column and a trailing icon. Announced as a list item, so keep the rows inside a `role=\"list\"` container.",
   demos: [
     {
       title: "In a group",
       render: () => (
-        <YGroup width={320} bordered separator={<Separator />}>
+        <YGroup width={320} bordered role="list" separator={<Separator />}>
           <YGroup.Item>
             <ListItem hoverTheme pressTheme title="Star" subTitle="Add to favourites" icon="★" iconAfter="›" />
           </YGroup.Item>
@@ -24,34 +25,47 @@ export const ListItemDemos: ComponentDemos = {
     },
     {
       title: "Composed children",
+      description: "Wrap the title and subtitle in a YStack to stack them; anything else is laid out as a row.",
       render: () => (
-        <YStack width={320} borderWidth={1} borderColor="$borderColor" borderRadius="$radius.4" overflow="hidden">
-          <ListItem>
-            <ListItem.Icon>✉</ListItem.Icon>
-            <ListItem.Text>
+        <YStack role="list" width={320} bordered borderRadius="$radius.4" overflow="hidden">
+          <ListItem.Frame hoverTheme>
+            <ListItem.Icon placement="before">✉</ListItem.Icon>
+            <YStack flexGrow={1} flexShrink={1} minWidth={0}>
               <ListItem.Title>Inbox</ListItem.Title>
               <ListItem.Subtitle>12 unread messages</ListItem.Subtitle>
-            </ListItem.Text>
+            </YStack>
             <Text opacity={0.5}>12</Text>
-          </ListItem>
+          </ListItem.Frame>
           <Separator />
-          <ListItem>
-            <ListItem.Icon>✎</ListItem.Icon>
-            <ListItem.Text>
+          <ListItem.Frame hoverTheme>
+            <ListItem.Icon placement="before">✎</ListItem.Icon>
+            <YStack flexGrow={1} flexShrink={1} minWidth={0}>
               <ListItem.Title>Drafts</ListItem.Title>
-            </ListItem.Text>
+            </YStack>
             <Text opacity={0.5}>3</Text>
-          </ListItem>
+          </ListItem.Frame>
         </YStack>
       ),
     },
     {
       title: "Sizes",
       render: () => (
-        <YStack width={320} gap="$space.2">
-          {["1", "2", "3", "4", "5"].map((size) => (
-            <ListItem key={size} size={size} title={`Size ${size}`} subTitle="Subtitle" bordered borderRadius="$radius.3" />
+        <YStack role="list" width={320} gap="$space.2">
+          {["$2", "$3", "$4", "$5", "$6"].map((size) => (
+            <ListItem key={size} size={size} title={`Size ${size}`} subTitle="Subtitle" variant="outlined" borderRadius="$radius.3" />
           ))}
+        </YStack>
+      ),
+    },
+    {
+      title: "States",
+      render: () => (
+        <YStack role="list" width={320} gap="$space.2">
+          <ListItem title="Default" hoverTheme pressTheme variant="outlined" borderRadius="$radius.3" />
+          <ListItem title="Active" subTitle="The selected row" active variant="outlined" borderRadius="$radius.3" />
+          <ListItem title="Disabled" disabled variant="outlined" borderRadius="$radius.3" />
+          <ListItem title="A very long title that has to be truncated because it does not fit" iconAfter="›" variant="outlined" borderRadius="$radius.3" />
+          <ListItem variant="outlined" borderRadius="$radius.3">Plain children</ListItem>
         </YStack>
       ),
     },

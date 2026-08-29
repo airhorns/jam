@@ -1,129 +1,268 @@
-import { h } from "@jam/core/jsx";
+import { Portal } from "@jam/core";
+import { createContext, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { styled } from "../styled";
+import type { StyledProps } from "../styled";
+import { getSpaceSized, themeableVariants } from "../variants";
+import { useControllableState, useStableId } from "../state";
+import { readFloatingPosition, useDismissableLayer } from "../layers";
+import type { FloatingPosition } from "../layers";
+import { arrowStyle, floatingStyle, repositionLayer, splitPlacement } from "../floating";
+import type { Placement, Side } from "../floating";
+import { Button } from "./Button";
+import { dataState } from "./Dialog";
+import { Slot } from "./Slot";
+import { YStack } from "./Stacks";
+
+export type PopoverContextValue = {
+  id: string;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  placement: Placement;
+  contentId: string;
+};
+
+export const PopoverContext = createContext<PopoverContextValue | null>(null);
+
+export function usePopoverContext(part: string): PopoverContextValue {
+  const ctx = useContext(PopoverContext);
+  if (!ctx) throw new Error(`Popover.${part} must be rendered inside <Popover>`);
+  return ctx;
+}
+
+export type PopoverProps = {
+  open?: boolean;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Preferred side and alignment; flips when it would leave the viewport. */
+  placement?: Placement;
+  /** Gap in px between the anchor and the content (default 8). */
+  offset?: number;
+  /** Trap focus and lock scroll while open (default false). */
+  modal?: boolean;
+  dismissOnEscape?: boolean;
+  dismissOnOutsidePress?: boolean;
+  children?: VChild | VChild[];
+};
+
+function PopoverRoot(props: PopoverProps): VNode {
+  const id = useStableId("popover");
+  const placement = props.placement ?? "bottom";
+  const offset = props.offset ?? 8;
+  const [openState, setOpen] = useControllableState<boolean>("open", {
+    value: props.open,
+    defaultValue: props.defaultOpen ?? false,
+    onChange: props.onOpenChange,
+  });
+  const open = openState === true;
+  useDismissableLayer(id, open, {
+    onDismiss: () => setOpen(false),
+    modal: props.modal ?? false,
+    autoFocus: true,
+    restoreFocus: true,
+    dismissOnEscape: props.dismissOnEscape,
+    dismissOnOutsidePress: props.dismissOnOutsidePress,
+    onReposition: () => repositionLayer(id, { placement, offset }),
+  });
+  const value: PopoverContextValue = { id, open, setOpen, placement, contentId: `${id}-content` };
+  return h(PopoverContext.Provider, { value }, props.children);
+}
+PopoverRoot.displayName = "Popover";
+
+// ---- Trigger / Anchor / Close ----
+
+export type PopoverTriggerProps = StyledProps & {
+  asChild?: boolean;
+  onClick?: (event: MouseEvent) => void;
+};
+
+function PopoverTrigger(props: PopoverTriggerProps): VNode {
+  const ctx = usePopoverContext("Trigger");
+  const { asChild, onClick, ...rest } = props;
+  return h(asChild ? Slot : Button, {
+    ...rest,
+    "aria-haspopup": "dialog",
+    "aria-expanded": ctx.open,
+    "aria-controls": ctx.contentId,
+    "data-state": dataState(ctx.open),
+    "data-layer-trigger": ctx.id,
+    onClick: (event: MouseEvent) => {
+      onClick?.(event);
+      ctx.setOpen(!ctx.open);
+    },
+  });
+}
+PopoverTrigger.displayName = "PopoverTrigger";
+
+/** Position the content against this element instead of the trigger. */
+function PopoverAnchor(props: StyledProps & { asChild?: boolean }): VNode {
+  const ctx = usePopoverContext("Anchor");
+  const { asChild, ...rest } = props;
+  return h(asChild ? Slot : YStack, { ...rest, "data-layer-anchor": ctx.id });
+}
+PopoverAnchor.displayName = "PopoverAnchor";
+
+function PopoverClose(props: PopoverTriggerProps): VNode {
+  const ctx = usePopoverContext("Close");
+  const { asChild, onClick, ...rest } = props;
+  return h(asChild ? Slot : Button, {
+    ...rest,
+    onClick: (event: MouseEvent) => {
+      onClick?.(event);
+      ctx.setOpen(false);
+    },
+  });
+}
+PopoverClose.displayName = "PopoverClose";
+
+// ---- Content / Arrow ----
+
+export const PopoverContentFrame = styled(YStack, {
+  name: "PopoverContent",
+  defaultProps: {
+    animation: "quick",
+  },
+  variants: {
+    unstyled: {
+      false: {
+        size: "$true",
+        backgroundColor: "$background",
+        borderWidth: 1,
+        borderStyle: "solid",
+        borderColor: "$borderColor",
+        elevate: true,
+        zIndex: 100_000,
+        outlineWidth: 0,
+      },
+    },
+    size: {
+      "...size": getSpaceSized,
+      ":number": getSpaceSized,
+    },
+    elevate: themeableVariants.elevate,
+    elevation: themeableVariants.elevation,
+    bordered: themeableVariants.bordered,
+  },
+  defaultVariants: {
+    unstyled: false,
+  },
+});
+
+/** Slide in from the anchor's side. */
+export function enterStyleFor(side: Side, distance = 6): Record<string, number> {
+  switch (side) {
+    case "bottom":
+      return { opacity: 0, y: -distance };
+    case "top":
+      return { opacity: 0, y: distance };
+    case "right":
+      return { opacity: 0, x: -distance };
+    case "left":
+      return { opacity: 0, x: distance };
+  }
+}
 
 /**
- * Popover: floating content positioned relative to a trigger.
+ * Attributes shared by every floating content element: fixed position, layer
+ * id, resolved placement and a matching enter animation. The caller's own
+ * `style` is merged over the positioning.
+ */
+export function floatingContentProps(id: string, fallback: Placement, props: Record<string, unknown>): { position: FloatingPosition | undefined; attrs: Record<string, unknown> } {
+  const { position, style } = floatingStyle(id);
+  const placement = (position?.placement as Placement | undefined) ?? fallback;
+  const own = props.style;
+  return {
+    position,
+    attrs: {
+      "data-layer": id,
+      "data-placement": placement,
+      enterStyle: enterStyleFor(splitPlacement(placement).side),
+      animateOnly: ["opacity", "transform"],
+      ...props,
+      style: own && typeof own === "object" ? { ...style, ...(own as Record<string, unknown>) } : style,
+    },
+  };
+}
+
+export type PopoverContentProps = StyledProps & {
+  size?: string | number;
+  elevate?: boolean;
+  elevation?: string | number;
+  bordered?: boolean | number;
+  unstyled?: boolean;
+};
+
+function PopoverContent(props: PopoverContentProps): VNode | null {
+  const ctx = usePopoverContext("Content");
+  if (!ctx.open) return null;
+  const { attrs } = floatingContentProps(ctx.id, ctx.placement, props);
+  return h(
+    Portal,
+    null,
+    h(PopoverContentFrame, {
+      id: ctx.contentId,
+      role: "dialog",
+      "data-state": "open",
+      tabIndex: -1,
+      ...attrs,
+    }),
+  );
+}
+PopoverContent.displayName = "PopoverContent";
+
+export const PopoverArrowFrame = styled("span", {
+  name: "PopoverArrow",
+  variants: {
+    unstyled: {
+      false: {
+        backgroundColor: "$background",
+        borderWidth: 1,
+        borderStyle: "solid",
+        borderColor: "$borderColor",
+      },
+    },
+  },
+  defaultVariants: {
+    unstyled: false,
+  },
+});
+
+export type PopoverArrowProps = StyledProps & {
+  /** Arrow square size in px (default 8). */
+  size?: number;
+};
+
+/** An arrow on the content edge that points at the anchor. Render it inside Content. */
+export function FloatingArrow(props: PopoverArrowProps & { layerId: string; frame?: typeof PopoverArrowFrame }): VNode {
+  const { layerId, frame = PopoverArrowFrame, size = 8, ...rest } = props;
+  const position = readFloatingPosition(layerId);
+  const { outer, inner } = arrowStyle(position, size);
+  return h("span", { style: outer, "data-placement": position?.placement, "aria-hidden": "true" }, h(frame, { ...rest, style: inner }));
+}
+
+function PopoverArrow(props: PopoverArrowProps): VNode {
+  const ctx = usePopoverContext("Arrow");
+  return h(FloatingArrow, { ...props, layerId: ctx.id });
+}
+PopoverArrow.displayName = "PopoverArrow";
+
+/**
+ * Popover: non-modal floating content anchored to a trigger. Escape or a
+ * press outside closes it; it flips sides when it would leave the viewport.
  *
- * Usage:
- *   <Popover open={isOpen} onOpenChange={setOpen}>
- *     <Popover.Trigger>Click me</Popover.Trigger>
+ *   <Popover placement="bottom">
+ *     <Popover.Trigger asChild><Button>Options</Button></Popover.Trigger>
  *     <Popover.Content>
  *       <Popover.Arrow />
- *       Popover content
+ *       …
+ *       <Popover.Close asChild><Button size="$2">Done</Button></Popover.Close>
  *     </Popover.Content>
  *   </Popover>
  */
-export function Popover(props: {
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-  placement?: "top" | "bottom" | "left" | "right";
-  children?: VChild | VChild[];
-  [key: string]: unknown;
-}): VNode | null {
-  const { open = false, onOpenChange, placement = "bottom", children, ...rest } = props;
-
-  return PopoverFrame({
-    ...rest,
-    "data-state": open ? "open" : "closed",
-    "data-placement": placement,
-    children,
-  });
-}
-Popover.displayName = "Popover";
-
-const PopoverFrame = styled("div", {
-  name: "PopoverFrame",
-  defaultProps: {
-    display: "inline-flex",
-    position: "relative",
-  },
-});
-
-Popover.Trigger = styled("button", {
-  name: "PopoverTrigger",
-  defaultProps: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-    backgroundColor: "$background",
-    color: "$color",
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "$borderColor",
-    borderRadius: "$radius.3",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 14,
-    hoverStyle: {
-      backgroundColor: "$backgroundHover",
-    },
-  },
-});
-
-Popover.Content = styled("div", {
-  name: "PopoverContent",
-  defaultProps: {
-    position: "absolute",
-    top: "100%",
-    left: "50%",
-    transform: "translateX(-50%)",
-    marginTop: 8,
-    display: "flex",
-    flexDirection: "column",
-    padding: 12,
-    backgroundColor: "$background",
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "$borderColor",
-    borderRadius: "$radius.3",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-    zIndex: 50,
-    minWidth: 200,
-  },
-});
-
-Popover.Arrow = styled("div", {
-  name: "PopoverArrow",
-  defaultProps: {
-    width: 10,
-    height: 10,
-    backgroundColor: "$background",
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "$borderColor",
-    borderBottomWidth: 0,
-    borderRightWidth: 0,
-    transform: "rotate(45deg)",
-    position: "absolute",
-    top: -6,
-    left: "50%",
-    marginLeft: -5,
-  },
-});
-
-Popover.Anchor = styled("div", {
-  name: "PopoverAnchor",
-  defaultProps: {
-    display: "inline-flex",
-  },
-});
-
-Popover.Close = styled("button", {
-  name: "PopoverClose",
-  defaultProps: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-    backgroundColor: "transparent",
-    borderWidth: 0,
-    color: "$color",
-    padding: 4,
-    borderRadius: "$radius.2",
-    hoverStyle: {
-      backgroundColor: "$backgroundHover",
-    },
-  },
+export const Popover = Object.assign(PopoverRoot, {
+  Trigger: PopoverTrigger,
+  Anchor: PopoverAnchor,
+  Content: PopoverContent,
+  Arrow: PopoverArrow,
+  Close: PopoverClose,
 });

@@ -1,76 +1,122 @@
-import { styled } from "../styled";
+import { createStyledContext, styled } from "../styled";
+import type { StyledProps, VariantFunction } from "../styled";
+import { getRadiusSized, tokenValue } from "../variants";
+import { ThemeableStack, YStack } from "./Stacks";
+
+export type CardProps = StyledProps & {
+  size?: string | number;
+  padded?: boolean;
+  elevate?: boolean;
+  elevation?: string | number;
+  bordered?: boolean | number;
+  hoverTheme?: boolean;
+  pressTheme?: boolean;
+  unstyled?: boolean;
+};
+
+/** Shares `size` with Card.Header and Card.Footer so their padding matches. */
+export const CardContext = createStyledContext<{ size?: string | number }>({
+  size: undefined,
+});
 
 /**
- * Card: content container with border and background.
+ * Card: a surface that groups related content. `elevate` adds the themed drop
+ * shadow, `bordered` the themed outline, and `size` picks the radius token.
  */
-export const Card = styled("div", {
+export const CardFrame = styled<CardProps>(ThemeableStack, {
   name: "Card",
-  defaultProps: {
-    display: "flex",
-    flexDirection: "column",
-    position: "relative",
-    overflow: "hidden",
-    backgroundColor: "$background",
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "$borderColor",
-    borderRadius: "$radius.4",
-  },
+  context: CardContext,
   variants: {
+    unstyled: {
+      false: {
+        size: "$true",
+        backgroundColor: "$background",
+        borderRadius: "$true",
+        position: "relative",
+        overflow: "hidden",
+      },
+    },
+
     size: {
-      "1": { padding: 8 },
-      "2": { padding: 12 },
-      "3": { padding: 16 },
-      "4": { padding: 20 },
-      "5": { padding: 24 },
-    },
-    bordered: {
-      false: { borderWidth: 0 },
-    },
-    elevated: {
-      true: { boxShadow: "0 2px 8px rgba(0,0,0,0.1)" },
+      "...size": getRadiusSized,
+      ":number": getRadiusSized,
     },
   },
   defaultVariants: {
-    size: "3",
+    unstyled: false,
   },
-}) as ReturnType<typeof styled> & {
-  Header: ReturnType<typeof styled>;
-  Footer: ReturnType<typeof styled>;
-  Background: ReturnType<typeof styled>;
+});
+
+const paddingFromSpace: VariantFunction = (value, { tokens }) => {
+  const padding = tokenValue(tokens, "space", value);
+  return padding === undefined ? null : { padding };
 };
 
-(Card as any).Header = styled("div", {
+/** Card.Header: the top block, padded from the card's size. */
+export const CardHeader = styled(YStack, {
   name: "CardHeader",
-  defaultProps: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 6,
-    padding: 16,
+  context: CardContext,
+  variants: {
+    unstyled: {
+      false: {
+        size: "$true",
+        zIndex: 10,
+        backgroundColor: "transparent",
+        marginBottom: "auto",
+      },
+    },
+
+    size: {
+      "...space": paddingFromSpace,
+      ":number": paddingFromSpace,
+    },
+  },
+  defaultVariants: {
+    unstyled: false,
   },
 });
 
-(Card as any).Footer = styled("div", {
+/** Card.Footer: a padded row pinned to the bottom of the card. */
+export const CardFooter = styled(CardHeader, {
   name: "CardFooter",
-  defaultProps: {
-    display: "flex",
-    flexDirection: "row",
-    gap: 8,
-    padding: 16,
-    justifyContent: "flex-end",
+  variants: {
+    unstyled: {
+      false: {
+        zIndex: 5,
+        flexDirection: "row",
+        alignItems: "center",
+        marginTop: "auto",
+        marginBottom: 0,
+      },
+    },
   },
 });
 
-(Card as any).Background = styled("div", {
+/** Card.Background: fills the card behind its content, inheriting its radius. */
+export const CardBackground = styled(YStack, {
   name: "CardBackground",
-  defaultProps: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    zIndex: 0,
-    overflow: "hidden",
-    borderRadius: "inherit",
+  variants: {
+    unstyled: {
+      false: {
+        position: "absolute",
+        inset: 0,
+        zIndex: 0,
+        overflow: "hidden",
+        pointerEvents: "none",
+        padding: 0,
+        borderRadius: "inherit",
+      },
+    },
   },
+  defaultVariants: {
+    unstyled: false,
+  },
+});
+
+export const Card = Object.assign(CardFrame, {
+  Header: CardHeader,
+  Footer: CardFooter,
+  Background: CardBackground,
+  /** Provide a size to every Card part beneath. */
+  Apply: CardContext.Provider,
 });

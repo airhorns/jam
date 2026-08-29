@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loadRegistry, showComponent, trackErrors } from "./helpers";
+import { loadRegistry, performRecipe, showComponent, trackErrors } from "./helpers";
 
 test.describe("catalog smoke", () => {
   test("every component page renders all its demos without errors", async ({ page }) => {
@@ -15,11 +15,24 @@ test.describe("catalog smoke", () => {
         for (let i = 0; i < entry.demos.length; i++) {
           const body = cards.nth(i).locator(":scope > :last-child");
           const childCount = await body.evaluate((el) => el.childNodes.length);
-          expect(childCount, `${entry.name} demo "${entry.demos[i]}" has content`).toBeGreaterThan(0);
+          expect(childCount, `${entry.name} demo "${entry.demos[i].title}" has content`).toBeGreaterThan(0);
         }
       }
     }
 
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  test("every shot recipe can be performed without errors", async ({ page }) => {
+    const errors = trackErrors(page);
+    const registry = await loadRegistry(page);
+    for (const entry of registry) {
+      for (const [i, demo] of entry.demos.entries()) {
+        if (!demo.shot) continue;
+        await showComponent(page, entry.name, "light", i);
+        await performRecipe(page, demo.shot);
+      }
+    }
     expect(errors, errors.join("\n")).toEqual([]);
   });
 

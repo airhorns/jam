@@ -249,6 +249,32 @@ describe("mount", () => {
     expect(Array.from(container.querySelectorAll("span")).map((n) => n.textContent)).toEqual(["one", "two"]);
   });
 
+  it("creates svg elements in the SVG namespace and updates them in place", () => {
+    set("icon", "d", "M0 0L1 1");
+    const Icon = () => {
+      const d = String(when(["icon", "d", $.d])[0]?.d ?? "");
+      return h(
+        "svg",
+        { width: 12, viewBox: "0 0 12 12" },
+        h("path", { d, stroke: "currentColor", "stroke-width": 1.5 }),
+        h("foreignObject", null, h("div", null, "html")),
+      );
+    };
+    dispose = mount(h("span", null, h(Icon, null)), container);
+
+    const svg = container.querySelector("svg")!;
+    const path = container.querySelector("path")!;
+    expect(svg.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(path.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(svg.getAttribute("viewBox")).toBe("0 0 12 12");
+    expect(path.getAttribute("stroke-width")).toBe("1.5");
+    expect(container.querySelector("foreignObject div")!.namespaceURI).toBe("http://www.w3.org/1999/xhtml");
+
+    set("icon", "d", "M1 1L2 2");
+    expect(container.querySelector("path")).toBe(path);
+    expect(path.getAttribute("d")).toBe("M1 1L2 2");
+  });
+
   it("focuses elements with autofocus when they are created", () => {
     replace("ui", "show", false);
     const Root = () => {

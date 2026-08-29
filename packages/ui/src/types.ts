@@ -326,6 +326,8 @@ export type ThemeableProps = {
   tag?: string;
   /** Name of a configured animation; applied as a CSS transition. */
   animation?: string;
+  /** Restrict the transition to these style props (default: all). */
+  animateOnly?: string[];
   /** Add a class to this element in addition to generated ones. */
   className?: string;
   class?: string;

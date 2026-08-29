@@ -1,9 +1,9 @@
 import { h } from "@jam/core/jsx";
-import { Stack, XStack, YStack, ZStack, Square, Text } from "@jam/ui";
+import { Stack, ThemeableStack, XStack, YStack, ZStack, Square, SizableText, Text } from "@jam/ui";
 import type { ComponentDemos } from "../types";
 
 const Box = ({ label, color }: { label: string; color: string }) => (
-  <Square size={56} backgroundColor={color} borderRadius="$radius.3" alignItems="center" justifyContent="center">
+  <Square size={56} backgroundColor={color} borderRadius="$radius.3">
     <Text color="white" fontWeight="600">{label}</Text>
   </Square>
 );
@@ -11,7 +11,8 @@ const Box = ({ label, color }: { label: string; color: string }) => (
 export const StacksDemos: ComponentDemos = {
   name: "Stacks",
   group: "Layout",
-  description: "Stack, XStack, YStack and ZStack are the flexbox building blocks.",
+  description:
+    "Stack is a flexbox reset; XStack and YStack pin the direction, ZStack layers its children, and ThemeableStack adds the theme-reactive variants everything else extends.",
   demos: [
     {
       title: "XStack",
@@ -35,6 +36,7 @@ export const StacksDemos: ComponentDemos = {
     },
     {
       title: "ZStack",
+      description: "Each child fills the stack, so it positions against the stack's box.",
       render: () => (
         <ZStack width={140} height={140}>
           <Square position="absolute" top={0} left={0} size={90} backgroundColor="$blue9" borderRadius="$radius.4" />
@@ -59,6 +61,29 @@ export const StacksDemos: ComponentDemos = {
             <Text>centered in a plain Stack</Text>
           </Stack>
         </YStack>
+      ),
+    },
+    {
+      title: "Shape variants",
+      description: "Shared by every stack: bordered, elevate, elevation, circular, transparent, chromeless.",
+      render: () => (
+        <XStack gap="$space.4" flexWrap="wrap">
+          <YStack bordered padding="$space.4" borderRadius="$radius.4"><Text>bordered</Text></YStack>
+          <YStack bordered elevate padding="$space.4" borderRadius="$radius.4" backgroundColor="$background"><Text>elevate</Text></YStack>
+          <YStack bordered elevation="$6" padding="$space.4" borderRadius="$radius.4" backgroundColor="$background"><Text>elevation $6</Text></YStack>
+          <YStack bordered={2} padding="$space.4" borderRadius="$radius.4"><Text>bordered 2px</Text></YStack>
+        </XStack>
+      ),
+    },
+    {
+      title: "ThemeableStack",
+      description: "backgrounded, radiused, padded and the hover/press/focus theme variants.",
+      render: () => (
+        <XStack gap="$space.4" flexWrap="wrap">
+          <ThemeableStack backgrounded radiused padded bordered><SizableText>backgrounded radiused padded</SizableText></ThemeableStack>
+          <ThemeableStack backgrounded radiused padded bordered hoverTheme pressTheme><SizableText>hoverTheme pressTheme</SizableText></ThemeableStack>
+          <ThemeableStack backgrounded radiused padded bordered theme="accent"><SizableText>theme accent</SizableText></ThemeableStack>
+        </XStack>
       ),
     },
   ],

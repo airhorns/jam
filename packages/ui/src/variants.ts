@@ -14,11 +14,19 @@ export function tokenValue(tokens: VariantExtras["tokens"], category: string, va
 /**
  * Step a token up or down its category's scale: `stepToken(tokens, "size", "$4", 1)` → "$4.5".
  * `true` is skipped over so a shift of ±1 always lands on a different value.
+ * `excludeHalfSteps` walks only the whole steps, which is what the font size
+ * tables have keys for.
  */
-export function stepToken(tokens: VariantExtras["tokens"], category: string, current: unknown, shift: number): string {
+export function stepToken(
+  tokens: VariantExtras["tokens"],
+  category: string,
+  current: unknown,
+  shift: number,
+  { excludeHalfSteps = false }: { excludeHalfSteps?: boolean } = {},
+): string {
   const table = tokens[category] ?? {};
   const keys = Object.keys(table)
-    .filter((k) => !k.startsWith("$") && k !== "true")
+    .filter((k) => !k.startsWith("$") && k !== "true" && !(excludeHalfSteps && k.endsWith(".5")))
     .sort((a, b) => (table[a] as number) - (table[b] as number));
   let key = tokenKey(current);
   if (key === "true") {
@@ -63,6 +71,26 @@ export const getSquareSized: VariantFunction = (value, { tokens }) => {
   if (size == null) return null;
   return { width: size, height: size, minWidth: size, minHeight: size };
 };
+
+/** Spacer sizing: width and height from a space token (`$4` → 18px), or a literal number. */
+export const getSpacerSized: VariantFunction = (value, { tokens }) => {
+  const space = tokenValue(tokens, "space", value ?? "$true") ?? tokens.space?.true ?? 0;
+  return { width: space, height: space, minWidth: space, minHeight: space };
+};
+
+/** Radius from the matching radius token (Group, Card…); numbers are literal pixels. */
+export const getRadiusSized: VariantFunction = (value, { tokens }) => {
+  if (value == null) return null;
+  if (typeof value === "number") return { borderRadius: value };
+  const key = tokenKey(value);
+  return { borderRadius: tokens.radius?.[key] ?? tokens.radius?.true };
+};
+
+/** Value of the space token `shift` steps from `value`: a tighter padding than the size implies. */
+export function steppedSpace(tokens: VariantExtras["tokens"], value: unknown, shift: number): number | undefined {
+  if (typeof value === "number") return value;
+  return tokenValue(tokens, "space", stepToken(tokens, "space", value ?? "$true", shift));
+}
 
 /** Padding from the matching space token, radius from the matching radius token (Card, ListItem…). */
 export const getSpaceSized: VariantFunction = (value, { tokens }) => {

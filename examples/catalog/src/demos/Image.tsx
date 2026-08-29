@@ -11,14 +11,16 @@ const landscape =
 export const ImageDemos: ComponentDemos = {
   name: "Image",
   group: "Content",
+  description: "A styled `img`: every style prop works, plus `object-fit` under its CSS name and the React-Native `resizeMode` spelling.",
   demos: [
     {
       title: "Sized",
       render: () => (
-        <XStack gap="$space.4" flexWrap="wrap">
+        <XStack gap="$space.4" flexWrap="wrap" alignItems="flex-start">
           <Image src={landscape} width={200} height={100} alt="Landscape" />
           <Image src={landscape} width={100} height={100} borderRadius="$radius.4" alt="Square crop" />
           <Image src={landscape} width={100} height={100} borderRadius={1000} alt="Circle crop" />
+          <Image src={landscape} width={160} aspectRatio={16 / 9} alt="By aspect ratio" />
         </XStack>
       ),
     },
@@ -26,12 +28,36 @@ export const ImageDemos: ComponentDemos = {
       title: "objectFit",
       render: () => (
         <XStack gap="$space.4" flexWrap="wrap">
-          {(["cover", "contain", "fill", "none"] as const).map((fit) => (
+          {(["cover", "contain", "fill", "none", "scale-down"] as const).map((fit) => (
             <YStack key={fit} gap="$space.2" alignItems="center">
               <Image src={landscape} width={120} height={120} objectFit={fit} backgroundColor="$backgroundHover" alt="" />
-              <Text fontSize={12} opacity={0.6}>{fit}</Text>
+              <Text fontSize="$2" opacity={0.6}>{fit}</Text>
             </YStack>
           ))}
+        </XStack>
+      ),
+    },
+    {
+      title: "resizeMode",
+      description: "The React-Native spelling, mapped onto real object-fit values.",
+      render: () => (
+        <XStack gap="$space.4" flexWrap="wrap">
+          {(["cover", "contain", "stretch", "center"] as const).map((mode) => (
+            <YStack key={mode} gap="$space.2" alignItems="center">
+              <Image src={landscape} width={120} height={120} resizeMode={mode} backgroundColor="$backgroundHover" alt="" />
+              <Text fontSize="$2" opacity={0.6}>{mode}</Text>
+            </YStack>
+          ))}
+        </XStack>
+      ),
+    },
+    {
+      title: "Styled",
+      render: () => (
+        <XStack gap="$space.4" flexWrap="wrap" alignItems="flex-start">
+          <Image src={landscape} width={140} height={90} borderRadius="$radius.4" bordered alt="" />
+          <Image src={landscape} width={140} height={90} borderRadius="$radius.4" opacity={0.5} alt="" />
+          <Image src={landscape} width={140} height={90} borderRadius="$radius.4" elevation="$6" alt="" />
         </XStack>
       ),
     },

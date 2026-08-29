@@ -1,12 +1,15 @@
-// Visual inspection: writes one PNG per component per theme into ./shots.
-// Run with `pnpm shots`. Not a regression test — the images are for humans
-// (and agents) to look at. Filter with SHOTS=Button,Card.
+// Visual inspection: writes one PNG per component per theme into ./shots,
+// plus one viewport PNG per demo that declares a `shot` recipe (opened
+// dialogs, hovered tooltips…). Run with `pnpm shots`. Not a regression test —
+// the images are for humans (and agents) to look at. Filter with SHOTS=Button,Card.
 import { test } from "@playwright/test";
 import { mkdirSync } from "node:fs";
-import { loadRegistry, showComponent } from "./helpers";
+import { loadRegistry, performRecipe, showComponent } from "./helpers";
 
 const outDir = new URL("../shots/", import.meta.url).pathname;
 const only = process.env.SHOTS?.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+
+const slug = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
 test("screenshot every component", async ({ page }) => {
   test.setTimeout(10 * 60 * 1000);
@@ -21,6 +24,12 @@ test("screenshot every component", async ({ page }) => {
         path: `${outDir}${entry.name}.${theme}.png`,
         animations: "disabled",
       });
+      for (const [i, demo] of entry.demos.entries()) {
+        if (!demo.shot) continue;
+        await showComponent(page, entry.name, theme, i);
+        await performRecipe(page, demo.shot);
+        await page.screenshot({ path: `${outDir}${entry.name}.${slug(demo.title)}.${theme}.png`, animations: "disabled" });
+      }
     }
   }
 });

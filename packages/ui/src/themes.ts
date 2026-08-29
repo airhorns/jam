@@ -179,6 +179,7 @@ function invertScheme(name: string): string | undefined {
  *   resolveThemeName("light_blue", undefined, "Button") → "light_blue_Button"
  *   resolveThemeName("light_blue", "accent")        → "light_blue_accent"
  *   resolveThemeName("light_blue_Button", "red")    → "light_red" (walks up the parent chain)
+ *   resolveThemeName("light_Card", undefined, "Button") → "light_Button" (component themes never nest)
  *   resolveThemeName("light", "dark_blue")          → "dark_blue" (full names win)
  *
  * Returns the parent when nothing more specific exists.
@@ -195,6 +196,7 @@ export function resolveThemeName(
     if (inverted && hasTheme(inverted)) base = inverted;
   }
   if (name?.startsWith("$")) name = name.slice(1);
+  if (base && (name || componentName)) base = withoutComponentTheme(base);
 
   if (name) {
     const parts = base ? base.split("_") : [];
@@ -208,6 +210,14 @@ export function resolveThemeName(
   }
   if (componentName && base && hasTheme(`${base}_${componentName}`)) return `${base}_${componentName}`;
   return base;
+}
+
+/** Component theme segments start with a capital: "light_blue_Button" → "light_blue". */
+function withoutComponentTheme(themeName: string): string {
+  const parts = themeName.split("_");
+  const last = parts[parts.length - 1];
+  if (parts.length > 1 && last && last[0] !== last[0].toLowerCase()) parts.pop();
+  return parts.join("_");
 }
 
 // ---- CSS ----

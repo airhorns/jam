@@ -1,39 +1,56 @@
+import { h } from "@jam/core/jsx";
+import type { VNode } from "@jam/core/jsx";
 import { styled } from "../styled";
+import type { StyledProps } from "../styled";
+import { Button } from "./Button";
+import type { ButtonProps } from "./Button";
+import { Stack } from "./Stacks";
 
-/**
- * Form: styled form element.
- */
-export const Form = styled("form", {
+export type FormProps = StyledProps & {
+  /** Called with the submit event; the default page reload is already prevented. */
+  onSubmit?: (event: Event) => void;
+};
+
+export const FormFrame = styled<FormProps>(Stack, {
   name: "Form",
+  tag: "form",
   defaultProps: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 16,
+    gap: "$4",
   },
-}) as ReturnType<typeof styled> & { Trigger: ReturnType<typeof styled> };
+});
 
 /**
- * Form.Trigger: submit button for the form.
+ * Form.Trigger: a submit Button. Use `asChild` to submit from any button-like
+ * child; it must live inside the Form so the browser submits natively.
  */
-(Form as any).Trigger = styled("button", {
-  name: "FormTrigger",
-  defaultProps: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: "$radius.3",
-    backgroundColor: "$background",
-    color: "$color",
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "$borderColor",
-    cursor: "pointer",
-    fontWeight: "600",
-    fontSize: 14,
-    hoverStyle: {
-      backgroundColor: "$backgroundHover",
+function FormTrigger(props: ButtonProps): VNode {
+  const { className, ...rest } = props;
+  return h(Button, {
+    type: "submit",
+    ...rest,
+    className: className ? `is_FormTrigger ${className}` : "is_FormTrigger",
+  });
+}
+FormTrigger.displayName = "FormTrigger";
+
+/**
+ * Form: a `form` whose `onSubmit` runs instead of a page reload. Read the
+ * submitted values from `new FormData(event.target)`.
+ */
+function FormComponent(props: FormProps): VNode {
+  const { onSubmit, ...rest } = props;
+  return h(FormFrame, {
+    ...(rest as Record<string, unknown>),
+    onSubmit: (event: Event) => {
+      event.preventDefault();
+      onSubmit?.(event);
     },
-  },
+  });
+}
+FormComponent.displayName = "Form";
+
+export const Form = Object.assign(FormComponent, {
+  Trigger: FormTrigger,
+  Frame: FormFrame,
+  staticConfig: FormFrame.staticConfig,
 });

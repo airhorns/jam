@@ -10,10 +10,11 @@ export const AlertDialogDemos: ComponentDemos = {
   demos: [
     {
       title: "Confirm destructive action",
+      shot: { click: "open-alert" },
       render: () => {
         const [result, setResult] = useDemoState("alert.result", "");
         return (
-          <YStack gap="$space.3">
+          <YStack gap="$3">
             <AlertDialog>
               <AlertDialog.Trigger asChild>
                 <Button data-testid="open-alert">Delete account</Button>
@@ -25,7 +26,7 @@ export const AlertDialogDemos: ComponentDemos = {
                   <AlertDialog.Description>
                     This action cannot be undone. This will permanently delete your account and remove your data from our servers.
                   </AlertDialog.Description>
-                  <XStack gap="$space.3" justifyContent="flex-end" marginTop="$space.4">
+                  <XStack gap="$3" justifyContent="flex-end">
                     <AlertDialog.Cancel asChild>
                       <Button variant="outlined" onClick={() => setResult("cancelled")} data-testid="alert-cancel">Cancel</Button>
                     </AlertDialog.Cancel>

@@ -6,6 +6,7 @@ import { useDemoState } from "./state";
 export const FormDemos: ComponentDemos = {
   name: "Form",
   group: "Forms",
+  description: "A real `<form>` whose `onSubmit` runs instead of reloading the page. Form.Trigger is the submit button.",
   demos: [
     {
       title: "Basic form",
@@ -15,7 +16,6 @@ export const FormDemos: ComponentDemos = {
           <Form
             maxWidth={380}
             onSubmit={(e: Event) => {
-              e.preventDefault();
               const data = new FormData(e.target as HTMLFormElement);
               setSubmitted(`${data.get("name")} <${data.get("email")}>`);
             }}
@@ -43,6 +43,33 @@ export const FormDemos: ComponentDemos = {
           </Form>
         );
       },
+    },
+    {
+      title: "Trigger",
+      description: "Form.Trigger is a Button with type=\"submit\", so it takes every Button prop; `asChild` merges onto your own button instead.",
+      render: () => (
+        <Form maxWidth={380} gap="$space.3">
+          <Input name="q" placeholder="Enter submits too" />
+          <XStack gap="$space.3" flexWrap="wrap">
+            <Form.Trigger>Default</Form.Trigger>
+            <Form.Trigger size="$3" variant="outlined">Outlined</Form.Trigger>
+            <Form.Trigger theme="accent">Themed</Form.Trigger>
+            <Form.Trigger disabled>Disabled</Form.Trigger>
+          </XStack>
+        </Form>
+      ),
+    },
+    {
+      title: "Inline form",
+      render: () => (
+        <Form flexDirection="row" gap="$space.3" alignItems="flex-end" maxWidth={420}>
+          <YStack gap="$space.2" flexGrow={1}>
+            <Label htmlFor="f-inline">Search</Label>
+            <Input id="f-inline" name="q" type="search" placeholder="Anything" />
+          </YStack>
+          <Form.Trigger theme="accent">Go</Form.Trigger>
+        </Form>
+      ),
     },
   ],
 };

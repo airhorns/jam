@@ -114,16 +114,29 @@ export const shorthandMap: Record<string, string> = {
   ww: "wordWrap",
 };
 
-/** Style props that expand to several CSS longhands. */
+const sides = ["Top", "Right", "Bottom", "Left"];
+const corners = ["TopLeft", "TopRight", "BottomRight", "BottomLeft"];
+
+/**
+ * Style props that expand to CSS longhands. Shorthands never reach the
+ * stylesheet, so a later `paddingBottom` always beats an earlier `padding`
+ * regardless of the order their atomic classes were injected.
+ */
 export const expansionMap: Record<string, string[]> = {
+  padding: sides.map((side) => `padding${side}`),
   paddingHorizontal: ["paddingLeft", "paddingRight"],
   paddingVertical: ["paddingTop", "paddingBottom"],
   paddingStart: ["paddingLeft"],
   paddingEnd: ["paddingRight"],
+  margin: sides.map((side) => `margin${side}`),
   marginHorizontal: ["marginLeft", "marginRight"],
   marginVertical: ["marginTop", "marginBottom"],
   marginStart: ["marginLeft"],
   marginEnd: ["marginRight"],
+  borderWidth: sides.map((side) => `border${side}Width`),
+  borderColor: sides.map((side) => `border${side}Color`),
+  borderStyle: sides.map((side) => `border${side}Style`),
+  borderRadius: corners.map((corner) => `border${corner}Radius`),
   inset: ["top", "right", "bottom", "left"],
 };
 

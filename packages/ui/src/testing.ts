@@ -105,6 +105,24 @@ function parseDeclarations(block: string): Record<string, string> {
   return out;
 }
 
+const shorthandGroups: Record<string, string[]> = {
+  padding: ["padding-top", "padding-right", "padding-bottom", "padding-left"],
+  margin: ["margin-top", "margin-right", "margin-bottom", "margin-left"],
+  "border-width": ["border-top-width", "border-right-width", "border-bottom-width", "border-left-width"],
+  "border-color": ["border-top-color", "border-right-color", "border-bottom-color", "border-left-color"],
+  "border-style": ["border-top-style", "border-right-style", "border-bottom-style", "border-left-style"],
+  "border-radius": ["border-top-left-radius", "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius"],
+};
+
+/** Add `padding: 4px` when all four `padding-*` longhands agree, since the style system only ever emits longhands. */
+function collapseShorthands(declarations: Record<string, string>): Record<string, string> {
+  for (const [shorthand, longhands] of Object.entries(shorthandGroups)) {
+    const values = longhands.map((prop) => declarations[prop]);
+    if (values[0] !== undefined && values.every((value) => value === values[0])) declarations[shorthand] = values[0];
+  }
+  return declarations;
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -139,7 +157,7 @@ export function css(el: Element, pseudo = ""): Record<string, string> {
       if (match) Object.assign(result, parseDeclarations(match[1]));
     }
   }
-  return result;
+  return collapseShorthands(result);
 }
 
 /** Declarations injected for an element inside a given `@media` query. */
@@ -158,7 +176,7 @@ export function mediaCss(el: Element, mediaQuery: string): Record<string, string
       if (match) Object.assign(result, parseDeclarations(match[1]));
     }
   }
-  return result;
+  return collapseShorthands(result);
 }
 
 /** Resolved computed style, for when cascade/inheritance matters. */

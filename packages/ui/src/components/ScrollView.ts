@@ -1,16 +1,29 @@
 import { styled } from "../styled";
+import type { StyledProps } from "../styled";
+import { Stack } from "./Stacks";
+
+export type ScrollViewProps = StyledProps & {
+  horizontal?: boolean;
+  showsScrollIndicator?: boolean;
+  fullscreen?: boolean;
+  unstyled?: boolean;
+};
 
 /**
- * ScrollView: a scrollable container.
+ * ScrollView: a scrolling viewport. Vertical by default; `horizontal` scrolls
+ * along the other axis and lays children out in a row.
  */
-export const ScrollView = styled("div", {
+export const ScrollView = styled<ScrollViewProps>(Stack, {
   name: "ScrollView",
-  defaultProps: {
-    overflow: "auto",
-    display: "flex",
-    flexDirection: "column",
-  },
   variants: {
+    unstyled: {
+      false: {
+        flexDirection: "column",
+        overflowX: "hidden",
+        overflowY: "auto",
+      },
+    },
+
     horizontal: {
       true: {
         flexDirection: "row",
@@ -18,5 +31,13 @@ export const ScrollView = styled("div", {
         overflowY: "hidden",
       },
     },
+
+    /** `false` hides the scrollbar without disabling scrolling. */
+    showsScrollIndicator: {
+      false: { scrollbarWidth: "none" },
+    },
+  },
+  defaultVariants: {
+    unstyled: false,
   },
 });

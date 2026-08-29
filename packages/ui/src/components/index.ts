@@ -1,5 +1,5 @@
 // Layout
-export { Stack, XStack, YStack, ZStack } from "./Stacks";
+export { Stack, ThemeableStack, XStack, YStack, ZStack } from "./Stacks";
 export { Spacer } from "./Spacer";
 export { Separator } from "./Separator";
 export { ScrollView } from "./ScrollView";
@@ -41,8 +41,10 @@ export { Accordion } from "./Accordion";
 export { Tabs } from "./Tabs";
 
 // Notifications
-export { Toast } from "./Toast";
+export { Toast, toastController, useToastController, useToastState } from "./Toast";
+export type { ToastOptions, ToastRecord, ToastPlacement } from "./Toast";
 export { Tooltip } from "./Tooltip";
 
 // Utility
 export { VisuallyHidden } from "./VisuallyHidden";
+export { Slot } from "./Slot";

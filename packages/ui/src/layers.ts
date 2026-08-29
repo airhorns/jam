@@ -3,8 +3,9 @@
 // locks body scroll while a modal is open, and restores focus on close.
 //
 // Components register while rendering (`useDismissableLayer`) and mark
-// their DOM with `data-layer={id}` (content) and `data-layer-anchor={id}`
-// (trigger) so the program can tell inside from outside.
+// their DOM with `data-layer={id}` (content), `data-layer-trigger={id}` and
+// optionally `data-layer-anchor={id}` so the program can tell inside from
+// outside and floating.ts knows what to position against.
 
 import { $, _, db, retract, set, when } from "@jam/core";
 
@@ -40,7 +41,7 @@ function contentElement(id: string): HTMLElement | null {
 
 function isInsideLayer(id: string, target: Node | null): boolean {
   if (!(target instanceof Element)) return false;
-  return target.closest(`[data-layer="${id}"], [data-layer-anchor="${id}"]`) != null;
+  return target.closest(`[data-layer="${id}"], [data-layer-trigger="${id}"], [data-layer-anchor="${id}"]`) != null;
 }
 
 /** Drop layers whose content has left the document (component unmounted while open). */
@@ -215,6 +216,8 @@ export type FloatingPosition = {
   placement: string;
   arrowX?: number;
   arrowY?: number;
+  anchorWidth: number;
+  anchorHeight: number;
 };
 
 export function readFloatingPosition(id: string): FloatingPosition | undefined {

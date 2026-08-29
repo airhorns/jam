@@ -57,6 +57,8 @@ const ATTRIBUTE_ALIASES: Record<string, string> = {
   viewBox: "viewBox",
 };
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
 function attributeName(key: string): string {
   return ATTRIBUTE_ALIASES[key] ?? key;
 }
@@ -86,9 +88,9 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
   );
 
   // --- Phase 2: Patch DOM from all VDOM claims ---
-  const managed = new Map<string, HTMLElement | Text>();
+  const managed = new Map<string, Element | Text>();
   const pendingFocus: HTMLElement[] = [];
-  const mountedRefs = new Map<string, { element: HTMLElement; refKey: string; callback: ElementRef }>();
+  const mountedRefs = new Map<string, { element: Element; refKey: string; callback: ElementRef }>();
 
   function releaseElementRef(entityId: string) {
     const mounted = mountedRefs.get(entityId);
@@ -140,7 +142,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
 
     const visited = new Set<string>();
 
-    function syncElementRef(entityId: string, el: HTMLElement) {
+    function syncElementRef(entityId: string, el: Element) {
       const refKey = elementRefs.get(entityId);
       const callback = refKey ? (db.getRef(refKey) as ElementRef | undefined) : undefined;
       if (!refKey || !callback) {
@@ -150,11 +152,11 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       const mounted = mountedRefs.get(entityId);
       if (mounted?.refKey === refKey && mounted.element === el) return;
       if (mounted) mounted.callback(null);
-      callback(el);
+      callback(el as HTMLElement);
       mountedRefs.set(entityId, { element: el, refKey, callback });
     }
 
-    function reconcile(entityId: string): Node | null {
+    function reconcile(entityId: string, inSvg = false): Node | null {
       const tag = tags.get(entityId);
       if (!tag || visited.has(entityId)) return null;
       visited.add(entityId);
@@ -171,10 +173,11 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
         return node;
       }
 
+      const svg = inSvg || tag === "svg";
       let el = managed.get(entityId);
       let created = false;
-      if (!(el instanceof HTMLElement) || el.tagName.toLowerCase() !== tag) {
-        el = document.createElement(tag);
+      if (!(el instanceof Element) || el.tagName.toLowerCase() !== tag.toLowerCase()) {
+        el = svg ? document.createElementNS(SVG_NS, tag) : document.createElement(tag);
         managed.set(entityId, el);
         created = true;
       }
@@ -194,10 +197,11 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
           const attr = attributeName(key);
           if (DOM_PROPERTIES.has(key) && key in el) {
             if ((el as any)[key] !== value) (el as any)[key] = value;
+            // Keep any attribute the property reflects to (e.g. a hidden input's value).
+            activeAttrs.add(attr);
             // Reflect boolean state as an attribute too so CSS selectors and
-            // tests can see it; `value` stays a property only.
+            // tests can see it.
             if (typeof value === "boolean") {
-              activeAttrs.add(attr);
               if (value) {
                 if (!el.hasAttribute(attr)) el.setAttribute(attr, "");
               } else if (el.hasAttribute(attr)) {
@@ -210,7 +214,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
             if (value) {
               activeAttrs.add(attr);
               if (!el.hasAttribute(attr)) el.setAttribute(attr, "");
-              if (created && attr === "autofocus") pendingFocus.push(el);
+              if (created && attr === "autofocus" && el instanceof HTMLElement) pendingFocus.push(el);
             } else if (el.hasAttribute(attr)) {
               el.removeAttribute(attr);
             }
@@ -250,7 +254,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       const childList = children.get(entityId) ?? [];
       const childNodes: Node[] = [];
       for (const [, childId] of childList) {
-        const node = reconcile(childId);
+        const node = reconcile(childId, svg && tag !== "foreignObject");
         if (node) childNodes.push(node);
       }
       for (let i = 0; i < childNodes.length; i++) {

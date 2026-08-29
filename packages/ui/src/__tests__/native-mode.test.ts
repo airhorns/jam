@@ -114,7 +114,7 @@ describe("native mode", () => {
     const styleFacts = facts.filter(f => f[0] === "dom:0" && f[1] === "style");
     expect(styleFacts.length).toBeGreaterThan(0);
 
-    const paddingFact = styleFacts.find(f => f[2] === "padding");
+    const paddingFact = styleFacts.find(f => f[2] === "paddingTop");
     expect(paddingFact).toBeDefined();
     expect(paddingFact![3]).toBe(16);
 
@@ -169,7 +169,7 @@ describe("native mode", () => {
     });
 
     const styleFacts = Array.from(db.facts.values()).filter(f => f[0] === "dom:0" && f[1] === "style");
-    const paddingFact = styleFacts.find(f => f[2] === "padding");
+    const paddingFact = styleFacts.find(f => f[2] === "paddingTop");
     expect(paddingFact).toBeDefined();
     expect(paddingFact![3]).toBe(16);
   });

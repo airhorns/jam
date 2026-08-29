@@ -63,6 +63,8 @@ one class on `<html>` and no atomic classes are rehashed.
   semantics.
 - A styled component with a `name` picks up its component theme automatically:
   `Button` inside `light_blue` renders with `t_light_blue_Button` classes.
+  Component themes never nest: a `Button` inside `light_Card` resolves to
+  `light_Button`, and `theme="red"` inside `light_blue_Button` to `light_red`.
 - `useThemeName()` / `useTheme()` read the theme in effect for the current
   component; `resolveThemeValue("$background")` returns the concrete colour.
 
@@ -112,11 +114,20 @@ Style props also accept:
   selector repeats `:root` by the query's position in the media config, so
   later (larger min-width) queries win regardless of injection order.
 - shorthands (`p`, `px`, `bg`, `br`, `ai`, `jc`, …) from `shorthandMap`.
+  `padding`, `margin`, `borderWidth`, `borderColor`, `borderStyle`,
+  `borderRadius`, `inset` and the `Horizontal`/`Vertical` variants expand to
+  longhands (`expansionMap`) as each layer merges, so `borderWidth: 0` in
+  `defaultProps` and `borderBottomWidth: 1` in a variant compose
+  deterministically. A multi-value string such as `"0 auto"` is not
+  supported; set the sides individually.
 - transform pieces `x y scale rotate …` composed into `transform`, and
   `shadowColor/Offset/Radius/Opacity` composed into `box-shadow`.
-- `animation="quick"` → a `transition` from the configured presets.
+- `animation="quick"` → `transition: all <preset>`; `animateOnly={["opacity",
+  "transform"]}` limits it to those properties.
+- `enterStyle={{ opacity: 0, y: -4 }}` with an `animation` plays a keyframe
+  animation from those values to the resolved styles when the element mounts.
 - `asChild` merges the resolved class and passthrough props onto the single
-  child element instead of rendering a wrapper.
+  child element instead of rendering a wrapper (see `docs/Slot.md`).
 
 Every declaration becomes its own atomic class `_<abbrev>[-pseudo|-m]-<hash>`
 in `<style id="jamagui-styles">`, deduped per declaration.
@@ -146,7 +157,8 @@ together.
   at a time, so calling it again unmounts the previous one.
 - `css(el, pseudo?)` returns the declarations injected for an element's
   classes (`css(button, ":hover")`), `mediaCss(el, query)` for media rules,
-  `computed(el)` for the cascade.
+  `computed(el)` for the cascade. Both add the shorthand (`padding`,
+  `border-radius`, …) when all of its longhands agree.
 - `resetUI()` clears the fact DB, token/theme/font caches, injected styles,
   media listeners and DOM; call it in `beforeEach` before `createJamUI(...)`.
 - `click/keydown/keyup/type/focus/blur/pointerEnter/pointerLeave/tick`.

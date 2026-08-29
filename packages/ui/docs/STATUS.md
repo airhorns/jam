@@ -64,7 +64,60 @@ events, `resetUI`) — 212 unit tests across 13 files. `examples/catalog` render
 every component in both themes; Playwright smoke suite in CI, `pnpm shots` for
 visual review.
 
-**Still open (next pass).** Overlay/menu behaviour (open state, dismiss,
-keyboard, focus), `Card` should use its `surface1` component theme and show
-elevation, remaining components need the same compound/context treatment as
-Button, and per-component docs.
+## After the component pass
+
+Every component now has real behaviour, tokenised styling, a DOM test file and
+a `docs/<Component>.md` (usage, props, parts, keyboard, theming, accessibility).
+
+**Behaviour helpers** (`state.ts`, `layers.ts`, `floating.ts`,
+`components/roving-focus.ts`): `useControllableState`, `useStableId`,
+`useDismissableLayer` (Escape/outside-press dismissal, focus trap, autofocus
+and focus restore, scroll lock), `repositionLayer`/`floatingStyle` (placement
+against an anchor, flipping and shifting to stay in the viewport),
+`rovingFocus`/`rovingTabIndex` for arrow-key groups. Overlays portal to the mount root and
+sit at `zIndex` 100000 (toasts 100001).
+
+**Components.** `Dialog`/`AlertDialog`/`Sheet` are modal layers; `Popover`,
+`Tooltip` and `Select` are anchored floating layers; `Toast` has a declarative
+form and an imperative `toastController` with a `Toast.Viewport`. `Checkbox`,
+`Switch`, `RadioGroup`, `ToggleGroup`, `Slider`, `Tabs` and `Accordion` are
+keyboard-operable with the ARIA roles/states of their tamagui counterparts.
+`Form` is a real `form` with a submit `Trigger`; `Input`/`TextArea`,
+`Label`, `Progress`, `Spinner`, `Avatar`, `Image`, `Card`, `ListItem`,
+`Group`, `Separator`, `ScrollView` and the shapes take their sizes from the
+tokens. `asChild` (via `Slot`) is supported on every trigger/close part.
+
+**Style system additions.** `enterStyle` plays as a keyframe animation from
+the given values; `animateOnly` restricts a transition to listed props
+(floating layers use `["opacity", "transform"]` so their position never
+animates). Shorthand style props (`padding`, `margin`, `borderWidth`,
+`borderColor`, `borderStyle`, `borderRadius`, `inset`, the axis variants)
+expand to longhands before styles merge, so precedence between a shorthand and
+a longhand is decided by layer order, never by stylesheet injection order.
+Component themes never nest: a `Button` inside `light_Card` resolves to
+`light_Button`. `StyledComponent<P>` lets `P` override a style prop's type
+(`Sheet`'s numeric `position`).
+
+**Core.** SVG elements are created in the SVG namespace (children of
+`foreignObject` return to HTML); attributes that back a DOM property
+(`value`, `checked`, …) are kept across reconciles so hidden form inputs keep
+their value.
+
+**QA.** 404 unit tests across 40 files in `packages/jamagui`, 76 in
+`packages/core`. The catalog has a demo page per component with "shot
+recipes" (click/hover/focus before capture) so open overlays are
+screenshotted; `pnpm test:e2e` renders every demo and performs every recipe,
+`pnpm shots` writes light and dark screenshots for review.
+
+**Known constraints.**
+
+- Attributes and inline styles set imperatively by event handlers are removed
+  on the next reconcile; components must drive the DOM through facts.
+- `Select` discovers its options by walking its own VNode children, so items
+  must be direct descendants (arrays/fragments/`Group` are fine), not rendered
+  by another component.
+- `$backgroundActive` equals `$background` and `$borderColor` in the base
+  light theme equals the `Button` background, as in tamagui's v4 templates.
+- Plain `Card` and `Avatar` fallbacks share the page background in the
+  default theme; use `bordered`/`elevate` or a sub-theme on flat surfaces.
+- `styled(Base, { name })` looks up a component theme by the new name only.

@@ -1,50 +1,39 @@
 import { styled } from "../styled";
+import type { StyledProps } from "../styled";
+import { ThemeableStack } from "./Stacks";
+import { getSquareSized } from "../variants";
+
+export type ShapeProps = StyledProps & {
+  size?: string | number;
+  circular?: boolean;
+  bordered?: boolean | number;
+  elevation?: string | number;
+  elevate?: boolean;
+};
 
 /**
- * Square: fixed aspect-ratio square. Set `size` to control both width and height.
+ * Square: a centred box whose `size` sets both dimensions. Accepts a size
+ * token (`$4`, `4`) or a literal number of pixels.
  */
-export const Square = styled("div", {
+export const Square = styled<ShapeProps>(ThemeableStack, {
   name: "Square",
   defaultProps: {
-    display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    flexDirection: "column",
   },
   variants: {
     size: {
-      "1": { width: 20, height: 20 },
-      "2": { width: 30, height: 30 },
-      "3": { width: 40, height: 40 },
-      "4": { width: 50, height: 50 },
-      "5": { width: 60, height: 60 },
-      "6": { width: 80, height: 80 },
-      "7": { width: 100, height: 100 },
-      "8": { width: 120, height: 120 },
+      "...size": getSquareSized,
+      ":number": getSquareSized,
     },
   },
 });
 
-/**
- * Circle: a square with borderRadius making it circular.
- */
-export const Circle = styled("div", {
+/** Circle: a Square with a fully rounded border radius. */
+export const Circle = styled<ShapeProps>(Square, {
   name: "Circle",
   defaultProps: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 100000,
-  },
-  variants: {
-    size: {
-      "1": { width: 20, height: 20 },
-      "2": { width: 30, height: 30 },
-      "3": { width: 40, height: 40 },
-      "4": { width: 50, height: 50 },
-      "5": { width: 60, height: 60 },
-      "6": { width: 80, height: 80 },
-      "7": { width: 100, height: 100 },
-      "8": { width: 120, height: 120 },
-    },
+    borderRadius: 100_000,
   },
 });

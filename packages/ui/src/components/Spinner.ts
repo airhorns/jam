@@ -1,53 +1,82 @@
 import { h } from "@jam/core/jsx";
-import type { VChild, VNode } from "@jam/core/jsx";
+import type { VNode } from "@jam/core/jsx";
+import { injectRule } from "../css";
 import { styled } from "../styled";
+import type { StyledProps, VariantFunction } from "../styled";
+import { tokenValue } from "../variants";
 
-let spinnerKeyframesInjected = false;
+const SPIN = "jamagui-spin";
 
-function injectSpinnerKeyframes(): void {
-  if (spinnerKeyframesInjected || typeof document === "undefined") return;
-  spinnerKeyframesInjected = true;
-
-  const style = document.createElement("style");
-  style.textContent = `@keyframes _jui_spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`;
-  document.head.appendChild(style);
+// The keyframes and the animation shorthand can't come from style props, so
+// they are one injected rule; the doubled class beats the atomic classes.
+function injectSpinnerRules(): void {
+  injectRule(`@keyframes ${SPIN}`, `@keyframes ${SPIN} { to { transform: rotate(360deg) } }`);
+  injectRule("jamagui-spinner", `.is_Spinner.is_Spinner { animation: ${SPIN} 0.85s linear infinite }`);
 }
+
+const ringSized = (diameter: number) => ({
+  width: diameter,
+  height: diameter,
+  borderWidth: Math.max(2, Math.round(diameter / 12)),
+});
+
+const spinnerSized: VariantFunction = (value, { tokens }) => {
+  const diameter = tokenValue(tokens, "size", value);
+  return diameter === undefined ? null : ringSized(diameter);
+};
+
+export type SpinnerProps = StyledProps & {
+  size?: "small" | "large" | string | number;
+  /** Colour of the leading arc; defaults to the theme's `$color`. */
+  color?: string;
+};
+
+export const SpinnerFrame = styled<SpinnerProps>("div", {
+  name: "Spinner",
+  defaultProps: {
+    display: "inline-block",
+    boxSizing: "border-box",
+    flexShrink: 0,
+    borderStyle: "solid",
+    borderRadius: 100_000,
+    // All four longhands: a `border-color` shorthand beside `border-top-color`
+    // would win or lose by stylesheet order rather than by specificity.
+    borderTopColor: "$color",
+    borderRightColor: "$borderColor",
+    borderBottomColor: "$borderColor",
+    borderLeftColor: "$borderColor",
+    role: "progressbar",
+    "aria-label": "Loading",
+    "aria-busy": "true",
+  },
+  variants: {
+    size: {
+      small: ringSized(20),
+      large: ringSized(36),
+      "...size": spinnerSized,
+      ":number": spinnerSized,
+    },
+
+    color: {
+      ":string": (value: string) => ({ borderTopColor: value }),
+    },
+  },
+  defaultVariants: {
+    size: "small",
+  },
+});
 
 /**
- * Spinner: CSS-animated loading indicator.
+ * Spinner: an indeterminate loading ring. `size` takes `"small"`, `"large"` or
+ * a size token; `color` tints the leading arc.
  */
-export function Spinner(props: {
-  size?: string;
-  color?: string;
-  children?: VChild | VChild[];
-  [key: string]: unknown;
-}): VNode {
-  injectSpinnerKeyframes();
-
-  const { size = "3", color, ...rest } = props;
-
-  const sizeMap: Record<string, number> = {
-    "1": 16, "2": 20, "3": 24, "4": 32, "5": 40,
-  };
-  const dim = sizeMap[size] ?? 24;
-
-  return SpinnerFrame({
-    ...rest,
-    width: dim,
-    height: dim,
-    borderWidth: 2,
-    borderColor: color || "$borderColor",
-    borderTopColor: color || "$color",
-  });
+function SpinnerComponent(props: SpinnerProps): VNode {
+  injectSpinnerRules();
+  return h(SpinnerFrame, props as Record<string, unknown>);
 }
-Spinner.displayName = "Spinner";
+SpinnerComponent.displayName = "Spinner";
 
-const SpinnerFrame = styled("div", {
-  name: "SpinnerFrame",
-  defaultProps: {
-    display: "inline-flex",
-    borderRadius: 100000,
-    borderStyle: "solid",
-    // Animation applied via inline style since we can't easily remember animation through the token system
-  },
+export const Spinner = Object.assign(SpinnerComponent, {
+  Frame: SpinnerFrame,
+  staticConfig: SpinnerFrame.staticConfig,
 });
