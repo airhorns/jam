@@ -41,8 +41,6 @@ export function applyState(state: CatalogState): void {
   set("catalog", "demo", state.demo ?? -1);
   setTheme(state.theme);
   document.documentElement.dataset.theme = state.theme;
-  document.body.style.background = state.theme === "dark" ? "#111113" : "#fff";
-  document.body.style.color = state.theme === "dark" ? "#ededef" : "#18181b";
   writeUrl(state);
 }
 

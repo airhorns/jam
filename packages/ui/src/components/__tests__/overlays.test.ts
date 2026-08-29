@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { db } from "@jam/core";
-import { clearInjectedStyles } from "../../css";
+import { resetUI } from "../../testing";
 import { Portal } from "../Portal";
 import { Dialog } from "../Dialog";
 import { Sheet } from "../Sheet";
@@ -8,8 +7,7 @@ import { AlertDialog } from "../AlertDialog";
 import { Popover } from "../Popover";
 
 beforeEach(() => {
-  db.clear();
-  clearInjectedStyles();
+  resetUI();
 });
 
 describe("Portal", () => {

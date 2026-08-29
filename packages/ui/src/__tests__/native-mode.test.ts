@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { resetUI } from "../testing";
 import { $, db, replace, when } from "@jam/core";
 import { emitVdom } from "@jam/core/jsx";
 import { h } from "@jam/core/jsx";
@@ -76,7 +77,7 @@ function runNativeCatalogMount(source: string) {
 
 describe("native mode", () => {
   beforeEach(() => {
-    db.clear();
+    resetUI();
     setNativeMode(false);
   });
 

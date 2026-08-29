@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { db } from "@jam/core";
+import { resetUI } from "../testing";
 import { createTokens, getToken, resolveTokenValue, isTokenRef, isThemeRef } from "../tokens";
 
 beforeEach(() => {
-  db.clear();
+  resetUI();
 });
 
 describe("createTokens", () => {

@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { db } from "@jam/core";
-import { clearInjectedStyles } from "../../css";
+import { resetUI } from "../../testing";
 import { Card } from "../Card";
 import { Avatar } from "../Avatar";
 import { Image } from "../Image";
@@ -11,8 +10,7 @@ import { Accordion } from "../Accordion";
 import { Tabs } from "../Tabs";
 
 beforeEach(() => {
-  db.clear();
-  clearInjectedStyles();
+  resetUI();
 });
 
 describe("Card", () => {

@@ -71,7 +71,7 @@ All application state — including the VDOM — lives in a shared **fact databa
   - `persist.ts` — mirrors facts into a `jam_facts` table and restores them on load
   - `tables.ts` — `syncTable`: live queries over PGlite tables ↔ facts, fact writes → SQL (what Electric sync plugs into)
 
-- **@jam/ui** (`packages/ui/`): Tamagui-inspired styled component library with theming, tokens, and 40+ components.
+- **@jam/ui** (`packages/ui/`): Port of tamagui's web style system and components onto the fact DB. `createJamUI(defaultConfig)` sets up tokens, 390 generated themes (CSS variables behind `t_light t_light_blue t_light_blue_Button` class chains), fonts, media queries and animations; `styled()` supports tamagui-style variants, styled contexts, pseudo/media props and sub-tree theming via `<Theme>`. Read `packages/ui/docs/STYLE-SYSTEM.md` before changing the style system; `docs/STATUS.md` tracks what is still rough.
 
 ### Examples
 
@@ -81,7 +81,7 @@ All application state — including the VDOM — lives in a shared **fact databa
 - `examples/trello-clone/` — Kanban board example with unit + e2e tests
 - `examples/obsidian-clone/` — Linked-note workspace example with unit + e2e tests
 - `examples/linearlite/` — Linear clone on PGlite + Electric sync (port of Electric's demo), unit + e2e tests
-- `examples/catalog/` — @jam/ui component catalog (port 5175). One demo file per component in `src/demos/`, registered in `src/registry.ts`. URL params: `?c=Button&theme=dark&chrome=0&demo=1`. `pnpm test:e2e` runs the smoke suite (every component renders in both themes with no console errors); `pnpm shots` (or `just shots Button,Card`) writes a PNG per component per theme into `shots/` for visual inspection.
+- `examples/catalog/` — @jam/ui component catalog (port 5175; set `CATALOG_PORT` if that port is taken — Playwright reuses whatever server is listening there). One demo file per component in `src/demos/`, registered in `src/registry.ts`. URL params: `?c=Button&theme=dark&chrome=0&demo=1`. `pnpm test:e2e` runs the smoke suite (every component renders in both themes with no console errors); `pnpm shots` (or `just shots Button,Card`) writes a PNG per component per theme into `shots/` for visual inspection.
 - `examples/ui-catalog/` — Browser catalog for `@jam/ui` component review
 - `examples/ui-catalog-native/` — Native catalog source for SwiftUI renderer coverage
 - `examples/counter-ios/` and `examples/spatial-counter/` — Swift native examples

@@ -1,13 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { db } from "@jam/core";
-import { clearInjectedStyles } from "../../css";
+import { resetUI } from "../../testing";
 import { Toast } from "../Toast";
 import { Tooltip } from "../Tooltip";
 import { VisuallyHidden } from "../VisuallyHidden";
 
 beforeEach(() => {
-  db.clear();
-  clearInjectedStyles();
+  resetUI();
 });
 
 describe("Toast", () => {

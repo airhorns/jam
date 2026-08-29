@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { db } from "@jam/core";
-import { clearInjectedStyles } from "../../css";
+import { resetUI } from "../../testing";
 import { Stack, XStack, YStack, ZStack } from "../Stacks";
 import { Text, SizableText, Paragraph, Heading, H1, H2, H3, H4, H5, H6 } from "../Text";
 import { Spacer } from "../Spacer";
@@ -11,8 +10,7 @@ import { Square, Circle } from "../Shapes";
 import { createFont } from "../../fonts";
 
 beforeEach(() => {
-  db.clear();
-  clearInjectedStyles();
+  resetUI();
 });
 
 describe("Stacks", () => {
@@ -69,9 +67,10 @@ describe("Text", () => {
     expect(result.tag).toBe("p");
   });
 
-  it("Heading renders an h2 tag", () => {
+  it("Heading renders a span with the heading role", () => {
     const result = Heading({ children: "title" }) as any;
-    expect(result.tag).toBe("h2");
+    expect(result.tag).toBe("span");
+    expect(result.props.role).toBe("heading");
   });
 
   it("H1-H6 render correct tags", () => {

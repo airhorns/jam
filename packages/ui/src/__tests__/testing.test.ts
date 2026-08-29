@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { h } from "@jam/core/jsx";
 import { set, when, $ } from "@jam/core";
-import { render, css, click, resetUI, computed } from "../testing";
+import { render, css, click, resetUI, computed, injectedRules } from "../testing";
 import { createJamUI } from "../config";
 import { styled } from "../styled";
 import { Button } from "../components/Button";
@@ -10,10 +10,11 @@ import { Button } from "../components/Button";
 beforeEach(() => {
   resetUI();
   createJamUI({
-    tokens: { radius: { "3": 8 }, space: { "2": 8 } },
+    tokens: { size: { "2": 32, true: 44 }, radius: { "2": 8, true: 9 }, space: { "2": 8, true: 16 } },
     themes: {
       light: { background: "#fff", backgroundHover: "#eee", backgroundPress: "#ddd", color: "#111", borderColor: "#ccc", outlineColor: "blue" },
     },
+    fonts: { body: { family: "Inter", size: { "2": 12, true: 14 } } },
     defaultTheme: "light",
   });
 });
@@ -28,8 +29,10 @@ describe("testing harness", () => {
     expect(styles["display"]).toBe("flex");
     expect(styles["height"]).toBe("32px");
     expect(styles["border-radius"]).toBe("8px");
-    expect(css(button, ":hover")["background-color"]).toBe("#eee");
-    expect(css(button, ":active")["background-color"]).toBe("#ddd");
+    expect(css(button, ":hover")["background-color"]).toBe("var(--backgroundHover)");
+    expect(css(button, ":active")["background-color"]).toBe("var(--backgroundPress)");
+    expect(injectedRules().find((rule) => rule.startsWith(".t_light "))).toContain("--backgroundHover: #eee");
+    expect(css(r.get("span"))["font-size"]).toBe("12px");
   });
 
   it("computed styles resolve through injected classes", () => {

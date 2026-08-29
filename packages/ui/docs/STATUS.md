@@ -37,3 +37,34 @@ re-render when the fact changes.
 VNode's `tag` / that `props.class` is defined / that sub-components exist. No
 DOM rendering, no CSS inspection, no events. No visual catalog, no browser
 tests for the library. CI does not exercise the library beyond `vitest run`.
+
+## After the style-system pass
+
+See [STYLE-SYSTEM.md](./STYLE-SYSTEM.md) for how the system now works.
+
+**Style system.** Ported from tamagui v4: default tokens/fonts/media/animations
+(`defaultConfig`), 390 generated themes (`createDefaultThemes`: light/dark ×
+colour × component), themes as CSS variables behind `t_<name>` class chains so
+switching theme changes one class, `<Theme>` / `theme` / `themeInverse`
+sub-tree theming, component themes (`light_Button`) picked up by `name`.
+Variants support spreads, typed catch-alls, functional variants with tamagui's
+`extras`, nested variant defaults, `defaultVariants`, `unstyled`, and
+`mergeVariants` on extension. `createStyledContext` propagates props between
+compound parts. Pseudo (`hover/press/focus/focusVisible/focusWithin/disabled/
+placeholder`) and media props emit real CSS rules. Fonts follow tamagui's
+`createFont` fill semantics; `SizableText`/`Paragraph`/`Heading`/`H1–H6` and
+`Button` (`Frame`/`Text`/`Icon`/`Apply`) match tamagui's composition.
+
+**Core.** Component expansion is tracked, so `when()` in nested components
+re-renders; `createContext`/`useContext`, `useComponentId`, `Portal`; `mount`'s
+disposer removes the tree's facts.
+
+**QA.** DOM tests through `@jam/ui/testing` (`render`, `css`, `mediaCss`,
+events, `resetUI`) — 212 unit tests across 13 files. `examples/catalog` renders
+every component in both themes; Playwright smoke suite in CI, `pnpm shots` for
+visual review.
+
+**Still open (next pass).** Overlay/menu behaviour (open state, dismiss,
+keyboard, focus), `Card` should use its `surface1` component theme and show
+elevation, remaining components need the same compound/context treatment as
+Button, and per-component docs.

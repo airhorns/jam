@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { db } from "@jam/core";
+import { resetUI } from "../testing";
 import {
   createThemes,
   setTheme,
@@ -12,7 +12,7 @@ import {
 } from "../themes";
 
 beforeEach(() => {
-  db.clear();
+  resetUI();
 });
 
 describe("createThemes", () => {

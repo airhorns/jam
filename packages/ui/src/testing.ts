@@ -5,6 +5,10 @@ import { db, mount } from "@jam/core";
 import type { VChild } from "@jam/core/jsx";
 import { clearInjectedStyles } from "./css";
 import { disposeMedia } from "./media";
+import { resetTokenCache } from "./tokens";
+import { clearThemeCSS, resetThemeCache } from "./themes";
+import { resetFontCache } from "./fonts";
+import { resetSettings } from "./settings";
 
 export type RenderResult = {
   container: HTMLElement;
@@ -22,8 +26,12 @@ const mounted: Array<() => void> = [];
 /**
  * Mount a VNode into a fresh container attached to document.body. The
  * container is removed on `unmount()` or by `cleanup()`.
+ *
+ * Only one tree can be mounted at a time (all trees expand under the "dom"
+ * root in the fact database), so rendering again unmounts the previous tree.
  */
 export function render(vnode: VChild): RenderResult {
+  cleanup();
   const container = document.createElement("div");
   document.body.appendChild(container);
   const dispose = mount(vnode, container);
@@ -56,15 +64,22 @@ export function cleanup(): void {
 }
 
 /**
- * Reset all global UI state: mounted trees, the fact database, injected
- * styles, media listeners, and any leftover portal/theme DOM.
+ * Reset all global UI state: mounted trees, the fact database, design-system
+ * caches, injected styles, media listeners, and any leftover portal/theme DOM.
  */
 export function resetUI(): void {
   cleanup();
   db.clear();
+  resetTokenCache();
+  resetThemeCache();
+  resetFontCache();
+  resetSettings();
+  clearThemeCSS();
   clearInjectedStyles();
   disposeMedia();
+  if (typeof document === "undefined") return;
   document.body.innerHTML = "";
+  document.documentElement.className = "";
   document.querySelectorAll("style[id^='jamagui']").forEach((el) => el.remove());
 }
 
