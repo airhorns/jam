@@ -9,6 +9,9 @@ import { resetTokenCache } from "./tokens";
 import { clearThemeCSS, resetThemeCache } from "./themes";
 import { resetFontCache } from "./fonts";
 import { resetSettings } from "./settings";
+import { resetLayers } from "./layers";
+import { createJamUI } from "./config";
+import { defaultConfig } from "./default-config";
 
 export type RenderResult = {
   container: HTMLElement;
@@ -77,10 +80,17 @@ export function resetUI(): void {
   clearThemeCSS();
   clearInjectedStyles();
   disposeMedia();
+  resetLayers();
   if (typeof document === "undefined") return;
   document.body.innerHTML = "";
   document.documentElement.className = "";
   document.querySelectorAll("style[id^='jamagui']").forEach((el) => el.remove());
+}
+
+/** `resetUI()` followed by `createJamUI(defaultConfig)`: a clean default design system. */
+export function setupDefaultUI(): void {
+  resetUI();
+  createJamUI(defaultConfig);
 }
 
 function parseDeclarations(block: string): Record<string, string> {

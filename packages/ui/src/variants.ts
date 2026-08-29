@@ -57,6 +57,24 @@ export const getButtonSized: VariantFunction = (value, { tokens, props }) => {
   };
 };
 
+/** Square sizing: width and height from a size token (Avatar, Square, Checkbox…). */
+export const getSquareSized: VariantFunction = (value, { tokens }) => {
+  const size = tokenValue(tokens, "size", value) ?? value;
+  if (size == null) return null;
+  return { width: size, height: size, minWidth: size, minHeight: size };
+};
+
+/** Padding from the matching space token, radius from the matching radius token (Card, ListItem…). */
+export const getSpaceSized: VariantFunction = (value, { tokens }) => {
+  if (value == null) return null;
+  if (typeof value === "number") return { padding: value, borderRadius: value * 0.5 };
+  const key = tokenKey(value);
+  return {
+    padding: tokens.space?.[key] ?? tokens.space?.true,
+    borderRadius: tokens.radius?.[key] ?? tokens.radius?.true,
+  };
+};
+
 /**
  * Text sizing from a font size token: fontSize, lineHeight, fontWeight and
  * letterSpacing from the font in effect. `$true` maps to the font's default size.

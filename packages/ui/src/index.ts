@@ -102,12 +102,22 @@ export type {
 export {
   getButtonSized,
   getFontSized,
+  getSquareSized,
+  getSpaceSized,
   getElevation,
   getSizedElevation,
   themeableVariants,
   stepToken,
   tokenValue,
 } from "./variants";
+
+// Behaviour helpers for building interactive components
+export { useControllableState, useControllableList, useStableId } from "./state";
+export type { ControllableStateOptions } from "./state";
+export { useDismissableLayer, isTopmostLayer, focusableElements, resetLayers } from "./layers";
+export type { LayerOptions, FloatingPosition } from "./layers";
+export { computePosition, repositionLayer, floatingStyle, arrowStyle, splitPlacement } from "./floating";
+export type { Placement, Side, Alignment, Rect } from "./floating";
 export { atomicClassName, injectAtomic, injectRule, stylesToCSS, clearInjectedStyles } from "./css";
 export {
   shorthandMap,

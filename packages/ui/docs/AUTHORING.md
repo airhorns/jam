@@ -1,0 +1,95 @@
+# Authoring @jam/ui components
+
+Every component in `src/components/` follows the same shape so the library
+stays consistent. `Button.ts` and `Text.ts` are the reference implementations.
+Read `STYLE-SYSTEM.md` first.
+
+## Structure
+
+- One file per component family (`Card.ts` exports `Card` with
+  `Card.Header`/`Card.Footer`/`Card.Background`).
+- Compound components are built with `Object.assign(Root, { Part, ... })`,
+  never `(X as any).Part = ...`. Export a `<Name>Props` type.
+- Component `name`s match tamagui's (`Card`, `CardHeader`, `Input`,
+  `SwitchThumb`…) so the `is_<Name>` classes and component themes
+  (`light_Button`, `light_Input`, `light_SwitchThumb`…) line up.
+- Stateful parts share state through `createStyledContext` (for style props
+  like `size`) or `createContext` from `@jam/core` (for behaviour like
+  `open`/`onOpenChange`). Store uncontrolled state with `useControllableState`
+  from `../state`.
+- Interactive elements render real `<button>`/`<input>` elements so keyboard
+  and focus work for free; use `role`/`aria-*` for anything else.
+- Overlays register with `useDismissableLayer` (`../layers`) and position with
+  `../floating`; content goes through `Portal` from `@jam/core`.
+
+## Styling rules
+
+- No literal pixel sizes or colours. Sizes come from tokens through a `size`
+  variant (`"...size"` spread with `getButtonSized`/`getFontSized`/
+  `getSpaceSized`-style helpers in `../variants`; add a helper there when a
+  new shape is needed). Colours are theme refs (`$background`, `$color`,
+  `$borderColor`, `$backgroundHover`, `$color10`…) or colour tokens.
+- Default look lives under `unstyled: { false: { … } }` with
+  `defaultVariants: { unstyled: false }`, so `unstyled` strips it; use
+  `defaultProps` only for structural CSS (display, position, box-sizing).
+- Shadows via `elevation`/`elevate` from `themeableVariants`, never
+  hard-coded `boxShadow`. Radii via `$true`/`$4` radius tokens or
+  `borderRadius: 100000` for circles.
+- Pseudo states use `hoverStyle`/`pressStyle`/`focusVisibleStyle`/
+  `disabledStyle`; disabled elements get the real `disabled` attribute.
+- Transitions via `animation="quick"` etc., not literal `transition` strings.
+
+## Per-component checklist
+
+1. **Implementation** in `src/components/<Name>.ts` following the rules above.
+2. **Tests** in `src/components/__tests__/<group>.test.ts` with
+   `// @vitest-environment happy-dom`, using `render`, `css`, `click`,
+   `keydown`, `type` from `../../testing`. Cover: tag/role/aria, default
+   size resolves to token values, each variant, theme refs become
+   `var(--…)`, and every behaviour (toggle, keyboard, dismiss, controlled vs
+   uncontrolled, callbacks).
+3. **Docs** in `docs/<Name>.md` following the template below.
+4. **Catalog demo** in `examples/catalog/src/demos/<Name>.tsx`: one demo per
+   variant group plus one interactive demo with `data-testid`s. Run
+   `CATALOG_PORT=5176 pnpm shots <Name>` from `examples/catalog` and look at
+   both PNGs in `shots/` — fix anything that looks off before moving on.
+5. `pnpm exec vitest run` and `pnpm typecheck` pass in `packages/jamagui`,
+   `pnpm typecheck` passes in `examples/catalog`.
+
+## Doc template (`docs/<Name>.md`)
+
+```markdown
+# Name
+
+One-paragraph description and when to use it.
+
+## Usage
+
+```tsx
+import { Name } from "@jam/ui";
+
+<Name size="$4">…</Name>
+```
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+
+## Parts
+
+`Name.Part` — what it renders and which props it accepts.
+
+## Variants
+
+`size`, `variant`, … with what each does.
+
+## Theming
+
+Which theme keys it reads (`$background`, `$borderColor`…), the component
+theme it uses (`light_Name`), and how `theme="…"` affects it.
+
+## Accessibility
+
+Roles, keyboard interactions, focus behaviour.
+```
