@@ -88,7 +88,7 @@ importers:
         version: 6.4.2(@types/node@22.20.1)(tsx@4.23.13)
       vitest:
         specifier: ^3.0.0
-        version: 3.2.4(@types/node@22.20.1)(jsdom@29.0.2)(msw@2.13.4(@types/node@22.20.1)(typescript@5.9.3))(tsx@4.23.13)
+        version: 3.2.4(@types/node@22.20.1)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@22.20.1)(typescript@5.9.3))(tsx@4.23.13)
 
   examples/obsidian-clone:
     dependencies:
@@ -107,7 +107,7 @@ importers:
         version: 6.4.2(@types/node@25.6.0)(tsx@4.23.13)
       vitest:
         specifier: ^3.0.0
-        version: 3.2.4(@types/node@25.6.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.23.13)
+        version: 3.2.4(@types/node@25.6.0)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.23.13)
 
   examples/puddy-vite:
     dependencies:
@@ -147,7 +147,7 @@ importers:
         version: 6.4.2(@types/node@25.6.0)(tsx@4.21.0)
       vitest:
         specifier: ^3.0.0
-        version: 3.2.4(@types/node@25.6.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.21.0)
+        version: 3.2.4(@types/node@25.6.0)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.21.0)
 
   examples/trello-clone:
     dependencies:
@@ -166,7 +166,7 @@ importers:
         version: 6.4.2(@types/node@25.6.0)(tsx@4.23.13)
       vitest:
         specifier: ^3.0.0
-        version: 3.2.4(@types/node@25.6.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.23.13)
+        version: 3.2.4(@types/node@25.6.0)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.23.13)
 
   examples/ui-catalog:
     dependencies:
@@ -206,6 +206,9 @@ importers:
         specifier: ^6.13.0
         version: 6.15.0
     devDependencies:
+      happy-dom:
+        specifier: ^17.6.3
+        version: 17.6.3
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
@@ -214,7 +217,7 @@ importers:
         version: 6.4.2(@types/node@25.6.0)(tsx@4.23.13)
       vitest:
         specifier: ^3.0.0
-        version: 3.2.4(@types/node@25.6.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.23.13)
+        version: 3.2.4(@types/node@25.6.0)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.23.13)
 
   packages/meta-agent:
     dependencies:
@@ -236,7 +239,7 @@ importers:
         version: 6.4.2(@types/node@25.6.0)(tsx@4.23.13)
       vitest:
         specifier: ^3.0.0
-        version: 3.2.4(@types/node@25.6.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.23.13)
+        version: 3.2.4(@types/node@25.6.0)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.23.13)
 
   packages/native:
     dependencies:
@@ -277,7 +280,7 @@ importers:
         version: 6.4.2(@types/node@25.6.0)(tsx@4.23.13)
       vitest:
         specifier: ^3.0.0
-        version: 3.2.4(@types/node@25.6.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.23.13)
+        version: 3.2.4(@types/node@25.6.0)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.23.13)
 
 packages:
 
@@ -1379,6 +1382,10 @@ packages:
     resolution: {integrity: sha512-5bJ+nf/UCpAjHM8i06fl7eLyVC9iuNAjm9qzkiu2ZGhM0VscSvS6WDPfAwkdkBuoXGM9FJSbKl6wylMwP9Ktig==}
     engines: {node: ^12.22.0 || ^14.16.0 || ^16.0.0 || >=17.0.0}
 
+  happy-dom@17.6.3:
+    resolution: {integrity: sha512-UVIHeVhxmxedbWPCfgS55Jg2rDfwf2BCKeylcPSqazLz5w3Kri7Q4xdBJubsr/+VUzFLh0VjIvh13RaDA2/Xug==}
+    engines: {node: '>=20.0.0'}
+
   headers-polyfill@5.0.1:
     resolution: {integrity: sha512-1TJ6Fih/b8h5TIcv+1+Hw0PDQWJTKDKzFZzcKOiW1wJza3XoAQlkCuXLbymPYB8+ZQyw8mHvdw560e8zVFIWyA==}
 
@@ -1719,9 +1726,17 @@ packages:
     resolution: {integrity: sha512-o8qghlI8NZHU1lLPrpi2+Uq7abh4GGPpYANlalzWxyWteJOCsr/P+oPBA49TOLu5FTZO4d3F9MnWJfiMo4BkmA==}
     engines: {node: '>=18'}
 
+  webidl-conversions@7.0.0:
+    resolution: {integrity: sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==}
+    engines: {node: '>=12'}
+
   webidl-conversions@8.0.1:
     resolution: {integrity: sha512-BMhLD/Sw+GbJC21C/UgyaZX41nPt8bUTg+jWyDeg7e7YN4xOM05YPSIXceACnXVtqyEw/LMClUQMtMZ+PGGpqQ==}
     engines: {node: '>=20'}
+
+  whatwg-mimetype@3.0.0:
+    resolution: {integrity: sha512-nt+N2dzIutVRxARx1nghPKGv1xHikU7HKdfafKkLNLindmPU/ch3U31NOCGGA/dmPcmb1VlofO0vnKAcsm0o/Q==}
+    engines: {node: '>=12'}
 
   whatwg-mimetype@5.0.0:
     resolution: {integrity: sha512-sXcNcHOC51uPGF0P/D4NVtrkjSU2fNsm9iog4ZvZJsL3rjoDAzXZhkm2MWt1y+PUdggKAYVoMAIYcs78wJ51Cw==}
@@ -2594,6 +2609,11 @@ snapshots:
 
   graphql@16.13.2: {}
 
+  happy-dom@17.6.3:
+    dependencies:
+      webidl-conversions: 7.0.0
+      whatwg-mimetype: 3.0.0
+
   headers-polyfill@5.0.1:
     dependencies:
       '@types/set-cookie-parser': 2.4.10
@@ -3002,7 +3022,7 @@ snapshots:
       fsevents: 2.3.3
       tsx: 4.23.13
 
-  vitest@3.2.4(@types/node@22.20.1)(jsdom@29.0.2)(msw@2.13.4(@types/node@22.20.1)(typescript@5.9.3))(tsx@4.23.13):
+  vitest@3.2.4(@types/node@22.20.1)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@22.20.1)(typescript@5.9.3))(tsx@4.23.13):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.4
@@ -3029,6 +3049,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 22.20.1
+      happy-dom: 17.6.3
       jsdom: 29.0.2
     transitivePeerDependencies:
       - jiti
@@ -3044,7 +3065,7 @@ snapshots:
       - tsx
       - yaml
 
-  vitest@3.2.4(@types/node@25.6.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.21.0):
+  vitest@3.2.4(@types/node@25.6.0)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.21.0):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.4
@@ -3071,6 +3092,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 25.6.0
+      happy-dom: 17.6.3
       jsdom: 29.0.2
     transitivePeerDependencies:
       - jiti
@@ -3086,7 +3108,7 @@ snapshots:
       - tsx
       - yaml
 
-  vitest@3.2.4(@types/node@25.6.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.23.13):
+  vitest@3.2.4(@types/node@25.6.0)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@5.9.3))(tsx@4.23.13):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.4
@@ -3113,6 +3135,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 25.6.0
+      happy-dom: 17.6.3
       jsdom: 29.0.2
     transitivePeerDependencies:
       - jiti
@@ -3132,7 +3155,11 @@ snapshots:
     dependencies:
       xml-name-validator: 5.0.0
 
+  webidl-conversions@7.0.0: {}
+
   webidl-conversions@8.0.1: {}
+
+  whatwg-mimetype@3.0.0: {}
 
   whatwg-mimetype@5.0.0: {}
 

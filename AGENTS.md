@@ -64,8 +64,8 @@ All application state — including the VDOM — lives in a shared **fact databa
 - **@jam/core** (`packages/core/`): The reactive database and rendering engine.
   - `db.ts` — FactDB: MobX-reactive fact store with per-pattern indexing and Datalog-style pattern matching
   - `primitives.ts` — Public API: `claim`, `remember`, `replace`, `forget`, `when`, `whenever`, `transaction`, `$`, `_`
-  - `jsx.ts` — Custom JSX factory (`h`/`Fragment`) with deterministic entity ID generation
-  - `renderer.ts` — Two-phase rendering: emit VDOM claims into the fact DB, then patch the real DOM
+  - `jsx.ts` — Custom JSX factory (`h`/`Fragment`) with deterministic entity ID generation; `expandRoot` runs the component tree (with `createContext`/`useContext`, `useComponentId`, `Portal`) and `emitExpanded` writes the result as facts
+  - `renderer.ts` — Two-phase rendering: expand the tree in a tracked reaction, emit VDOM claims into the fact DB, then patch the real DOM
   - `select.ts` — CSS selector queries over VDOM facts
   - `pglite.ts` / `pglite-worker.ts` — `openDatabase`: PGlite (Postgres in WASM) in a shared worker, backed by IndexedDB
   - `persist.ts` — mirrors facts into a `jam_facts` table and restores them on load
@@ -87,10 +87,17 @@ All application state — including the VDOM — lives in a shared **fact databa
 
 ### Two-Phase Rendering Pipeline
 
-1. **Emit phase**: Execute component tree via JSX, write VDOM facts (prefixed `dom:`) into the fact DB
+1. **Emit phase**: Expand the whole component tree inside a MobX reaction (every component runs tracked, so `when()` anywhere in the tree re-renders on change), then write VDOM facts (prefixed `dom:`) into the fact DB
 2. **Patch phase**: Read VDOM facts back out, reconcile against the real DOM
 
 This means external "programs" (using `whenever`) can observe and decorate any element's VDOM facts without touching the component that created them.
+
+Component-level primitives from `@jam/core`:
+
+- `createContext(default)` / `useContext(ctx)` — `<ctx.Provider value>` scopes a value to a subtree; resolved during expansion
+- `useComponentId()` — the stable entity id of the calling component instance; use it to key per-instance state in the fact DB (`set(id, "open", true)`)
+- `<Portal>` — renders children as direct children of the mount container (for overlays); ids stay derived from the portal's own tree position
+- `injectVdom(parentId, startIndex, ...nodes)` — add children to an existing element from outside the tree
 
 ## JSX Configuration
 

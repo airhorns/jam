@@ -19,6 +19,7 @@
     "mobx": "^6.13.0"
   },
   "devDependencies": {
+    "happy-dom": "^17.6.3",
     "typescript": "^5.9.0",
     "vite": "^6.0.0",
     "vitest": "^3.0.0"
