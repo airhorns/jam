@@ -1,0 +1,108 @@
+import { createJamUI } from "@jam/ui";
+
+// Catalog design-system setup. Once @jam/ui ships a default config this
+// collapses to createJamUI(defaultConfig).
+export function setupUI(): void {
+  createJamUI({
+    tokens: {
+      size: {
+        "0": 0, "0.25": 2, "0.5": 4, "0.75": 8, "1": 20, "1.5": 24, "2": 28, "2.5": 32,
+        "3": 36, "3.5": 40, "4": 44, "true": 44, "4.5": 48, "5": 52, "6": 64, "7": 74,
+        "8": 84, "9": 94, "10": 104, "11": 124, "12": 144, "13": 164, "14": 184,
+        "15": 204, "16": 224, "17": 224, "18": 244, "19": 264, "20": 284,
+      },
+      space: {
+        "0": 0, "0.25": 0.5, "0.5": 1, "0.75": 2, "1": 5, "1.5": 6, "2": 7, "2.5": 8,
+        "3": 9, "3.5": 10, "4": 11, "true": 11, "4.5": 12, "5": 13, "6": 16, "7": 19,
+        "8": 21, "9": 24, "10": 26, "11": 31, "12": 36, "13": 41, "14": 46, "15": 51,
+        "16": 56, "17": 56, "18": 61, "19": 66, "20": 71,
+      },
+      radius: {
+        "0": 0, "1": 3, "2": 5, "3": 7, "4": 9, "true": 9, "5": 10, "6": 16, "7": 19,
+        "8": 22, "9": 26, "10": 34, "11": 42, "12": 50,
+      },
+      zIndex: { "0": 0, "1": 100, "2": 200, "3": 300, "4": 400, "5": 500 },
+      color: {
+        white: "#fff",
+        black: "#000",
+        blue9: "#0090ff",
+        blue10: "#0588f0",
+        red9: "#e5484d",
+        green9: "#30a46c",
+        yellow9: "#ffe629",
+      },
+    },
+    themes: {
+      light: {
+        background: "#fff",
+        backgroundHover: "#f4f4f5",
+        backgroundPress: "#e4e4e7",
+        backgroundFocus: "#e4e4e7",
+        backgroundStrong: "#fafafa",
+        backgroundTransparent: "rgba(255,255,255,0)",
+        color: "#18181b",
+        colorHover: "#09090b",
+        colorPress: "#09090b",
+        colorFocus: "#09090b",
+        colorTransparent: "rgba(0,0,0,0)",
+        borderColor: "#d4d4d8",
+        borderColorHover: "#a1a1aa",
+        borderColorPress: "#a1a1aa",
+        borderColorFocus: "#0090ff",
+        placeholderColor: "#a1a1aa",
+        outlineColor: "rgba(0,144,255,0.5)",
+        shadowColor: "rgba(0,0,0,0.12)",
+        shadowColorHover: "rgba(0,0,0,0.2)",
+        accentBackground: "#0090ff",
+        accentColor: "#fff",
+        color1: "#fcfcfc", color2: "#f9f9f9", color3: "#f0f0f0", color4: "#e8e8e8",
+        color5: "#e0e0e0", color6: "#d9d9d9", color7: "#cecece", color8: "#bbb",
+        color9: "#8d8d8d", color10: "#838383", color11: "#646464", color12: "#202020",
+      },
+      dark: {
+        background: "#111113",
+        backgroundHover: "#222325",
+        backgroundPress: "#2a2b2e",
+        backgroundFocus: "#2a2b2e",
+        backgroundStrong: "#0a0a0b",
+        backgroundTransparent: "rgba(17,17,19,0)",
+        color: "#ededef",
+        colorHover: "#fff",
+        colorPress: "#fff",
+        colorFocus: "#fff",
+        colorTransparent: "rgba(255,255,255,0)",
+        borderColor: "#3a3a3f",
+        borderColorHover: "#55555b",
+        borderColorPress: "#55555b",
+        borderColorFocus: "#3b9eff",
+        placeholderColor: "#6f6f78",
+        outlineColor: "rgba(59,158,255,0.5)",
+        shadowColor: "rgba(0,0,0,0.5)",
+        shadowColorHover: "rgba(0,0,0,0.7)",
+        accentBackground: "#3b9eff",
+        accentColor: "#fff",
+        color1: "#111111", color2: "#191919", color3: "#222222", color4: "#2a2a2a",
+        color5: "#313131", color6: "#3a3a3a", color7: "#484848", color8: "#606060",
+        color9: "#6e6e6e", color10: "#7b7b7b", color11: "#b4b4b4", color12: "#eeeeee",
+      },
+    },
+    defaultTheme: "light",
+    fonts: {
+      body: {
+        family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
+        size: { "1": 11, "2": 12, "3": 13, "4": 14, "true": 14, "5": 16, "6": 18, "7": 20, "8": 23, "9": 30, "10": 46 },
+        lineHeight: { "1": 16, "2": 18, "3": 20, "4": 22, "true": 22, "5": 24, "6": 26, "7": 28, "8": 32, "9": 40, "10": 56 },
+        weight: { "1": "300", "4": "400", "6": "600", "7": "700" },
+      },
+      heading: {
+        family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
+        size: { "1": 11, "2": 12, "3": 13, "4": 14, "true": 14, "5": 16, "6": 18, "7": 20, "8": 23, "9": 30, "10": 46 },
+        weight: { "4": "400", "6": "600", "7": "700" },
+      },
+      mono: {
+        family: "'SF Mono', 'Fira Code', Menlo, Consolas, monospace",
+        size: { "1": 11, "2": 12, "3": 13, "4": 14, "true": 14, "5": 16 },
+      },
+    },
+  });
+}

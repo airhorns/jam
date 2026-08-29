@@ -81,6 +81,7 @@ All application state — including the VDOM — lives in a shared **fact databa
 - `examples/trello-clone/` — Kanban board example with unit + e2e tests
 - `examples/obsidian-clone/` — Linked-note workspace example with unit + e2e tests
 - `examples/linearlite/` — Linear clone on PGlite + Electric sync (port of Electric's demo), unit + e2e tests
+- `examples/catalog/` — @jam/ui component catalog (port 5175). One demo file per component in `src/demos/`, registered in `src/registry.ts`. URL params: `?c=Button&theme=dark&chrome=0&demo=1`. `pnpm test:e2e` runs the smoke suite (every component renders in both themes with no console errors); `pnpm shots` (or `just shots Button,Card`) writes a PNG per component per theme into `shots/` for visual inspection.
 - `examples/ui-catalog/` — Browser catalog for `@jam/ui` component review
 - `examples/ui-catalog-native/` — Native catalog source for SwiftUI renderer coverage
 - `examples/counter-ios/` and `examples/spatial-counter/` — Swift native examples
@@ -110,8 +111,9 @@ All packages use a custom JSX factory — **not React**:
 ## Testing
 
 - **Unit tests**: Vitest, files in `src/__tests__/`. Run a single test file: `cd packages/core && pnpm exec vitest run src/__tests__/db.test.ts`
+- **DOM tests**: add `// @vitest-environment happy-dom` at the top of a test file to get a real DOM. `@jam/ui/testing` exports `render()`, `css(el, pseudo?)` (declarations the style system injected for an element), `computed()`, `click/keydown/type/focus`, and `resetUI()`.
 - **E2E tests**: Playwright (Chromium). Test servers use per-worktree default ports to avoid cross-worktree collisions; set `PLAYWRIGHT_PORT` or the example-specific `*_PLAYWRIGHT_PORT` variable to override.
-- **CI** runs: install → typecheck → UI tests → unit tests → folk-todo, puddy-vite, and linearlite e2e. A separate CI job runs core benchmarks. The native Swift packages are not built in CI: `packages/native` bundles `@jam/core` as a single IIFE, which cannot include the PGlite worker.
+- **CI** runs: install → typecheck → UI tests → unit tests → folk-todo, puddy-vite, linearlite and catalog e2e. A separate CI job runs core benchmarks. The native Swift packages are not built in CI: `packages/native` bundles `@jam/core` as a single IIFE, which cannot include the PGlite worker.
 
 ## Browser Automation
 

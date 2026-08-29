@@ -8,6 +8,7 @@ export const Card = styled("div", {
   defaultProps: {
     display: "flex",
     flexDirection: "column",
+    position: "relative",
     overflow: "hidden",
     backgroundColor: "$background",
     borderWidth: 1,

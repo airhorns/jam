@@ -64,7 +64,10 @@ export const Button = styled("button", {
   defaultVariants: {
     size: "3",
   },
-});
+}) as ReturnType<typeof styled> & {
+  Text: ReturnType<typeof styled>;
+  Icon: ReturnType<typeof styled>;
+};
 
 /**
  * Button.Text: styled text inside a button.

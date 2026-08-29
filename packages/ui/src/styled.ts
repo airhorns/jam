@@ -45,11 +45,12 @@ function resolveValue(prop: string, value: unknown): unknown {
 
   if (isThemeRef(value)) {
     const resolved = resolveThemeValue(value);
-    return resolved !== undefined ? resolved : value;
+    if (resolved !== undefined) return resolved;
+    // Bare color tokens ($blue9) fall back to the color token scale, like tamagui.
+    const colorToken = resolveTokenValue(`$color.${(value as string).slice(1)}`);
+    return colorToken !== undefined ? colorToken : value;
   }
 
-  // Check if this property has an implicit token category and value is a plain number-like string
-  // e.g. padding="4" could resolve to space token "4"
   return value;
 }
 
