@@ -108,11 +108,13 @@ const OUTBOX_INSERT_CHUNK = 5000;
 
 type LockRelease = () => Promise<void>;
 
+const webLocks = () => (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks;
+
 /** Hold a Web Lock (one tab per shape / pusher) for as long as `run` takes; without Web Locks just run. */
-function holdLock(name: string, run: (released: Promise<void>) => Promise<void>): LockRelease {
+function holdLock(name: string, run: (released: Promise<void>) => Promise<void>, mode: LockMode = "exclusive"): LockRelease {
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
-  const locks = (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks;
+  const locks = webLocks();
   if (!locks) {
     const done = run(released).catch((e) => console.error("[jam] sync task failed", e));
     return async () => {
@@ -122,7 +124,7 @@ function holdLock(name: string, run: (released: Promise<void>) => Promise<void>)
   }
   const controller = new AbortController();
   const done = locks
-    .request(name, { signal: controller.signal }, () => run(released))
+    .request(name, { mode, signal: controller.signal }, () => run(released))
     .catch((e: unknown) => {
       if ((e as { name?: string })?.name !== "AbortError") console.error("[jam] sync task failed", e);
     });
@@ -132,6 +134,9 @@ function holdLock(name: string, run: (released: Promise<void>) => Promise<void>)
     await done;
   };
 }
+
+/** Every tab subscribed to a shape shares this lock; dropping the shape needs it exclusively. */
+const shapeUseLock = (table: string) => `${table}:in-use`;
 
 /** The Electric browser client pauses hidden tabs; the tab holding a shape's lock must keep streaming for the others. */
 const ALWAYS_VISIBLE = {
@@ -514,7 +519,7 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
   const runPush = (): Promise<void> => {
     if (pushing) return pushing;
     pushing = (async () => {
-      const locks = (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks;
+      const locks = webLocks();
       const run = async () => {
         try {
           let dropped = false;
@@ -636,11 +641,36 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
     return () => feed.unsubscribe();
   };
 
+  /** Mark the shape in use across tabs before touching its tables, so no tab's prune can drop them underneath us. */
+  const startElectric = async (shape: Shape): Promise<() => Promise<void>> => {
+    let markInUse!: () => void;
+    const inUse = new Promise<void>((resolve) => (markInUse = resolve));
+    const releaseUse = holdLock(
+      shapeUseLock(shape.compiled.id),
+      async (released) => {
+        markInUse();
+        await released;
+      },
+      "shared",
+    );
+    await inUse;
+    try {
+      const stop = await openElectricShape(shape);
+      return async () => {
+        await stop();
+        await releaseUse();
+      };
+    } catch (e) {
+      await releaseUse();
+      throw e;
+    }
+  };
+
   // pglite-sync answers a must-refetch by truncating the shape table in its own
   // transaction and inserting the fresh snapshot later. The rows are parked in a
   // `__stale` table meanwhile so the facts stay put, then cleared once the
   // snapshot has committed (metadata last_lsn leaves the -1 the truncate wrote).
-  const startElectric = async (shape: Shape): Promise<() => Promise<void>> => {
+  const openElectricShape = async (shape: Shape): Promise<() => Promise<void>> => {
     const { where, params, id: table } = shape.compiled;
     const stale = staleTable(table);
     await pg.exec(`
@@ -835,15 +865,20 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
   const touchShape = (table: string) =>
     pg.query(`UPDATE ${SHAPES_TABLE} SET last_used = now() WHERE table_name = $1`, [table]).catch((e) => console.error("[jam] sync: touching a shape failed", e));
 
-  /** Drop a shape's local table, stale rows and resume state unless something subscribed to it meanwhile. */
+  /** Drop a shape's local table, stale rows and resume state, unless a subscription in this or another tab still uses it. */
   const dropShape = async (id: string) => {
-    const dropped = await pg.transaction(async (tx) => {
-      if (shapes.has(id)) return false;
-      await tx.exec(`DROP TABLE IF EXISTS "${id}"; DROP TABLE IF EXISTS "${staleTable(id)}";`);
-      await tx.query(`DELETE FROM ${SHAPES_TABLE} WHERE table_name = $1`, [id]);
-      return true;
-    });
-    if (dropped) await pg.sync!.deleteSubscription(id);
+    const drop = async () => {
+      if (shapes.has(id)) return;
+      await pg.sync!.initMetadataTables();
+      await pg.transaction(async (tx) => {
+        await tx.exec(`DROP TABLE IF EXISTS "${id}"; DROP TABLE IF EXISTS "${staleTable(id)}";`);
+        await tx.query(`DELETE FROM ${SHAPES_TABLE} WHERE table_name = $1`, [id]);
+        await tx.query(`DELETE FROM electric.subscriptions_metadata WHERE key = $1`, [id]);
+      });
+    };
+    const locks = webLocks();
+    if (!locks) return drop();
+    await locks.request(shapeUseLock(id), { ifAvailable: true }, (lock) => (lock ? drop() : undefined));
   };
 
   /** Keep the `keepShapes` most recently used unsubscribed shapes; drop the rest. */

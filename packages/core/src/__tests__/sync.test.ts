@@ -8,6 +8,7 @@ import { sync, compileFilter, OUTBOX_TABLE, SHAPES_TABLE, type SyncHandle, type 
 import { JAM_FACTS_SQL, factKey } from "../server";
 import type { JamPGlite } from "../pglite";
 import { FakeElectric } from "./helpers/fake-electric";
+import { installFakeLocks } from "./helpers/fake-locks";
 
 const P1 = "project:p1";
 const P2 = "project:p2";
@@ -691,6 +692,29 @@ describe("sync (Electric)", () => {
     expect(await shapeTables()).toEqual([held.id]);
     await held.dispose();
     expect(await shapeTables()).toEqual([]);
+  });
+
+  it("leaves a shape alone while another tab is subscribed to it", async () => {
+    const restoreLocks = installFakeLocks();
+    try {
+      await insert(["issue", 1, "title", "One"], P1);
+      const tabA = await start({ keepShapes: 0 });
+      const held = tabA.subscribe({ scope: P1 });
+      await held.ready;
+
+      const tabB = await start({ keepShapes: 0 });
+      expect(await shapeTables()).toEqual([held.id]);
+      await tabB.forgetShape({ scope: P1 });
+      expect(await shapeTables()).toEqual([held.id]);
+      await insert(["issue", 1, "status", "todo"], P1);
+      await waitFor(() => has("issue", 1, "status", "todo"), "tab A still streaming");
+
+      await held.dispose();
+      expect(await shapeTables()).toEqual([]);
+      expect(await registered()).toEqual([]);
+    } finally {
+      restoreLocks();
+    }
   });
 
   it("prunes idle shapes left over from a previous session on start", async () => {
