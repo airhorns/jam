@@ -68,8 +68,10 @@ All application state — including the VDOM — lives in a shared **fact databa
   - `renderer.ts` — Two-phase rendering: expand the tree in a tracked reaction, emit VDOM claims into the fact DB, then patch the real DOM
   - `select.ts` — CSS selector queries over VDOM facts
   - `pglite.ts` / `pglite-worker.ts` — `openDatabase`: PGlite (Postgres in WASM) in a shared worker, backed by IndexedDB
-  - `persist.ts` — mirrors facts into a `jam_facts` table and restores them on load
-  - `tables.ts` — `syncTable`: live queries over PGlite tables ↔ facts, fact writes → SQL (what Electric sync plugs into)
+  - `sync.ts` — `sync()`: every durable fact is stored in one `jam_facts` table as `(key, scope)`; subscriptions by scope/pattern decide which facts are in memory, standalone against local PGlite or streamed from Postgres through Electric shapes with a `jam_outbox` write path
+  - `server.ts` (`@jam/core/server`) — the Postgres side: `JAM_FACTS_SQL` DDL and `applyFactChanges` for a write endpoint; browser-safe, no dependencies
+  - `persist.ts` — mirrors device-local facts into `jam_local_facts` and restores them on load
+  - `tables.ts` — `syncTable`: live queries over existing PGlite tables ↔ facts, fact writes → SQL (escape hatch for relational data)
 
 - **@jam/ui** (`packages/ui/`): Port of tamagui's web style system and components onto the fact DB. `createJamUI(defaultConfig)` sets up tokens, 390 generated themes (CSS variables behind `t_light t_light_blue t_light_blue_Button` class chains), fonts, media queries and animations; `styled()` supports tamagui-style variants, styled contexts, pseudo/media props and sub-tree theming via `<Theme>`. Read `packages/ui/docs/STYLE-SYSTEM.md` before changing the style system; `docs/STATUS.md` tracks what is still rough.
 
@@ -80,7 +82,7 @@ All application state — including the VDOM — lives in a shared **fact databa
 - `examples/puddy-vite/` — Chat app with session management, VCR testing (MSW), unit + e2e tests
 - `examples/trello-clone/` — Kanban board example with unit + e2e tests
 - `examples/obsidian-clone/` — Linked-note workspace example with unit + e2e tests
-- `examples/linearlite/` — Linear clone on PGlite + Electric sync (port of Electric's demo), unit + e2e tests
+- `examples/linearlite/` — Multi-project Linear clone on `sync()`: one `jam_facts` table, per-project subscriptions, Electric backend via podman/docker (`pnpm backend:up`), unit + e2e tests including an Electric-backed suite
 - `examples/catalog/` — @jam/ui component catalog (port 5175; set `CATALOG_PORT` if that port is taken — Playwright reuses whatever server is listening there). One demo file per component in `src/demos/`, registered in `src/registry.ts`. URL params: `?c=Button&theme=dark&chrome=0&demo=1`. `pnpm test:e2e` runs the smoke suite (every component renders in both themes with no console errors); `pnpm shots` (or `just shots Button,Card`) writes a PNG per component per theme into `shots/` for visual inspection.
 
 ### Two-Phase Rendering Pipeline
@@ -111,7 +113,7 @@ All packages use a custom JSX factory — **not React**:
 - **Unit tests**: Vitest, files in `src/__tests__/`. Run a single test file: `cd packages/core && pnpm exec vitest run src/__tests__/db.test.ts`
 - **DOM tests**: add `// @vitest-environment happy-dom` at the top of a test file to get a real DOM. `@jam/ui/testing` exports `render()`, `css(el, pseudo?)` (declarations the style system injected for an element), `computed()`, `click/keydown/type/focus`, and `resetUI()`.
 - **E2E tests**: Playwright (Chromium). Test servers use per-worktree default ports to avoid cross-worktree collisions; set `PLAYWRIGHT_PORT` or the example-specific `*_PLAYWRIGHT_PORT` variable to override.
-- **CI** runs: install → typecheck → UI tests → unit tests → folk-todo, puddy-vite, linearlite and catalog e2e. A separate CI job runs the core benchmarks.
+- **CI** runs: install → typecheck → UI tests → unit tests → folk-todo, puddy-vite, linearlite and catalog e2e. Separate CI jobs run the linearlite suite against real Postgres + Electric containers and the core benchmarks.
 
 ## Browser Automation
 

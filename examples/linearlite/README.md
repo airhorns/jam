@@ -1,88 +1,84 @@
 # linearlite
 
-A Linear-style issue tracker built with jam on top of PGlite and [Electric](https://electric-sql.com). It's a port of Electric's [linearlite demo](https://electric-sql.com/demos/linearlite): the same Postgres schema, client-side triggers, shape sync, and write server, with the React UI replaced by jam components reading and writing facts.
+A Linear-style issue tracker built with jam on `sync()`: every durable fact lives in one `jam_facts` table, and the browser only loads the project it is looking at. Issues are grouped into projects; switching projects swaps which slice of the table is synced. It's a port of Electric's [linearlite demo](https://electric-sql.com/demos/linearlite) with the React UI replaced by jam components and the relational schema replaced by facts.
 
-Ported from [electric-sql/electric](https://github.com/electric-sql/electric/tree/main/examples/linearlite) (Apache-2.0). The SQL migrations, sync protocol, and write server are theirs with small changes noted below.
+Ported from [electric-sql/electric](https://github.com/electric-sql/electric/tree/main/examples/linearlite) (Apache-2.0).
 
 ## Running it
 
-**Standalone** — no backend, a local PGlite database seeded with 5,000 issues (`?seed=N` to change the count, applied only when the database is empty):
+**Standalone** — no backend; a local PGlite database seeded with 5,000 issues across four projects (`?seed=N` to change the count, applied only when the database is empty):
 
 ```bash
 corepack pnpm install
 corepack pnpm --dir examples/linearlite dev    # http://localhost:5173
 ```
 
-**With Electric** — Postgres and Electric in Docker, plus the write server:
+**With Electric** — Postgres and Electric in containers (docker or podman), plus the write server:
 
 ```bash
-corepack pnpm backend:up     # docker compose up, migrate, load 5,000 issues (ISSUES_TO_LOAD=N to change)
-corepack pnpm write-server   # Hono on :3001, accepts POST /apply-changes
-VITE_ELECTRIC_URL=http://localhost:3000 corepack pnpm dev
+corepack pnpm backend:up     # start postgres (:54321) + electric (:3033), create jam_facts, load 5,000 issues (ISSUES_TO_LOAD=N)
+corepack pnpm write-server   # Hono on :3001, accepts POST /jam/changes
+VITE_ELECTRIC_URL=http://localhost:3033 corepack pnpm dev
 ```
 
-The client seeds nothing in this mode; it syncs the `issue` and `comment` shapes, enables the triggers, and creates indexes once the initial sync finishes. `VITE_WRITE_SERVER_URL` overrides the write server location; `DATABASE_URL` overrides the Postgres connection for the scripts (default `postgresql://postgres:password@localhost:54321/linearlite`). `pnpm backend:down` tears it down; data lives in tmpfs so it's gone on restart.
+The client seeds nothing in this mode: it subscribes to the global scope (projects) and to `project:<id>` for the project on screen, and Electric streams those rows down. `VITE_WRITE_SERVER_URL` overrides the write server location; `DATABASE_URL` overrides the Postgres connection for the scripts (default `postgresql://postgres:password@localhost:54321/linearlite`); `JAM_POSTGRES_PORT`/`JAM_ELECTRIC_PORT` move the container ports. `pnpm backend:down` tears it down; data lives in tmpfs so it's gone on restart.
 
 ## How it's layered
 
 ```
-Postgres ──Electric shapes──▶ PGlite tables (issue, comment)
-                                   │  ▲
-                        live query │  │ UPDATE / INSERT / DELETE
-                                   ▼  │
-                   syncTable ──▶ facts ["issue", id, col, value]
-                                   │  ▲
-                            when() │  │ replace() / remember() / forget()
-                                   ▼  │
-                             jam components
+Postgres jam_facts (key, scope) ──Electric shape per subscription──▶ PGlite jam_shape_* tables
+        ▲                                                                    │
+        │ POST /jam/changes (jam_outbox)                                     │ live changes
+        │                                                                    ▼
+   write server ◀──────────────── core sync() ──────────────▶ facts ["issue", id, col, value]
+                                                                    │  ▲
+                                                             when() │  │ replace() / remember() / forget()
+                                                                    ▼  │
+                                                              jam components
 ```
 
-Reads: `syncTable` runs a windowed live query per view and mirrors the rows into facts, plus `["query", name, "row", index, id]` ordering facts. Components render from those with `when()`.
+There is no app-specific storage code. `src/sync.ts` calls `sync()` with the Electric URLs and an `exclude` for the app's ephemeral facts; `src/programs/subscriptions.ts` keeps two subscriptions open — `{ scope: "" }` for projects and `{ scope: "project:<id>" }` for the current project — and disposes the previous project's subscription only after the next one is ready, so the screen never empties on a switch. Everything else is facts:
 
-Writes: components mutate facts; `syncTable` turns them into SQL on the same table. In Electric mode the client triggers then record `modified_columns`, flip `synced` to false, and the write path posts the changed rows to `/apply-changes`, which applies them to Postgres. Electric streams the result back, the trigger sees `electric.syncing` and reconciles it with any newer local edits, the live query fires, and the facts settle. In standalone mode the triggers stay disabled, so every row reads as synced.
-
-Because the bridge only watches the table, Electric needs no jam-specific integration — its writes are ordinary SQL.
+- `createIssue` and `addComment` write inside `scoped(projectScope(id), …)`, so a new entity lands in its project's partition; later `replace`/`forget` calls inherit the scope from the entity.
+- `src/programs/queries.ts` derives each view in memory with `whenever`: filter, sort and search over the project's issue facts, then emit a window of `["query", name, "row", index, id]` facts (100 rows for the list, moved by `["ui", "list", "scrollTop"]`; 50 per board column; the issue and its comments on a detail page). Components render from those with `when()`.
+- The write server is `parseFactChanges` + `applyFactChanges` from `@jam/core/server` over a `postgres` client, one transaction per batch.
 
 ### Fact schema
 
-| Facts | Source |
+| Facts | Scope |
 |---|---|
-| `["issue", id, column, value]`, `["comment", id, column, value]` | `syncTable` over the two tables; NULL columns are absent |
-| `["query", "list" \| "board:<status>" \| "detail" \| "comments", "row" \| "total" \| "offset" \| "limit" \| "ready", …]` | ordering and paging for each view |
-| `["stats", "issues", "total", n]` | read-only `count(*)` binding |
-| `["route", "url", pathAndSearch]` | `programs/router.ts`; everything else about the route is derived |
-| `["ui", "menu" \| "modal" \| "list" \| "search" \| "confirm" \| "new-issue", …]` | transient UI state |
-| `["recent", id, "viewedAt" \| "title", …]` | recently viewed issues, persisted via `persist({ pg, include })` |
-| `["sync", "status" \| "message", …]` | `standalone`, `initial-sync`, or `done` |
+| `["project", id, "name" \| "key" \| "created", value]` | global (`""`) |
+| `["issue", id, "project" \| "title" \| "description" \| "priority" \| "status" \| "created" \| "modified" \| "kanbanorder" \| "username", value]` | `project:<id>` |
+| `["comment", id, "issue" \| "body" \| "username" \| "created" \| "modified", value]` | `project:<id>` of the issue |
+| `["recent", id, "viewedAt" \| "title" \| "project", value]` | device-local via `persist({ pg, include })` |
+| `["route", "url", pathAndSearch]`, `["ui", …]`, `["query", …]`, `["stats", "issues", "total", n]` | in memory only (`isEphemeral` in `src/types.ts`) |
+| `["sync", "status" \| "pending" \| "shape" \| "error", …]` | published by core `sync()`; the badge in the sidebar reads them |
 
-`programs/queries.ts` is a `whenever` on `["route", "url", …]` that (re)creates the bindings each view needs — a 100-row window for the list (moved by the scroll position in `["ui", "list", "scrollTop"]`), 50 rows per board column, and the issue plus its comments on a detail page. New bindings become ready before the old ones are disposed so shared rows never flicker out of the fact database.
+Routes carry the project: `/:projectId`, `/:projectId/board`, `/:projectId/search`, `/:projectId/issue/:id`; `/` redirects to the first project. `["query", name, "ready", bool]` follows the current project's `["sync", "shape", …, "ready", …]` fact so views show "Loading…" until the subscription has its initial data.
 
 ### Source map
 
-- `src/pglite-worker.ts` — PGlite in a worker (leader-elected across tabs): migrations, and seeding in standalone mode.
-- `src/sync.ts` — shape sync, post-sync indexes, and the write path to the server.
-- `src/programs/` — router, queries, UI state, recent issues.
+- `src/pglite-worker.ts` — PGlite in a worker (leader-elected across tabs); creates `jam_facts` and seeds it in standalone mode.
+- `src/sync.ts` — the one `sync()` call; `src/programs/subscriptions.ts` — which scopes are loaded.
+- `src/programs/` — router, in-memory queries, UI state, recent issues.
 - `src/components/` — the UI. Every component returns exactly one root element.
-- `src/mutations.ts` — `createIssue`, `updateIssue`, `deleteIssue`, `moveIssue` (fractional indexing for the board), `addComment`.
-- `db/migrations-client/` — PGlite schema and triggers; `db/migrations-server/` — Postgres schema; `db/migrate.ts`, `db/load-data.ts`; `server.ts` — write server.
-
-## Departures from the original
-
-- **Trigger recursion.** The original `handle_update` trigger issued a nested `UPDATE` on the same row for each server-provided column, which re-fires the trigger on PGlite. It now edits `NEW` in place and stores the previous value in `backup`.
-- **Deletes.** `deleteIssue` forgets the issue's facts; `syncTable` issues a `DELETE`, which the trigger converts to a soft delete (`deleted = true`) in Electric mode and is a real delete in standalone mode.
-- **Generated columns.** `synced` and the other local-state columns are `readonly` in the binding so they're never written back.
+- `src/mutations.ts` — `createProject`, `createIssue`, `updateIssue`, `deleteIssue`, `moveIssue` (fractional indexing for the board), `addComment`.
+- `src/seed.ts` — deterministic seed as `(key, scope)` rows, shared by the standalone worker and `db/load-data.ts`.
+- `db/migrate.ts` (runs `JAM_FACTS_SQL`), `db/load-data.ts`, `server.ts` — write server, `backend/containers.ts` — docker/podman lifecycle.
 
 ## Gotchas worth knowing
 
 - A component prop named `id` is jam's global element id, not a domain id: two components given the same `id` share one DOM element. Components here take `issueId`/`commentId`.
 - A `key` only takes effect on the element at its usage site. Putting it on the root of what a component returns does nothing; the root inherits the component's identity.
-- PGlite logs a single harmless `ErrnoError` the first time it creates an IndexedDB data directory; the e2e suite filters it out.
+- PGlite logs a single harmless `ErrnoError` the first time it creates an IndexedDB data directory; the e2e suites filter it out.
+- Electric only supports where-clauses over the shape table's own columns, which is why `jam_facts` carries `scope` and `t0..t2` as real columns (derived from `key` by a trigger).
 
 ## Tests
 
 ```bash
-corepack pnpm test           # filter-state and an Electric-mode simulation (triggers on, fake shape writes, write-path payloads)
-corepack pnpm test:e2e       # Playwright against the standalone app with ?seed=100
+corepack pnpm test               # query program, mutations and subscription switching against an in-memory FactDB
+corepack pnpm test:e2e           # Playwright against the standalone app with ?seed=100
+corepack pnpm test:e2e:electric  # Playwright against the running backend (pnpm backend:up && pnpm write-server first)
 ```
 
-The Electric path isn't exercised in CI (no Docker); `src/__tests__/sync.test.ts` covers it by running the client migrations in an in-memory PGlite, enabling the triggers, and replaying the transactions Electric would perform.
+The Electric suite resets Postgres to the seed and then checks that the page holds exactly the facts Postgres has for the subscribed scope: initial load, local edits reaching `jam_facts`, rows inserted straight into Postgres appearing in the UI, project switches swapping the scope, and two browsers converging. CI runs it with the same containers script (`backend/containers.ts`) that runs locally under podman.

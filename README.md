@@ -45,7 +45,7 @@ another app's dev server. Set `PLAYWRIGHT_PORT` or the example-specific
 - `examples/trello-clone` — kanban workflow example with ordered board state
 - `examples/obsidian-clone` — linked-note workspace with graph-derived views
 - `examples/puddy-vite` — chat/session app with VCR-style network tests
-- `examples/linearlite` — Linear clone on PGlite + Electric sync, with unit and e2e coverage
+- `examples/linearlite` — Multi-project Linear clone on `sync()` with per-project subscriptions over Electric, with unit and e2e coverage
 - `examples/catalog` — browser catalog for `@jam/ui` components, with screenshot and e2e tooling
 
 ## Core API
@@ -247,22 +247,77 @@ const pg = await openDatabase({ name: "my-app" });   // idb://my-app
 
 `openDatabase` accepts `dataDir` (`idb://`, `opfs-ahp://`, `memory://`) and `relaxedDurability` (default `true`: queries resolve before the write reaches storage; `await pg.syncToDisk()` when you need it flushed). PGlite currently logs one harmless `ErrnoError` the first time it creates an IndexedDB data directory.
 
-### Persisting facts
+There are three ways to keep facts around, from most to least automatic:
 
-`persist()` mirrors facts into a `jam_facts` table and restores them on the next load. Facts are stored by identity, so `replace()` is a delete plus an insert.
+| You want... | Use |
+|---|---|
+| durable facts stored automatically, optionally synced with Postgres and other clients | `sync()` |
+| facts that stay on this device only (UI preferences, recently viewed) | `persist()` |
+| an existing relational table to show up as facts | `syncTable()` |
+
+### Storing and syncing facts
+
+`sync()` stores every durable fact in one `jam_facts` table — `remember`/`replace` write it, `forget` removes it, `claim`ed facts never leave memory because they are derived and would be re-derived anyway. Nothing is mapped by hand: a new program that invents new facts gets them stored the moment it runs. A fact is a row `(key, scope)` where `key` is `JSON.stringify(fact)` and `scope` names the partition it belongs to.
+
+```typescript
+import { sync, scoped, remember, replace } from "@jam/core";
+
+const handle = await sync({ pg });                      // standalone: local jam_facts only
+const projects = handle.subscribe({ scope: "" });        // global facts
+const current = handle.subscribe({ scope: "project:p1" });
+await current.ready;
+
+scoped("project:p1", () => remember("issue", "i1", "project", "p1"));   // a new entity, placed in a partition
+replace("issue", "i1", "title", "Ship it");                            // inherits the entity's scope
+await current.dispose();                                               // its facts leave memory
+```
+
+Scopes are how a client decides what to load. Facts written without `scoped()` inherit the scope of the fact they replace, else of their `[entity, id]`, else the global scope `""`. A subscription's `FactFilter` is `{ scope?, pattern? }`, where a pattern narrows on literal terms in the first three positions (`["issue", _, "project"]`); subscribing to the same filter twice shares one stream, and facts stay in memory while any subscription holds them.
+
+Point the same call at [Electric](https://electric-sql.com) and the table lives in Postgres:
+
+```typescript
+const handle = await sync({
+  pg,
+  shapeUrl: "http://localhost:3000/v1/shape",   // Electric
+  writeUrl: "http://localhost:3001/jam/changes", // your write endpoint
+  exclude: (fact) => fact[0] === "ui",           // local-only facts; default excludes VDOM facts
+});
+```
+
+Each subscription becomes an Electric shape over `jam_facts` (`WHERE scope = $1`, plus `t0..t2` for pattern terms) mirrored into a local table, so the browser only ever downloads the partitions it asked for and resumes from its local copy on reload. Local writes go to a `jam_outbox` table and are posted to `writeUrl` as `{ changes: [{ op: "upsert" | "delete" | "replace", key, scope }] }`, retried with backoff, and reconciled when Electric echoes them back. The write endpoint is a few lines with `@jam/core/server`, which is dependency-free and runs anywhere a Postgres client does:
+
+```typescript
+import { JAM_FACTS_SQL, applyFactChanges, parseFactChanges } from "@jam/core/server";
+
+await sql.unsafe(JAM_FACTS_SQL);   // idempotent: table, trigger deriving terms/t0..t2 from key, indexes
+app.post("/jam/changes", async (c) => {
+  const changes = parseFactChanges(await c.req.json());
+  await sql.begin((tx) => applyFactChanges((q, p) => tx.unsafe(q, p), changes));
+  return c.json({ success: true });
+});
+```
+
+`replace` on the server removes every other fact sharing all but the last term, so two clients replacing the same attribute converge on the last write. Authorization belongs in front of both URLs (a proxy that pins `scope` to the session is the natural shape); `shapeParams` passes extra query params through to Electric.
+
+The handle publishes its state as facts: `["sync", "status", "standalone" | "syncing" | "live"]`, `["sync", "pending", n]` unpushed changes, `["sync", "shape", id, "ready", bool]` per subscription (`compileFilter(filter).id`), and `["sync", "error", message]` when the write endpoint rejects a batch. `handle.flush()` pushes now; `handle.dispose()` stops.
+
+### Persisting facts locally
+
+`persist()` mirrors facts into a `jam_local_facts` table and restores them on the next load — for facts that should survive a reload but never leave the device. Only durable facts are stored; `replace()` is a delete plus an insert.
 
 ```typescript
 import { persist } from "@jam/core";
 
-const handle = await persist({ pg, include: (fact) => fact[0] === "ui" });
+const handle = await persist({ pg, include: (fact) => fact[0] === "recent" });
 // handle.flush() writes pending changes now; await handle() flushes and stops.
 ```
 
-Without `include`, everything except VDOM facts (`defaultExclude`) is persisted. Pass your own `pg` whenever the app also uses `syncTable`, so both share one database. Restored facts are durable (`remember`-style), not scoped to any owner.
+Without `include`, everything except VDOM facts (`defaultExclude`) is persisted. Pass the same `pg` to `persist` and `sync` so they share one database, and keep their `include`/`exclude` disjoint so a fact isn't stored twice.
 
 ### Mirroring tables as facts
 
-`syncTable` projects a (windowed) live query over a PGlite table into `[entity, id, column, value]` facts and writes fact mutations back as SQL. Because it only watches the table, anything that writes to PGlite — your code, a migration, or [Electric](https://electric-sql.com) syncing a shape from Postgres — shows up in facts with no further integration.
+`syncTable` is the escape hatch for data that already lives in a relational table. It projects a (windowed) live query over a PGlite table into `[entity, id, column, value]` facts and writes fact mutations back as SQL. Because it only watches the table, anything that writes to PGlite — your code, a migration, or Electric syncing a shape from Postgres — shows up in facts with no further integration.
 
 ```typescript
 import { syncTable, replace, forget, _ } from "@jam/core";
@@ -289,7 +344,7 @@ await list.dispose();
 - While a write is pending, live results don't overwrite that cell, so keystrokes aren't clobbered by a stale echo.
 - Mirrored facts are durable, not scoped: a rule that `claim`s on top of them is revoked as usual, the row facts stay until the table changes.
 
-See `examples/linearlite` for a full app on this stack, including Electric sync.
+See `examples/linearlite` for a full app on `sync()`, including per-project subscriptions over Electric.
 
 ### Components and children
 
