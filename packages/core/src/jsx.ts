@@ -364,19 +364,8 @@ function emitNode(node: ExpandedNode, parentId: string, index: number): void {
   const elId = node.id;
   const props = node.props;
 
-  // Native mode: use component displayName as tag instead of HTML tag
-  const tagName = props.__nativeTag ? String(props.__nativeTag) : node.tag;
-  db.assert(elId, "tag", tagName);
+  db.assert(elId, "tag", node.tag);
   db.assert(parentId, "child", index, elId);
-
-  // Native mode: emit resolved style values as individual facts
-  if (props.__nativeStyles) {
-    for (const [prop, value] of Object.entries(props.__nativeStyles as Record<string, unknown>)) {
-      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-        db.assert(elId, "style", prop, value as Term);
-      }
-    }
-  }
 
   for (const [key, value] of Object.entries(props)) {
     if (key === "key" || value == null) continue;
@@ -392,7 +381,6 @@ function emitNode(node: ExpandedNode, parentId: string, index: number): void {
       if (value === "imperative") db.assert(elId, "childMode", "imperative");
       continue;
     }
-    if (key === "__nativeStyles" || key === "__nativeTag" || key.startsWith("__native_")) continue;
     if (key.startsWith("on") && typeof value === "function") {
       const eventName = key.slice(2).toLowerCase();
       const refKey = `${elId}:handler:${eventName}`;

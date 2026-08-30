@@ -1,15 +1,28 @@
 ---
 name: jam-ui-visual-review
-description: Launch and inspect the @jam/ui visual component catalog for on-demand agent review.
+description: Launch and inspect the @jam/ui component catalog for on-demand visual review, or capture screenshots of it.
 allowed-tools: Bash(pnpm:*), Bash(pnpm exec agent-browser:*), Bash(agent-browser:*), Bash(mkdir:*), Bash(tee:*), Bash(tail:*), Bash(kill:*), Bash(cat:*)
 ---
 
 # Jam UI Visual Review
 
-Use this skill when reviewing @jam/ui component appearance or interaction in a browser.
-It launches the Vite catalog in `examples/ui-catalog`, which exercises exported
-Jam UI components through the real Jam renderer, theme tokens, CSS injection, and
-fact-database state.
+Use this skill when reviewing @jam/ui component appearance or interaction in a
+browser. The catalog in `examples/catalog` renders one demo page per component
+through the real Jam renderer, theme tokens, CSS injection and fact-database
+state.
+
+## Screenshots without a browser session
+
+For a quick look at one or more components in both themes:
+
+```bash
+SHOTS="Button,Dialog" pnpm --dir examples/catalog shots
+```
+
+PNGs land in `examples/catalog/shots/<Name>.<demo>.<theme>.png`. Each demo can
+declare a shot recipe (click/hover/focus before capture) so overlays are open in
+the picture. `pnpm --dir examples/catalog test:e2e` runs the same pass as a
+smoke test without writing images.
 
 ## Launch
 
@@ -18,29 +31,32 @@ session while you drive the browser from a second shell:
 
 ```bash
 mkdir -p scratch/logs
-pnpm --dir examples/ui-catalog dev 2>&1 | tee scratch/logs/ui-catalog.log
+pnpm --dir examples/catalog dev 2>&1 | tee scratch/logs/catalog.log
 ```
 
-Open the printed Vite URL, usually `http://127.0.0.1:5173`:
+The server listens on port 5175 (`pnpm --dir examples/catalog dev -- --port N`
+to move it; the shots/e2e commands read `CATALOG_PORT`). URL parameters select
+what is shown: `?c=Button&theme=dark&demo=1&chrome=0`
+(`chrome=0` hides the sidebar). In the page, `window.__catalog.show(name, theme,
+demoIndex)` switches views without a reload.
 
 ```bash
-pnpm exec agent-browser open http://127.0.0.1:5173
+pnpm exec agent-browser open "http://127.0.0.1:5175/?c=Button"
 pnpm exec agent-browser snapshot -i
 ```
 
 ## Review Path
 
-1. Confirm the page title is `@jam/ui component catalog`.
-2. Toggle Light/Dark and inspect contrast changes.
-3. Toggle the notification switch and confirm progress changes.
-4. Toggle Accepted, Web/Native radio choices, Comfortable/Compact density, and Overview/Native tabs.
-5. Capture evidence with text, console, errors, or a screenshot:
+1. Toggle light/dark and inspect contrast changes.
+2. Walk the component's demos; drive the interactive one (open overlays, toggle
+   controls, use the keyboard) and confirm the fact-backed state updates.
+3. Capture evidence with text, console, errors, or a screenshot:
 
 ```bash
 pnpm exec agent-browser get text body
 pnpm exec agent-browser console
 pnpm exec agent-browser errors
-pnpm exec agent-browser screenshot scratch/ui-catalog.png
+pnpm exec agent-browser screenshot scratch/catalog.png
 ```
 
 ## Cleanup
@@ -49,55 +65,8 @@ pnpm exec agent-browser screenshot scratch/ui-catalog.png
 pnpm exec agent-browser close
 ```
 
-Record the log path and any screenshot path in the ticket or PR notes when used as validation evidence.
-For branch PRs that touch `@jam/ui` appearance or interaction, upload captured
-screenshot/video through GitHub-hosted media tooling when available and link to
-that uploaded asset. Do not commit PR media files to the branch or embed
-committed media in the PR body.
-
-## Native Catalog
-
-Use `examples/ui-catalog-native` when validating the same `@jam/ui` primitives
-through the SwiftUI renderer. Build the native runtime bundle first so the Swift
-resource file reflects current TypeScript source:
-
-```bash
-pnpm --dir packages/native build
-pnpm --dir examples/ui-catalog-native build:program
-swift build --package-path examples/ui-catalog-native
-```
-
-For broader native coverage, also run:
-
-```bash
-swift test --package-path packages/native
-swift build --package-path examples/counter-ios
-swift build --package-path examples/spatial-counter
-```
-
-On Linux, first check whether the Swift compiler is available directly or through
-the repeatable Docker image:
-
-```bash
-swift --version
-docker run --rm -v "$PWD":/workspace -w /workspace swift:5.9-jammy swift --version
-docker run --rm -v "$PWD":/workspace -w /workspace swift:5.9-jammy swift build --package-path packages/native
-```
-
-The current native package imports Apple frameworks (`JavaScriptCore` and
-`SwiftUI`), so Linux Swift images can prove compiler availability but cannot
-compile or render the Apple-platform targets. If that build fails with missing
-Apple modules, record the exact failure and still run the local native-mode VDOM
-contract test, web catalog, generated native catalog program, and
-`packages/native` JavaScript bundle build:
-
-```bash
-pnpm --dir examples/ui-catalog-native build:program
-pnpm --dir packages/ui exec vitest run src/__tests__/native-mode.test.ts
-pnpm --dir examples/ui-catalog build
-pnpm --dir packages/native build
-```
-
-The native catalog source remains the handoff artifact for macOS validation. CI
-should run the Swift package and native example builds on macOS when this
-surface changes.
+Record the log path and any screenshot path in the ticket or PR notes when used
+as validation evidence. For branch PRs that touch `@jam/ui` appearance or
+interaction, upload captured screenshot/video through GitHub-hosted media tooling
+when available and link to that uploaded asset. Do not commit PR media files to
+the branch or embed committed media in the PR body.

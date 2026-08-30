@@ -16,9 +16,6 @@ export {
 } from "./default-config";
 export { setDefaultFont, getDefaultFont, setAnimations, getAnimation } from "./settings";
 
-// Native mode
-export { setNativeMode, isNativeMode } from "./native-mode";
-
 // Token system
 export {
   createTokens,

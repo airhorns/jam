@@ -22,7 +22,7 @@ pnpm run bench     # Benchmarks (packages/core only)
 
 ## New Worktree Setup With Mise
 
-`mise.toml` pins the Codex/native worktree toolchain. `mise` should be installed
+`mise.toml` pins the worktree toolchain. `mise` should be installed
 once for the host/user before creating Jam worktrees; do not run the installer
 as part of every new worktree setup.
 
@@ -82,9 +82,6 @@ All application state — including the VDOM — lives in a shared **fact databa
 - `examples/obsidian-clone/` — Linked-note workspace example with unit + e2e tests
 - `examples/linearlite/` — Linear clone on PGlite + Electric sync (port of Electric's demo), unit + e2e tests
 - `examples/catalog/` — @jam/ui component catalog (port 5175; set `CATALOG_PORT` if that port is taken — Playwright reuses whatever server is listening there). One demo file per component in `src/demos/`, registered in `src/registry.ts`. URL params: `?c=Button&theme=dark&chrome=0&demo=1`. `pnpm test:e2e` runs the smoke suite (every component renders in both themes with no console errors); `pnpm shots` (or `just shots Button,Card`) writes a PNG per component per theme into `shots/` for visual inspection.
-- `examples/ui-catalog/` — Browser catalog for `@jam/ui` component review
-- `examples/ui-catalog-native/` — Native catalog source for SwiftUI renderer coverage
-- `examples/counter-ios/` and `examples/spatial-counter/` — Swift native examples
 
 ### Two-Phase Rendering Pipeline
 
@@ -96,7 +93,7 @@ This means external "programs" (using `whenever`) can observe and decorate any e
 Component-level primitives from `@jam/core`:
 
 - `createContext(default)` / `useContext(ctx)` — `<ctx.Provider value>` scopes a value to a subtree; resolved during expansion
-- `useComponentId()` — the stable entity id of the calling component instance; use it to key per-instance state in the fact DB (`set(id, "open", true)`)
+- `useComponentId()` — the stable entity id of the calling component instance; use it to key per-instance state in the fact DB (`replace(id, "open", true)`)
 - Entity ids: an element's `id` prop is its entity id (a global address, so DOM ids must be unique); otherwise ids derive from `key` or tree position. A component's `id` prop is *not* its entity id — it is an ordinary prop the component may hand to a nested element.
 - `<Portal>` — renders children as direct children of the mount container (for overlays); ids stay derived from the portal's own tree position
 - `injectVdom(parentId, startIndex, ...nodes)` — add children to an existing element from outside the tree
@@ -114,7 +111,7 @@ All packages use a custom JSX factory — **not React**:
 - **Unit tests**: Vitest, files in `src/__tests__/`. Run a single test file: `cd packages/core && pnpm exec vitest run src/__tests__/db.test.ts`
 - **DOM tests**: add `// @vitest-environment happy-dom` at the top of a test file to get a real DOM. `@jam/ui/testing` exports `render()`, `css(el, pseudo?)` (declarations the style system injected for an element), `computed()`, `click/keydown/type/focus`, and `resetUI()`.
 - **E2E tests**: Playwright (Chromium). Test servers use per-worktree default ports to avoid cross-worktree collisions; set `PLAYWRIGHT_PORT` or the example-specific `*_PLAYWRIGHT_PORT` variable to override.
-- **CI** runs: install → typecheck → UI tests → unit tests → folk-todo, puddy-vite, linearlite and catalog e2e. A separate CI job runs core benchmarks. The native Swift packages are not built in CI: `packages/native` bundles `@jam/core` as a single IIFE, which cannot include the PGlite worker.
+- **CI** runs: install → typecheck → UI tests → unit tests → folk-todo, puddy-vite, linearlite and catalog e2e. A separate CI job runs the core benchmarks.
 
 ## Browser Automation
 
@@ -144,9 +141,9 @@ flows.
 
 ## PR Media Requirements
 
-When a branch changes Jam UI, app behavior, examples, native views, renderer
-output, or `@jam/ui` component appearance, capture screenshots or video from the
-relevant running app, example, or component catalog after validation. Upload or
+When a branch changes Jam UI, app behavior, examples, renderer output, or
+`@jam/ui` component appearance, capture screenshots or video from the relevant
+running app, example, or component catalog after validation. Upload or
 attach that media in the pull request description so reviewers can inspect the
 result without rebuilding locally.
 
@@ -154,31 +151,6 @@ For low-level changes with no user-visible surface, such as fact database
 performance work or internal refactors that do not affect rendered output, media
 may be omitted. In that case, the pull request description should say media was
 omitted and briefly explain why the change has no UI/app-visible effect.
-
-## Native / Swift Development
-
-Use the existing Swift package entry points; do not add alternate native command
-layers unless the package layout changes.
-
-```bash
-just test-swift
-just build-native
-swift test --package-path packages/native
-swift build --package-path examples/counter-ios
-swift build --package-path examples/spatial-counter
-swift build --package-path examples/ui-catalog-native
-```
-
-Before native work, probe the host:
-
-```bash
-swift --version
-xcrun simctl list devices
-```
-
-If Swift/Xcode is unavailable, record that as an environment limitation in the
-ticket workpad and still run the web/package validation that is relevant to the
-change.
 
 ## Runtime Logs
 

@@ -1,4 +1,3 @@
-import { when, $ } from "@jam/core";
 import { createContext, h, useContext } from "@jam/core/jsx";
 import type { Context, VChild, VNode } from "@jam/core/jsx";
 import type { AllStyleProps, ThemeableProps } from "./types";
@@ -12,7 +11,7 @@ import {
   themeClassNames,
   useThemeName,
 } from "./themes";
-import { getMediaPrecedence, getMediaQuery, isMediaKey, useMedia } from "./media";
+import { getMediaPrecedence, getMediaQuery, isMediaKey } from "./media";
 import { getFont, getFontFamily, getFontValue, hasFont, type ResolvedFont } from "./fonts";
 import { getAnimation, getDefaultFont } from "./settings";
 import {
@@ -27,7 +26,6 @@ import {
   tokenCategoryMap,
 } from "./style-props";
 import { atomicClassName, injectAtomic, injectRule } from "./css";
-import { isNativeMode } from "./native-mode";
 
 type StyleObject = Record<string, unknown>;
 
@@ -179,7 +177,6 @@ function addLayer(acc: Flattened, styles: StyleObject): void {
 type ResolveContext = {
   themeName: string | undefined;
   fontName: string;
-  native: boolean;
 };
 
 const themeRefProxy: Record<string, string | undefined> = new Proxy({} as Record<string, string | undefined>, {
@@ -207,12 +204,7 @@ function resolveValue(prop: string, value: unknown, ctx: ResolveContext): unknow
     if (fromFont !== undefined) return fromFont;
   }
 
-  if (isThemeKey(key)) {
-    if (ctx.native) {
-      return ctx.themeName ? getResolvedThemeValues(ctx.themeName)[key] ?? value : value;
-    }
-    return `var(--${key})`;
-  }
+  if (isThemeKey(key)) return `var(--${key})`;
 
   const category = tokenCategoryMap[prop];
   if (category) {
@@ -383,7 +375,6 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
   const consumed = new Set(staticConfig.consumedProps ?? []);
 
   const component = ((props: Record<string, unknown>) => {
-    const native = isNativeMode();
     const defaults = staticConfig.defaultProps ?? {};
     const unstyled = props.unstyled === true || (props.unstyled === undefined && defaults.unstyled === true);
     const inText = staticConfig.isText === true && useContext(TextAncestor) === true;
@@ -483,12 +474,8 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
     }
 
     // 3. Resolve tokens, theme refs and font values.
-    const ctx: ResolveContext = { themeName, fontName: fontNameFor(acc.base), native };
+    const ctx: ResolveContext = { themeName, fontName: fontNameFor(acc.base) };
     const resolvedBase = resolveStyles(acc.base, ctx);
-
-    if (native) {
-      return renderNative(staticConfig, component, passthrough, props, acc, resolvedBase, ctx, themeChanged ? themeName : undefined);
-    }
 
     // 4. Emit atomic classes.
     const classes: string[] = [];
@@ -630,36 +617,4 @@ function fontNameFor(styles: Record<string, unknown>): string {
   const family = styles.fontFamily;
   if (typeof family === "string" && family.startsWith("$") && hasFont(family.slice(1))) return family.slice(1);
   return getDefaultFont();
-}
-
-function renderNative(
-  config: ResolvedStyledConfig,
-  component: StyledComponent<any>,
-  passthrough: Record<string, unknown>,
-  props: Record<string, unknown>,
-  acc: Flattened,
-  resolvedBase: StyleObject,
-  ctx: ResolveContext,
-  themeName: string | undefined,
-): VNode {
-  if (ctx.themeName) when(["theme", ctx.themeName, $.key, $.value]);
-  // Media styles are merged in JS since there is no CSS engine.
-  const media = useMedia();
-  const styles = { ...resolvedBase };
-  for (const [name, block] of Object.entries(acc.media)) {
-    if (media[name]) Object.assign(styles, resolveStyles(block.base, ctx));
-  }
-  passthrough.__nativeStyles = styles;
-  passthrough.__nativeTag = component.displayName || config.tag;
-  for (const [pseudoKey, pseudoStyles] of Object.entries(acc.pseudo)) {
-    passthrough[`__native_${pseudoKey}`] = resolveStyles(pseudoStyles, ctx);
-  }
-  if (props.class ?? props.className) passthrough.class = mergeClass(props.class, props.className);
-
-  let children = toChildren(props.children);
-  if (themeName) children = [h(ThemeContext.Provider, { value: themeName }, ...children)];
-  if (config.render) {
-    return config.render({ ...passthrough, children: children.length === 1 ? children[0] : children }) as VNode;
-  }
-  return h(config.tag, passthrough, ...children);
 }

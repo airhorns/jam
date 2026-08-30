@@ -190,35 +190,6 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/node@26.4.0)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@26.4.0)(typescript@5.9.3))(tsx@4.23.13)
 
-  examples/ui-catalog:
-    dependencies:
-      '@jam/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@jam/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-    devDependencies:
-      typescript:
-        specifier: ^5.9.0
-        version: 5.9.3
-      vite:
-        specifier: ^6.0.0
-        version: 6.4.2(@types/node@26.4.0)(tsx@4.23.13)
-
-  examples/ui-catalog-native:
-    dependencies:
-      '@jam/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@jam/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-    devDependencies:
-      typescript:
-        specifier: ^5.9.0
-        version: 5.9.3
-
   packages/core:
     dependencies:
       '@electric-sql/pglite':
@@ -262,25 +233,6 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.4(@types/node@26.4.0)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@26.4.0)(typescript@5.9.3))(tsx@4.23.13)
-
-  packages/native:
-    dependencies:
-      '@jam/core':
-        specifier: workspace:*
-        version: link:../core
-      '@jam/ui':
-        specifier: workspace:*
-        version: link:../ui
-      mobx:
-        specifier: ^6.13.7
-        version: 6.15.0
-    devDependencies:
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-      vite:
-        specifier: ^6.4.1
-        version: 6.4.2(@types/node@26.4.0)(tsx@4.23.13)
 
   packages/ui:
     dependencies:

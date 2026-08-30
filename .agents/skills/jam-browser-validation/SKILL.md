@@ -25,7 +25,7 @@ pnpm --dir examples/counter dev
 pnpm --dir examples/puddy-vite dev
 pnpm --dir examples/trello-clone dev
 pnpm --dir examples/obsidian-clone dev
-pnpm --dir examples/ui-catalog dev
+pnpm --dir examples/catalog dev
 ```
 
 If multiple worktrees are active, set a package-specific port or use the port
