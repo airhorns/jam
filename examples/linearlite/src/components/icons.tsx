@@ -82,20 +82,6 @@ export function PriorityIcon({ priority, class: cls }: { priority?: PriorityValu
   );
 }
 
-export function SyncedIcon({ synced }: { synced?: unknown }) {
-  return synced ? (
-    <Svg class="synced-icon synced">
-      <path d="M4.5 12.5a3 3 0 0 1-.3-6 4 4 0 0 1 7.7-.9 2.75 2.75 0 0 1 .3 5.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
-      <path d="M6 10.5l1.6 1.5L10.5 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-    </Svg>
-  ) : (
-    <Svg class="synced-icon unsynced">
-      <path d="M4.5 12.5a3 3 0 0 1-.3-6 4 4 0 0 1 7.7-.9 2.75 2.75 0 0 1 .3 5.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
-      <path d="M3 3l10 10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
-    </Svg>
-  );
-}
-
 export function ListIcon() {
   return (
     <Svg>
@@ -167,6 +153,14 @@ export function CheckIcon() {
   return (
     <Svg>
       <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </Svg>
+  );
+}
+
+export function ChevronIcon() {
+  return (
+    <Svg class="chevron-icon">
+      <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
     </Svg>
   );
 }

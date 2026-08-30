@@ -50,8 +50,16 @@ export const PriorityDisplay: Record<PriorityValue, string> = {
   low: "Low",
 };
 
+export interface Project {
+  id: string;
+  name: string;
+  key: string;
+  created: string;
+}
+
 export interface Issue {
   id: string;
+  project: string;
   title: string;
   description: string;
   priority: PriorityValue;
@@ -60,19 +68,23 @@ export interface Issue {
   created: string;
   kanbanorder: string;
   username: string;
-  synced: boolean;
 }
 
 export interface Comment {
   id: string;
+  issue: string;
   body: string;
   username: string;
-  issue_id: string;
   created: string;
-  synced: boolean;
+  modified: string;
 }
 
 export const USERNAME = "you";
 
-/** Columns owned by the sync machinery; never written back from facts. */
-export const LOCAL_STATE_COLUMNS = ["synced", "modified_columns", "sent_to_server", "backup", "new", "deleted"];
+/** The sync partition an issue's and its comments' facts live in; project facts themselves are global. */
+export const projectScope = (projectId: string): string => `project:${projectId}`;
+
+/** Facts that never leave the browser: navigation, UI state, derived query windows and the recent list. */
+export const EPHEMERAL = new Set(["route", "ui", "query", "stats", "recent"]);
+
+export const isEphemeral = (fact: readonly unknown[]): boolean => EPHEMERAL.has(fact[0] as string);

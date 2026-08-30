@@ -1,40 +1,37 @@
+// Seed data as jam_facts rows: the same rows load a standalone PGlite and the
+// Postgres behind Electric. Issues are spread evenly across a few projects so
+// switching projects exercises selective sync.
+
 import { faker } from "@faker-js/faker";
 import { generateNKeysBetween } from "fractional-indexing";
 import type { PGliteInterface } from "@electric-sql/pglite";
-import { PriorityValues, StatusValues } from "./types";
+import { JAM_FACTS_TABLE, factKey } from "@jam/core/server";
+import { PriorityValues, StatusValues, projectScope, type Comment, type Issue, type Project } from "./types";
 
-export interface SeedIssue {
-  id: string;
-  title: string;
-  description: string;
-  priority: string;
-  status: string;
-  created: string;
-  modified: string;
-  kanbanorder: string;
-  username: string;
+export interface SeedFact {
+  key: string;
+  scope: string;
 }
 
-export interface SeedComment {
-  id: string;
-  body: string;
-  username: string;
-  issue_id: string;
-  created: string;
-  modified: string;
-}
+export const SEED_PROJECTS: Project[] = [
+  { id: "web", name: "Web App", key: "WEB", created: "2025-01-06T09:00:00.000Z" },
+  { id: "mobile", name: "Mobile", key: "MOB", created: "2025-02-03T09:00:00.000Z" },
+  { id: "api", name: "Platform API", key: "API", created: "2025-03-03T09:00:00.000Z" },
+  { id: "design", name: "Design System", key: "DES", created: "2025-04-07T09:00:00.000Z" },
+];
 
-export function generateSeed(count: number, seed = 1): { issues: SeedIssue[]; comments: SeedComment[] } {
+export function generateSeed(count: number, seed = 1): { projects: Project[]; issues: Issue[]; comments: Comment[] } {
   faker.seed(seed);
   faker.setDefaultRefDate(new Date("2026-08-01T00:00:00Z"));
   const kanbanKeys = faker.helpers.shuffle(generateNKeysBetween(null, null, count));
-  const issues: SeedIssue[] = [];
-  const comments: SeedComment[] = [];
+  const issues: Issue[] = [];
+  const comments: Comment[] = [];
   for (let i = 0; i < count; i++) {
     const id = faker.string.uuid();
     const created = faker.date.past({ years: 1 });
     issues.push({
       id,
+      project: SEED_PROJECTS[i % SEED_PROJECTS.length].id,
       title: faker.lorem.sentence({ min: 3, max: 8 }),
       description: faker.lorem.sentences({ min: 2, max: 6 }, "\n"),
       priority: faker.helpers.arrayElement(PriorityValues),
@@ -49,43 +46,54 @@ export function generateSeed(count: number, seed = 1): { issues: SeedIssue[]; co
       const at = faker.date.between({ from: created, to: faker.defaultRefDate() }).toISOString();
       comments.push({
         id: faker.string.uuid(),
+        issue: id,
         body: faker.lorem.paragraph(),
         username: faker.internet.username(),
-        issue_id: id,
         created: at,
         modified: at,
       });
     }
   }
-  return { issues, comments };
+  return { projects: SEED_PROJECTS, issues, comments };
 }
 
-/** Insert generated data straight into a PGlite instance (standalone mode, no Electric). */
-export async function seedLocal(pg: PGliteInterface, count: number): Promise<void> {
-  const { issues, comments } = generateSeed(count);
-  await pg.transaction(async (tx) => {
-    for (const batch of chunk(issues, 500)) {
-      await tx.query(
-        `INSERT INTO issue (id, title, description, priority, status, created, modified, kanbanorder, username)
-         SELECT * FROM json_to_recordset($1) AS t(
-           id UUID, title TEXT, description TEXT, priority TEXT, status TEXT,
-           created TIMESTAMPTZ, modified TIMESTAMPTZ, kanbanorder TEXT, username TEXT)`,
-        [JSON.stringify(batch)],
-      );
-    }
-    for (const batch of chunk(comments, 500)) {
-      await tx.query(
-        `INSERT INTO comment (id, body, username, issue_id, created, modified)
-         SELECT * FROM json_to_recordset($1) AS t(
-           id UUID, body TEXT, username TEXT, issue_id UUID, created TIMESTAMPTZ, modified TIMESTAMPTZ)`,
-        [JSON.stringify(batch)],
-      );
-    }
-  });
+function entityFacts(entity: string, record: { id: string }, scope: string): SeedFact[] {
+  return Object.entries(record)
+    .filter(([column]) => column !== "id")
+    .map(([column, value]) => ({ key: factKey([entity, record.id, column, value as string]), scope }));
 }
 
-function chunk<T>(items: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
+/** Everything generateSeed() produces, as rows for jam_facts. */
+export function seedFacts(count: number, seed = 1): SeedFact[] {
+  const { projects, issues, comments } = generateSeed(count, seed);
+  const issueProject = new Map(issues.map((issue) => [issue.id, issue.project]));
+  return [
+    ...projects.flatMap((project) => entityFacts("project", project, "")),
+    ...issues.flatMap((issue) => entityFacts("issue", issue, projectScope(issue.project))),
+    ...comments.flatMap((comment) => entityFacts("comment", comment, projectScope(issueProject.get(comment.issue)!))),
+  ];
+}
+
+/** Insert facts straight into a PGlite or Postgres `jam_facts` table in batches. */
+export async function insertSeedFacts(
+  query: (sql: string, params: unknown[]) => Promise<unknown>,
+  facts: SeedFact[],
+  batchSize = 1000,
+): Promise<void> {
+  for (let i = 0; i < facts.length; i += batchSize) {
+    await query(
+      `INSERT INTO ${JAM_FACTS_TABLE} (key, scope)
+       SELECT key, scope FROM json_to_recordset($1) AS t(key TEXT, scope TEXT)
+       ON CONFLICT (key) DO NOTHING`,
+      [JSON.stringify(facts.slice(i, i + batchSize))],
+    );
+  }
+}
+
+/** Seed a standalone PGlite (no Electric) when it has no facts yet. */
+export async function seedLocal(pg: PGliteInterface, count: number): Promise<boolean> {
+  const existing = await pg.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${JAM_FACTS_TABLE}`);
+  if (existing.rows[0].n > 0) return false;
+  await pg.transaction((tx) => insertSeedFacts((sql, params) => tx.query(sql, params), seedFacts(count)));
+  return true;
 }

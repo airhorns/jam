@@ -1,5 +1,5 @@
 import { h } from "@jam/core/jsx";
-import { $, replace, when } from "@jam/core";
+import { replace } from "@jam/core";
 import { queryMeta, readValue } from "../facts";
 import { filterStateToParams, type FilterState } from "../filter-state";
 import { currentRoute, navigate, type Route } from "../programs/router";
@@ -182,17 +182,9 @@ function SearchBox({ route }: { route: Route }) {
   );
 }
 
-function syncSummary(): string | null {
-  const status = when(["sync", "status", $.status])[0]?.status;
-  if (status === "standalone") return "Local only";
-  if (status === "done") return "Synced";
-  return null;
-}
-
 export function TopFilter({ route }: { route: Route }) {
   const total = Number(readValue("stats", "issues", "total") ?? 0);
   const shown = shownCount(route);
-  const sync = syncSummary();
   return (
     <div class="top-filter">
       <div class="top-filter-row">
@@ -202,11 +194,6 @@ export function TopFilter({ route }: { route: Route }) {
         </span>
         {route.page === "search" && <SearchBox key="search" route={route} />}
         <span class="top-filter-spacer" key="spacer" />
-        {sync && (
-          <span class="sync-summary" key="sync">
-            {sync}
-          </span>
-        )}
         <FilterMenu key="filter" route={route} />
         {route.page !== "board" && <SortMenu key="sort" route={route} />}
       </div>
