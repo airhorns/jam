@@ -104,7 +104,7 @@ All packages use a custom JSX factory — **not React**:
 
 - **Unit tests**: Vitest, files in `src/__tests__/`. Run a single test file: `cd packages/core && pnpm exec vitest run src/__tests__/db.test.ts`
 - **E2E tests**: Playwright (Chromium). Test servers use per-worktree default ports to avoid cross-worktree collisions; set `PLAYWRIGHT_PORT` or the example-specific `*_PLAYWRIGHT_PORT` variable to override.
-- **CI** runs: install → typecheck → UI tests → unit tests → folk-todo, puddy-vite, and linearlite e2e. Separate CI jobs run core benchmarks and macOS native Swift builds.
+- **CI** runs: install → typecheck → UI tests → unit tests → folk-todo, puddy-vite, and linearlite e2e. A separate CI job runs core benchmarks. The native Swift packages are not built in CI: `packages/native` bundles `@jam/core` as a single IIFE, which cannot include the PGlite worker.
 
 ## Browser Automation
 
