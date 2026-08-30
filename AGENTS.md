@@ -4,7 +4,7 @@
 pnpm install       # Install all dependencies
 pnpm dev           # Run folk-todo example dev server
 pnpm test          # Run package/example unit tests where present
-pnpm test:e2e      # Run folk-todo and puddy-vite e2e tests (Playwright)
+pnpm test:e2e      # Run folk-todo, puddy-vite, and linearlite e2e tests (Playwright)
 pnpm typecheck     # TypeScript check all packages
 
 # Optional just conveniences, if just is installed
@@ -67,7 +67,9 @@ All application state — including the VDOM — lives in a shared **fact databa
   - `jsx.ts` — Custom JSX factory (`h`/`Fragment`) with deterministic entity ID generation
   - `renderer.ts` — Two-phase rendering: emit VDOM claims into the fact DB, then patch the real DOM
   - `select.ts` — CSS selector queries over VDOM facts
-  - `persist.ts` / `persist-worker.ts` — SQLite/OPFS persistence via wa-sqlite
+  - `pglite.ts` / `pglite-worker.ts` — `openDatabase`: PGlite (Postgres in WASM) in a shared worker, backed by IndexedDB
+  - `persist.ts` — mirrors facts into a `jam_facts` table and restores them on load
+  - `tables.ts` — `syncTable`: live queries over PGlite tables ↔ facts, fact writes → SQL (what Electric sync plugs into)
 
 - **@jam/ui** (`packages/ui/`): Tamagui-inspired styled component library with theming, tokens, and 40+ components.
 
@@ -78,6 +80,7 @@ All application state — including the VDOM — lives in a shared **fact databa
 - `examples/puddy-vite/` — Chat app with session management, VCR testing (MSW), unit + e2e tests
 - `examples/trello-clone/` — Kanban board example with unit + e2e tests
 - `examples/obsidian-clone/` — Linked-note workspace example with unit + e2e tests
+- `examples/linearlite/` — Linear clone on PGlite + Electric sync (port of Electric's demo), unit + e2e tests
 - `examples/ui-catalog/` — Browser catalog for `@jam/ui` component review
 - `examples/ui-catalog-native/` — Native catalog source for SwiftUI renderer coverage
 - `examples/counter-ios/` and `examples/spatial-counter/` — Swift native examples
@@ -101,7 +104,7 @@ All packages use a custom JSX factory — **not React**:
 
 - **Unit tests**: Vitest, files in `src/__tests__/`. Run a single test file: `cd packages/core && pnpm exec vitest run src/__tests__/db.test.ts`
 - **E2E tests**: Playwright (Chromium). Test servers use per-worktree default ports to avoid cross-worktree collisions; set `PLAYWRIGHT_PORT` or the example-specific `*_PLAYWRIGHT_PORT` variable to override.
-- **CI** runs: install → typecheck → UI tests → unit tests → folk-todo and puddy-vite e2e. Separate CI jobs run core benchmarks and macOS native Swift builds.
+- **CI** runs: install → typecheck → UI tests → unit tests → folk-todo, puddy-vite, and linearlite e2e. A separate CI job runs core benchmarks. The native Swift packages are not built in CI: `packages/native` bundles `@jam/core` as a single IIFE, which cannot include the PGlite worker.
 
 ## Browser Automation
 

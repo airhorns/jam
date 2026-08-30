@@ -7,8 +7,9 @@ import "./styles.css";
 import "./programs/strikethrough";
 
 async function start() {
-  // Restore persisted facts from SQLite/OPFS, then mount
-  await persist({ name: "folk-todo" });
+  // Restore persisted facts from PGlite (IndexedDB), then mount
+  const persistence = await persist({ name: "folk-todo" });
+  (window as any).__persist = persistence;
 
   mount(<TodoApp />, document.getElementById("app")!);
 }

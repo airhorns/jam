@@ -28,7 +28,7 @@ Useful commands:
 ```bash
 pnpm dev             # Run the folk-todo example dev server
 pnpm test            # Run unit tests for packages/examples that define them
-pnpm test:e2e        # Run folk-todo and puddy-vite Playwright suites
+pnpm test:e2e        # Run folk-todo, puddy-vite, and linearlite Playwright suites
 pnpm typecheck       # TypeScript check all packages and examples
 pnpm run dev:ui      # Run the @jam/ui catalog example
 ```
@@ -45,6 +45,7 @@ another app's dev server. Set `PLAYWRIGHT_PORT` or the example-specific
 - `examples/trello-clone` — kanban workflow example with ordered board state
 - `examples/obsidian-clone` — linked-note workspace with graph-derived views
 - `examples/puddy-vite` — chat/session app with VCR-style network tests
+- `examples/linearlite` — Linear clone on PGlite + Electric sync, with unit and e2e coverage
 - `examples/ui-catalog` — browser catalog for `@jam/ui` components
 - `examples/counter-ios`, `examples/spatial-counter`, and `examples/ui-catalog-native` — SwiftUI/native runtime examples
 
@@ -234,3 +235,63 @@ import { h, injectVdom } from "@jam/core";
 // Add a badge as child of session-s-1 at index 1000 (avoiding conflicts)
 injectVdom("session-s-1", 1000, h("span", { class: "badge" }, "3"));
 ```
+
+## Persistence and sync
+
+Jam stores durable state in [PGlite](https://pglite.dev) — Postgres compiled to WASM, running in a shared Web Worker and backed by IndexedDB. Tabs on the same database elect a leader that owns the files; the others proxy queries to it.
+
+```typescript
+import { openDatabase } from "@jam/core";
+
+const pg = await openDatabase({ name: "my-app" });   // idb://my-app
+```
+
+`openDatabase` accepts `dataDir` (`idb://`, `opfs-ahp://`, `memory://`) and `relaxedDurability` (default `true`: queries resolve before the write reaches storage; `await pg.syncToDisk()` when you need it flushed). PGlite currently logs one harmless `ErrnoError` the first time it creates an IndexedDB data directory.
+
+### Persisting facts
+
+`persist()` mirrors facts into a `jam_facts` table and restores them on the next load. Facts are stored by identity, so `replace()` is a delete plus an insert.
+
+```typescript
+import { persist } from "@jam/core";
+
+const handle = await persist({ pg, include: (fact) => fact[0] === "ui" });
+// handle.flush() writes pending changes now; await handle() flushes and stops.
+```
+
+Without `include`, everything except VDOM facts (`defaultExclude`) is persisted. Pass your own `pg` whenever the app also uses `syncTable`, so both share one database. Restored facts are durable (`remember`-style), not scoped to any owner.
+
+### Mirroring tables as facts
+
+`syncTable` projects a (windowed) live query over a PGlite table into `[entity, id, column, value]` facts and writes fact mutations back as SQL. Because it only watches the table, anything that writes to PGlite — your code, a migration, or [Electric](https://electric-sql.com) syncing a shape from Postgres — shows up in facts with no further integration.
+
+```typescript
+import { syncTable, replace, forget, _ } from "@jam/core";
+
+const list = syncTable(pg, {
+  table: "issue",
+  query: "SELECT * FROM issue WHERE deleted = false ORDER BY created DESC",
+  offset: 0, limit: 100,
+  name: "list",                 // emits ["query", "list", "row", index, id], "total", "offset", "limit", "ready"
+  readonly: ["synced"],         // generated columns are never written back
+  writeDebounce: 300,
+});
+await list.ready;
+
+replace("issue", id, "title", "New title");   // → UPDATE issue SET title = $2 WHERE id = $1
+forget("issue", id, _, _);                    // → DELETE FROM issue WHERE id = $1
+await list.refresh({ offset: 200 });          // move the window
+await list.dispose();
+```
+
+- A NULL column is an absent fact; forgetting one column writes NULL, forgetting a row's last fact deletes the row (decided at that moment, so a binding that re-mirrors the row before the debounced flush doesn't resurrect it).
+- Remembering facts for an id the table doesn't have inserts a row from all of its current facts.
+- Several bindings can watch the same entity (a list and a detail view); a fact is dropped only when no binding still holds it. Rebinding with the same `name` hands the `["query", name, …]` facts to the new binding.
+- While a write is pending, live results don't overwrite that cell, so keystrokes aren't clobbered by a stale echo.
+- Mirrored facts are durable, not scoped: a rule that `claim`s on top of them is revoked as usual, the row facts stay until the table changes.
+
+See `examples/linearlite` for a full app on this stack, including Electric sync.
+
+### Components and children
+
+Nested JSX reaches a function component as `props.children`, and every component accepts `key` and `id`. A prop literally named `id` is jam's global element id (see "Targeting elements"), so use another name — `issueId`, `todoId` — for domain identifiers. Nested components are executed inside the tracked render, so a `when()` in a child re-renders the tree just like one in the root. Elements under `<svg>` are created in the SVG namespace.

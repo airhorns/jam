@@ -16,13 +16,15 @@ export type VNode = {
   tag: string | Function;
   props: Record<string, unknown>;
   children: VChild[];
+  /** Component nodes only: the output of `tag(props)`, filled in by expandComponents(). */
+  rendered?: VChild;
 };
 
-export type ElementRef<T extends HTMLElement = HTMLElement> = (
+export type ElementRef<T extends Element = HTMLElement> = (
   element: T | null,
 ) => void;
 
-export type ImperativeHostProps<T extends HTMLElement = HTMLElement> = {
+export type ImperativeHostProps<T extends Element = HTMLElement> = {
   as?: string;
   onElement: ElementRef<T>;
   children?: never;
@@ -70,7 +72,7 @@ export function Fragment(
  * Children are intentionally not reconciled so libraries like terminal
  * emulators can own the host subtree.
  */
-export function ImperativeHost<T extends HTMLElement = HTMLElement>(
+export function ImperativeHost<T extends Element = HTMLElement>(
   props: ImperativeHostProps<T>,
 ): VNode {
   const { as = "div", onElement, children: _children, ...rest } = props;
@@ -99,6 +101,32 @@ function flattenChildren(children: VChild[]): VChild[] {
     }
   }
   return result;
+}
+
+/** Props a component is called with: its own props plus nested JSX as `children`. */
+function componentProps(vnode: VNode): Record<string, unknown> {
+  if (vnode.children.length === 0) return vnode.props;
+  return {
+    ...vnode.props,
+    children:
+      vnode.children.length === 1 ? vnode.children[0] : vnode.children,
+  };
+}
+
+/**
+ * Call every component in the tree and cache its output on a copy of the node,
+ * so the whole tree can be executed inside a tracking context and emitted later
+ * by emitVdom() without re-running components.
+ */
+export function expandComponents(node: VChild): VChild {
+  if (node == null || typeof node !== "object") return node;
+  if (Array.isArray(node)) return node.map(expandComponents);
+  if (!node.__vnode) return node;
+  if (typeof node.tag === "function") {
+    const result = (node.tag as Function)(componentProps(node));
+    return { ...node, rendered: expandComponents(result) };
+  }
+  return { ...node, children: node.children.map(expandComponents) };
 }
 
 /**
@@ -150,17 +178,11 @@ export function emitVdom(
   const vnode = node as VNode;
 
   if (typeof vnode.tag === "function") {
-    // Component: execute it, propagate key/id to root output element
-    // Merge children into props so components can access them
-    const propsWithChildren =
-      vnode.children.length > 0
-        ? {
-            ...vnode.props,
-            children:
-              vnode.children.length === 1 ? vnode.children[0] : vnode.children,
-          }
-        : vnode.props;
-    const result = (vnode.tag as Function)(propsWithChildren);
+    // Component: use its cached output (or execute it), propagate key/id to root output element
+    const result =
+      "rendered" in vnode
+        ? vnode.rendered
+        : (vnode.tag as Function)(componentProps(vnode));
     if (result) {
       // Compute the ID this component would get, and propagate to its output
       const componentId = computeEntityId(

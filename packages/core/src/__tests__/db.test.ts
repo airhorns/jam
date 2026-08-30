@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { FactDB, $, _, matchPattern } from "../db";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { isObservableArray, runInAction } from "mobx";
+import { FactDB, $, _, matchPattern, type Fact, type FactChange } from "../db";
 
 describe("matchPattern", () => {
   it("matches exact facts", () => {
@@ -173,6 +174,101 @@ describe("FactDB", () => {
       db.setRef("key", "val");
       db.deleteRef("key");
       expect(db.getRef("key")).toBeUndefined();
+    });
+  });
+
+  describe("observe", () => {
+    type Event = [FactChange, string, Fact];
+    let log: Event[];
+    beforeEach(() => {
+      log = [];
+      db.observe((type, key, fact) => log.push([type, key, fact]));
+    });
+
+    it("fires add synchronously with a plain array once the db is consistent", () => {
+      let seenInside = 0;
+      db.observe((type, _key, fact) => {
+        if (type === "add") seenInside = db.query(fact).length;
+      });
+      runInAction(() => {
+        db.insert("todo", 1, "title", "A");
+        expect(log).toHaveLength(1);
+      });
+      const [type, key, fact] = log[0];
+      expect(type).toBe("add");
+      expect(key).toBe(JSON.stringify(["todo", 1, "title", "A"]));
+      expect(fact).toEqual(["todo", 1, "title", "A"]);
+      expect(isObservableArray(fact)).toBe(false);
+      expect(() => structuredClone(fact)).not.toThrow();
+      expect(seenInside).toBe(1);
+    });
+
+    it("does not fire for a duplicate insert", () => {
+      db.insert("todo", 1, "title", "A");
+      db.insert("todo", 1, "title", "A");
+      expect(log).toHaveLength(1);
+    });
+
+    it("fires delete for exact and wildcard drops", () => {
+      db.insert("todo", 1, "title", "A");
+      db.insert("todo", 2, "title", "B");
+      db.insert("todo", 3, "title", "C");
+      log = [];
+      db.drop("todo", 1, "title", "A");
+      db.drop("todo", _, "title", _);
+      expect(log.map(([t, , f]) => [t, f[1]])).toEqual([["delete", 1], ["delete", 2], ["delete", 3]]);
+    });
+
+    it("replace() emits delete then add, and nothing for an unchanged value", () => {
+      db.insert("todo", 1, "title", "A");
+      log = [];
+      db.replace("todo", 1, "title", "B");
+      expect(log.map(([t, , f]) => [t, f[3]])).toEqual([["delete", "A"], ["add", "B"]]);
+      log = [];
+      db.replace("todo", 1, "title", "B");
+      expect(log).toEqual([]);
+    });
+
+    it("replace() of an unchanged value keeps the fact for a scope that claimed it", () => {
+      const owner = db.createChildOwner(db.getCurrentOwnerId(), "scope");
+      db.withOwnerScope(owner, () => db.assert("todo", 1, "title", "A"));
+      db.replace("todo", 1, "title", "A");
+      db.revokeOwner(owner);
+      expect(db.query(["todo", 1, "title", $.t])).toEqual([{ t: "A" }]);
+    });
+
+    it("deleteByKey and clear emit one delete per fact", () => {
+      db.insert("a", 1);
+      db.insert("b", 2);
+      db.insert("c", 3);
+      log = [];
+      db.deleteByKey(JSON.stringify(["a", 1]));
+      expect(log).toEqual([["delete", JSON.stringify(["a", 1]), ["a", 1]]]);
+      log = [];
+      db.clear();
+      expect(log.map(([t, , f]) => [t, ...f]).sort()).toEqual([["delete", "b", 2], ["delete", "c", 3]]);
+    });
+
+    it("unsubscribe stops notifications", () => {
+      const own: Event[] = [];
+      const stop = db.observe((type, key, fact) => own.push([type, key, fact]));
+      db.insert("a", 1);
+      stop();
+      db.insert("a", 2);
+      expect(own).toHaveLength(1);
+      expect(log).toHaveLength(2);
+    });
+
+    it("a throwing listener does not break the mutation or other listeners", () => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      db.observe(() => {
+        throw new Error("boom");
+      });
+      db.insert("a", 1);
+      expect(db.query(["a", $.x])).toEqual([{ x: 1 }]);
+      expect(log).toHaveLength(1);
+      expect(errors).toHaveBeenCalledOnce();
+      errors.mockRestore();
     });
   });
 });

@@ -1,136 +1,106 @@
-// persist() — durable fact storage via SQLite/OPFS in a Web Worker.
+// persist() — durable fact storage in a PGlite `jam_facts` table.
 //
 // Usage:
 //   import { persist } from "@jam/core";
 //   await persist({ name: "my-app" });
 //
 // On startup, restores persisted facts into the FactDB.
-// On changes, debounce-flushes modified facts to the worker.
+// On changes, debounce-flushes added/removed facts to the database.
 // VDOM facts (first term starts with "dom") are excluded by default.
 
-import { autorun, runInAction } from "mobx";
-import { db, type Fact, type Term } from "./db";
+import { runInAction } from "mobx";
+import { db, type Fact } from "./db";
+import { openDatabase, type JamPGlite } from "./pglite";
 
 export interface PersistOptions {
-  /** OPFS database name (default: "jam") */
+  /** Database name, used as the PGlite data directory `idb://${name}` (default: "jam"). Ignored when `pg` is given. */
   name?: string;
+  /** Use an already-open PGlite instance instead of opening one. Required when the app also uses syncTable(). */
+  pg?: JamPGlite;
   /** Debounce interval in ms (default: 500) */
   debounce?: number;
   /** Filter function — return true to EXCLUDE a fact from persistence.
    *  Default: excludes VDOM facts (first term starts with "dom"). */
   exclude?: (fact: Fact) => boolean;
+  /** Allowlist — when given, only facts for which this returns true are persisted and `exclude` is ignored. */
+  include?: (fact: Fact) => boolean;
 }
 
-const defaultExclude = (fact: Fact): boolean => {
+export const defaultExclude = (fact: Fact): boolean => {
   const first = fact[0];
   return typeof first === "string" && first.startsWith("dom");
 };
 
+/** Disposer returned by persist(); call it to flush and stop, or `.flush()` to write pending changes to storage now. */
+export type PersistHandle = (() => Promise<void>) & { flush(): Promise<void> };
+
 /**
- * Start persisting facts to SQLite/OPFS.
+ * Start persisting facts to PGlite.
  * Restores previously persisted facts on startup.
- * Returns a disposer to stop persistence.
+ * Returns a disposer that flushes pending writes and stops persistence.
  */
-export async function persist(options: PersistOptions = {}): Promise<() => void> {
-  const {
-    name = "jam",
-    debounce: debounceMs = 500,
-    exclude = defaultExclude,
-  } = options;
+export async function persist(options: PersistOptions = {}): Promise<PersistHandle> {
+  const { name = "jam", debounce: debounceMs = 500, exclude = defaultExclude, include } = options;
+  const shouldPersist = include ? include : (fact: Fact) => !exclude(fact);
 
-  // Spawn the worker
-  const worker = new Worker(
-    new URL("./persist-worker.ts", import.meta.url),
-    { type: "module" },
-  );
+  const ownsDatabase = !options.pg;
+  const pg = options.pg ?? (await openDatabase({ name }));
 
-  // Wait for the worker to load and restore facts
-  const restoredFacts = await new Promise<[string, Term[]][]>((resolve, reject) => {
-    const handler = (e: MessageEvent) => {
-      if (e.data.type === "ready") {
-        worker.removeEventListener("message", handler);
-        resolve(e.data.facts);
-      } else if (e.data.type === "error") {
-        worker.removeEventListener("message", handler);
-        reject(new Error(e.data.message));
-      }
-    };
-    worker.addEventListener("message", handler);
-    worker.postMessage({ type: "open", name });
-  });
+  await pg.exec(`CREATE TABLE IF NOT EXISTS jam_facts (key TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
 
-  // Restore facts into the FactDB
+  const restored = await pg.query<{ key: string; terms: Fact }>(`SELECT key, terms FROM jam_facts`);
   runInAction(() => {
-    for (const [, terms] of restoredFacts) {
-      db.insert(...terms);
-    }
+    for (const row of restored.rows) db.insert(...row.terms);
   });
 
-  // Track which fact keys are persisted so we can detect adds/removes
-  const persistedKeys = new Set<string>(restoredFacts.map(([key]) => key));
-
-  // Debounced sync: watch db.facts for changes, flush to worker
+  // key → fact to upsert, or null to delete; the latest change per key wins.
+  const pending = new Map<string, Fact | null>();
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
-  let pendingPuts: [string, Term[]][] = [];
-  let pendingDeletes: string[] = [];
+  let inflight: Promise<void> = Promise.resolve();
 
-  function scheduleFlush() {
+  const scheduleFlush = () => {
     if (flushTimer) clearTimeout(flushTimer);
-    flushTimer = setTimeout(flush, debounceMs);
-  }
+    flushTimer = setTimeout(() => void flush(), debounceMs);
+  };
 
-  function flush() {
+  const flush = (): Promise<void> => {
+    if (flushTimer) clearTimeout(flushTimer);
     flushTimer = null;
-    if (pendingPuts.length > 0) {
-      worker.postMessage({ type: "put", facts: pendingPuts });
-      for (const [key] of pendingPuts) persistedKeys.add(key);
-      pendingPuts = [];
-    }
-    if (pendingDeletes.length > 0) {
-      worker.postMessage({ type: "delete", keys: pendingDeletes });
-      for (const key of pendingDeletes) persistedKeys.delete(key);
-      pendingDeletes = [];
-    }
-  }
+    if (pending.size === 0) return inflight;
+    const batch = new Map(pending);
+    pending.clear();
+    inflight = inflight
+      .then(() => writeBatch(pg, batch))
+      .then(() => pg.syncToDisk?.())
+      .catch((e) => console.error("[jam] persist flush failed", e));
+    return inflight;
+  };
 
-  // Use autorun to track db.facts changes
-  const disposer = autorun(() => {
-    // Read all facts (tracks the observable map)
-    const currentFacts = new Map<string, Fact>();
-    for (const [key, fact] of db.facts) {
-      if (!exclude(fact)) {
-        currentFacts.set(key, [...fact]);
-      }
-    }
-
-    // Compute diff against persisted state
-    const puts: [string, Term[]][] = [];
-    const deletes: string[] = [];
-
-    for (const [key, fact] of currentFacts) {
-      if (!persistedKeys.has(key)) {
-        puts.push([key, fact]);
-      }
-    }
-    for (const key of persistedKeys) {
-      if (!currentFacts.has(key)) {
-        deletes.push(key);
-      }
-    }
-
-    if (puts.length > 0 || deletes.length > 0) {
-      pendingPuts.push(...puts);
-      pendingDeletes.push(...deletes);
-      scheduleFlush();
-    }
+  const unobserve = db.observe((type, key, fact) => {
+    if (!shouldPersist(fact)) return;
+    pending.set(key, type === "add" ? fact : null);
+    scheduleFlush();
   });
 
-  return () => {
-    disposer();
-    if (flushTimer) {
-      clearTimeout(flushTimer);
-      flush(); // final flush
-    }
-    worker.terminate();
+  const dispose = async () => {
+    unobserve();
+    await flush();
+    if (ownsDatabase) await pg.close();
   };
+  return Object.assign(dispose, { flush });
+}
+
+async function writeBatch(pg: JamPGlite, batch: Map<string, Fact | null>): Promise<void> {
+  await pg.transaction(async (tx) => {
+    for (const [key, fact] of batch) {
+      if (fact) {
+        await tx.query(
+          `INSERT INTO jam_facts (key, terms) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET terms = EXCLUDED.terms`,
+          [key, JSON.stringify(fact)],
+        );
+      } else {
+        await tx.query(`DELETE FROM jam_facts WHERE key = $1`, [key]);
+      }
+    }
+  });
 }
