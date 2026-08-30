@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { reaction, runInAction } from "mobx";
 import { db, $ } from "../db";
 import { replace, when } from "../primitives";
-import { h, Fragment, emitVdom, expandComponents, type VChild } from "../jsx";
-import { renderTree } from "../renderer";
+import { h, emitVdom, expandRoot, emitExpanded, type VChild } from "../jsx";
 
 beforeEach(() => {
   db.clear();
@@ -16,22 +15,19 @@ function emitted(tree: VChild): string[] {
   return Array.from(db.facts.keys()).sort();
 }
 
-/** Drive a tree the way mount() does, minus the DOM: track renderTree, emit in the effect. */
+/** Drive a tree the way mount() does, minus the DOM: track expandRoot, emit in the effect. */
 function drive(root: VChild) {
-  let componentKeys = new Set<string>();
+  const owner = db.createChildOwner(db.getCurrentOwnerId(), "drive");
   let dataRuns = 0;
   const dispose = reaction(
     () => {
       dataRuns++;
-      return renderTree(root);
+      return expandRoot(root, "dom");
     },
-    (vnode) => {
+    (nodes) => {
       runInAction(() => {
-        for (const key of componentKeys) db.deleteByKey(key);
-        db.emitCollector = new Set();
-        emitVdom(vnode, "dom", 0);
-        componentKeys = db.emitCollector;
-        db.emitCollector = null;
+        db.revokeOwner(owner);
+        db.withOwnerScope(owner, () => emitExpanded(nodes, "dom", 0));
       });
     },
     { fireImmediately: true, equals: () => false },
@@ -96,47 +92,10 @@ describe("nested component reactivity", () => {
   });
 });
 
-describe("expandComponents preserves emitVdom output", () => {
-  const cases: Record<string, () => VChild> = {
-    "keyed and id'd components": () => {
-      const Card = (p: { label: string }) => h("div", { class: "card" }, p.label);
-      return h("section", null, h(Card, { key: "x", label: "X" }), h(Card, { id: "the-card", label: "Y" }), h(Card, { label: "Z" }));
-    },
-    "nested component chain: inner id wins, inner keys ignored": () => {
-      const Inner = () => h("b", { key: "inner", id: "inner-id" }, "t");
-      const Middle = () => h(Inner, { key: "middle" });
-      const Outer = () => h(Middle, { key: "outer" });
-      return h("div", null, h(Outer, null));
-    },
-    "component returning a fragment, string, array, and null": () => {
-      const Frag = () => h(Fragment, null, h("i", null, "1"), h("i", null, "2"));
-      const Str = () => "just text";
-      const Arr = () => [h("u", null, "a"), "b", null, h("u", null, "c")];
-      const Nothing = () => null;
-      return h("div", null, h(Frag, null), h(Str, null), h(Arr, null), h(Nothing, null), h("hr", null));
-    },
-    "children passthrough": () => {
-      const Wrap = (p: { children?: VChild }) => h("div", { class: "wrap" }, p.children);
-      return h(Wrap, { children: [h("span", null, "a"), h("span", { key: "k" }, "b")] });
-    },
-    "handlers and boolean props": () => {
-      const Btn = () => h("button", { onClick: () => {}, disabled: true, "data-x": 3 }, "go");
-      return h("form", null, h(Btn, null));
-    },
-  };
-
-  for (const [name, build] of Object.entries(cases)) {
-    it(name, () => {
-      const direct = emitted(build());
-      const expanded = emitted(expandComponents(build()));
-      expect(expanded).toEqual(direct);
-      expect(direct.length).toBeGreaterThan(0);
-    });
-  }
-
-  it("renderTree unwraps the root component so ids start at dom:0", () => {
+describe("expandRoot", () => {
+  it("gives the root component's output ids starting at dom:0", () => {
     const Root = () => h("div", null, "hi");
-    const keys = emitted(renderTree(h(Root, null)));
+    const keys = emitted(h(Root, null));
     expect(keys).toEqual(emitted(h("div", null, "hi")));
     expect(keys).toContain(JSON.stringify(["dom:0", "tag", "div"]));
   });
@@ -144,8 +103,8 @@ describe("expandComponents preserves emitVdom output", () => {
   it("does not mutate the input tree", () => {
     const Child = () => h("i", null);
     const tree = h("div", null, h(Child, null));
-    expandComponents(tree);
-    expect("rendered" in (tree.children[0] as any)).toBe(false);
+    expandRoot(tree, "dom");
+    expect(tree).toEqual(h("div", null, h(Child, null)));
   });
 });
 

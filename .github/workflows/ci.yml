@@ -36,6 +36,7 @@ jobs:
           path: |
             examples/folk-todo/test-results
             examples/puddy-vite/test-results
+            examples/linearlite/test-results
             examples/catalog/test-results
           if-no-files-found: ignore
           retention-days: 7
