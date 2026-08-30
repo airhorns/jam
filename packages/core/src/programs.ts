@@ -4,6 +4,7 @@ import {
   remember as baseRemember,
   replace as baseReplace,
   forget as baseForget,
+  scoped,
   transaction,
   when,
   whenever as baseWhenever,
@@ -22,6 +23,7 @@ export interface ProgramAPI {
   forget: (...terms: (Term | typeof _)[]) => void;
   when: (...patterns: Pattern[]) => Bindings[];
   whenever: (patterns: Pattern[], body: (matches: Bindings[]) => void) => () => void;
+  scoped: typeof scoped;
   transaction: typeof transaction;
   h: typeof h;
   Fragment: typeof Fragment;
@@ -65,6 +67,7 @@ export function createProgramAPI(extraApi: Record<string, unknown> = {}, dispose
       autoDisposers.add(disposer);
       return disposer;
     },
+    scoped,
     transaction,
     h,
     Fragment,

@@ -6,8 +6,8 @@
 // Write side: fact mutations on the entity are collected and flushed back
 // to the table as UPDATE / INSERT / DELETE statements.
 
-import { runInAction } from "mobx";
 import { db, $, _, type Term, type Fact } from "./db";
+import { applyFacts, isApplying } from "./applying";
 import type { JamPGlite } from "./pglite";
 import type { LiveQuery, LiveQueryResults } from "@electric-sql/pglite/live";
 
@@ -116,21 +116,6 @@ function quoteIdent(name: string): string {
     .join(".");
 }
 
-/** > 0 while the read side is writing facts, so the write side ignores them. */
-let applying = 0;
-
-/** Run `fn` in one MobX action with the write side muted. Reactions fire after the action, unmuted. */
-function applyFacts(fn: () => void): void {
-  runInAction(() => {
-    applying++;
-    try {
-      fn();
-    } finally {
-      applying--;
-    }
-  });
-}
-
 // --- Per-entity shared state ---
 
 /** Tracks which (id, column) cells are held by how many bindings, so overlapping queries don't retract each other's facts. */
@@ -205,7 +190,7 @@ class TableWriter {
   }
 
   private onFact(type: "add" | "delete", fact: Fact): void {
-    if (applying > 0 || fact.length !== 4 || fact[0] !== this.entity) return;
+    if (isApplying() || fact.length !== 4 || fact[0] !== this.entity) return;
     const [, id, col, value] = fact;
     if (typeof col !== "string") return;
     const writable = !this.readonlyColumns.has(col);
