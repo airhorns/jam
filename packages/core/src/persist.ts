@@ -50,9 +50,9 @@ export async function persist(options: PersistOptions = {}): Promise<PersistHand
   const ownsDatabase = !options.pg;
   const pg = options.pg ?? (await openDatabase({ name }));
 
-  await pg.exec(`CREATE TABLE IF NOT EXISTS ${PERSIST_TABLE} (key TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
+  await pg.exec(`CREATE TABLE IF NOT EXISTS ${PERSIST_TABLE} (id TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
 
-  const restored = await pg.query<{ key: string; terms: Fact }>(`SELECT key, terms FROM ${PERSIST_TABLE}`);
+  const restored = await pg.query<{ terms: Fact }>(`SELECT terms FROM ${PERSIST_TABLE}`);
   runInAction(() => {
     for (const row of restored.rows) db.insert(...row.terms);
   });
@@ -94,17 +94,24 @@ export async function persist(options: PersistOptions = {}): Promise<PersistHand
   return Object.assign(dispose, { flush });
 }
 
+/** Rows are keyed by md5 of the fact key so facts of any size fit the index. */
 async function writeBatch(pg: JamPGlite, batch: Map<string, Fact | null>): Promise<void> {
+  const upserts: string[] = [];
+  const deletes: string[] = [];
+  for (const [key, fact] of batch) (fact ? upserts : deletes).push(key);
   await pg.transaction(async (tx) => {
-    for (const [key, fact] of batch) {
-      if (fact) {
-        await tx.query(
-          `INSERT INTO ${PERSIST_TABLE} (key, terms) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET terms = EXCLUDED.terms`,
-          [key, JSON.stringify(fact)],
-        );
-      } else {
-        await tx.query(`DELETE FROM ${PERSIST_TABLE} WHERE key = $1`, [key]);
-      }
+    if (upserts.length) {
+      await tx.query(
+        `INSERT INTO ${PERSIST_TABLE} (id, terms)
+         SELECT md5(value), value::jsonb FROM json_array_elements_text($1::text::json)
+         ON CONFLICT (id) DO NOTHING`,
+        [JSON.stringify(upserts)],
+      );
+    }
+    if (deletes.length) {
+      await tx.query(`DELETE FROM ${PERSIST_TABLE} WHERE id IN (SELECT md5(value) FROM json_array_elements_text($1::text::json))`, [
+        JSON.stringify(deletes),
+      ]);
     }
   });
 }

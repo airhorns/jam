@@ -1,11 +1,12 @@
 // sync() — every durable fact lives in one `jam_facts` table; a client mirrors
 // the slices it subscribes to into the FactDB and ships its own writes back.
 //
-//   const s = await sync({ pg, shapeUrl: "http://localhost:3000/v1/shape", writeUrl: "/jam/changes" });
-//   const project = s.subscribe({ scope: "project:p1" });
-//   await project.ready;
-//   …
-//   await project.dispose();
+//   const s = await sync({ pg, shapeUrl: "/jam/shape", writeUrl: "/jam/changes" });
+//   const stop = s.follow([["route", "project", $.id]], ([route]) => [
+//     { scope: "" },
+//     ...(route ? [{ scope: `project:${route.id}` }] : []),
+//   ]);
+//   // or by hand: const project = s.subscribe({ scope: "project:p1" }); await project.ready; … await project.dispose();
 //
 // Electric mode: each subscription is an Electric shape over `jam_facts`
 // streamed by pglite-sync into its own local table, and local writes queue in
@@ -20,18 +21,24 @@
 
 import type { Change } from "@electric-sql/pglite/live";
 import type { Transaction } from "@electric-sql/pglite";
-import { db, GLOBAL_SCOPE, _, type Fact, type PatternTerm, type Term } from "./db";
+import { comparer, reaction } from "mobx";
+import { db, GLOBAL_SCOPE, _, type Bindings, type Fact, type Pattern } from "./db";
 import { applyFacts, isApplying } from "./applying";
+import { compileFilter, type CompiledFilter, type FactFilter } from "./filter";
 import { defaultExclude } from "./persist";
 import type { JamPGlite } from "./pglite";
-import { JAM_FACTS_SQL, JAM_FACTS_TABLE, applyFactChanges, parseFactKey, type FactChangeRow, type FactOp } from "./server";
+import {
+  JAM_FACTS_COLUMNS,
+  JAM_FACTS_SQL,
+  JAM_FACTS_TABLE,
+  applyFactChanges,
+  isDataError,
+  parseFactKey,
+  type FactChangeRow,
+  type FactOp,
+} from "./server";
 
-export interface FactFilter {
-  /** Only facts in this partition; omit for every partition, "" for global facts. */
-  scope?: string;
-  /** Literal terms in the first three positions narrow the shape (`["issue", _, "project"]`); later positions must be wildcards. */
-  pattern?: PatternTerm[];
-}
+export { compileFilter, parseFilter, type CompiledFilter, type FactFilter } from "./filter";
 
 export interface SyncOptions {
   pg: JamPGlite;
@@ -55,6 +62,11 @@ export interface SyncOptions {
    * leaving one before it arrives in the other.
    */
   dropDelay?: number;
+  /**
+   * How many shapes nobody subscribes to stay on disk for a fast resume (default: 16).
+   * The least recently used beyond that are dropped when a subscription is released and on start.
+   */
+  keepShapes?: number;
   fetch?: typeof fetch;
 }
 
@@ -69,6 +81,13 @@ export interface FactSubscription {
 
 export interface SyncHandle {
   subscribe(filter?: FactFilter): FactSubscription;
+  /**
+   * Keep subscriptions in step with facts: whenever the matches of `patterns`
+   * change, subscribe what `wanted` returns for them. Newly wanted filters are
+   * ready before anything no longer wanted is released, so a switch never
+   * empties the screen first. Returns a function that releases them all.
+   */
+  follow(patterns: Pattern[], wanted: (matches: Bindings[]) => FactFilter[]): () => Promise<void>;
   /** Drop the local table and resume state of a shape nobody subscribes to any more. */
   forgetShape(filter?: FactFilter): Promise<void>;
   /** Write buffered changes to the outbox and attempt one push. */
@@ -80,60 +99,10 @@ export const SYNC_STATUS_FACT = "sync";
 export const OUTBOX_TABLE = "jam_outbox";
 export const SHAPES_TABLE = "jam_shapes";
 
-// --- Filters ---
-
-export interface CompiledFilter {
-  id: string;
-  /** SQL over jam_facts columns with `$n` placeholders; empty for "everything". */
-  where: string;
-  params: string[];
-  /** Whether a fact in `scope` belongs to this filter; omit `scope` to ask whether any scope could. */
-  matches(terms: Fact, scope?: string): boolean;
-}
-
-const FILTER_COLUMNS = ["t0", "t1", "t2"] as const;
-
-export function compileFilter(filter: FactFilter = {}): CompiledFilter {
-  const clauses: string[] = [];
-  const params: string[] = [];
-  const literals: Array<[number, Term]> = [];
-  if (filter.scope !== undefined) {
-    params.push(filter.scope);
-    clauses.push(`scope = $${params.length}`);
-  }
-  (filter.pattern ?? []).forEach((term, i) => {
-    if (term === _ || (typeof term === "object" && term !== null)) return;
-    if (i >= FILTER_COLUMNS.length) throw new Error(`sync: pattern filters may only use the first ${FILTER_COLUMNS.length} terms`);
-    literals.push([i, term]);
-    params.push(JSON.stringify(term));
-    clauses.push(`${FILTER_COLUMNS[i]} = $${params.length}`);
-  });
-  const where = clauses.join(" AND ");
-  return {
-    id: `jam_shape_${hash(where + "|" + JSON.stringify(params))}`,
-    where,
-    params,
-    matches: (terms, scope) =>
-      (filter.scope === undefined || scope === undefined || scope === filter.scope) &&
-      literals.every(([i, term]) => terms[i] === term),
-  };
-}
-
-/** cyrb53 — a small, stable string hash. */
-function hash(input: string): string {
-  let h1 = 0xdeadbeef;
-  let h2 = 0x41c6ce57;
-  for (let i = 0; i < input.length; i++) {
-    const ch = input.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
-}
-
 const staleTable = (table: string) => `${table}__stale`;
+const SHAPE_TABLE_COLUMNS = `id TEXT PRIMARY KEY, key TEXT NOT NULL, scope TEXT NOT NULL DEFAULT ''`;
+/** Rows per outbox INSERT, well under the protocol's 65535 parameters. */
+const OUTBOX_INSERT_CHUNK = 5000;
 
 // --- Locks ---
 
@@ -204,7 +173,14 @@ function httpTransport(url: string, doFetch: typeof fetch): Transport {
 
 function localTransport(pg: JamPGlite): Transport {
   return {
-    push: (changes) => pg.transaction((tx) => applyFactChanges((sql, params) => tx.query(sql, params), changes)),
+    push: async (changes) => {
+      try {
+        await pg.transaction((tx) => applyFactChanges((sql, params) => tx.query(sql, params), changes));
+      } catch (e) {
+        if (isDataError(e)) throw new SyncPushError(400, e instanceof Error ? e.message : String(e));
+        throw e;
+      }
+    },
   };
 }
 
@@ -241,6 +217,7 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
   const retryDelay = options.retryDelay ?? 1000;
   const echoTimeout = options.echoTimeout ?? 30_000;
   const dropDelay = options.dropDelay ?? 250;
+  const keepShapes = options.keepShapes ?? 16;
   const doFetch = options.fetch ?? globalThis.fetch;
   const shouldSync = include ? include : (fact: Fact) => !exclude(fact);
   const electric = shapeUrl !== undefined;
@@ -251,7 +228,9 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
     CREATE TABLE IF NOT EXISTS ${OUTBOX_TABLE} (
       seq SERIAL PRIMARY KEY, key TEXT NOT NULL, op TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '', acked_at TIMESTAMPTZ
     );
-    CREATE TABLE IF NOT EXISTS ${SHAPES_TABLE} (table_name TEXT PRIMARY KEY, filter JSONB NOT NULL, ready BOOLEAN NOT NULL DEFAULT false);
+    CREATE TABLE IF NOT EXISTS ${SHAPES_TABLE} (
+      table_name TEXT PRIMARY KEY, filter JSONB NOT NULL, ready BOOLEAN NOT NULL DEFAULT false, last_used TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
   if (!electric) await pg.exec(JAM_FACTS_SQL);
   const transport = electric ? httpTransport(writeUrl!, doFetch) : localTransport(pg);
@@ -346,11 +325,24 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
 
   // --- outbox ---
   const echoTimers = new Set<ReturnType<typeof setTimeout>>();
+  const retiring = new Set<number>();
+  let retireTimer: ReturnType<typeof setTimeout> | null = null;
+  const flushRetired = () => {
+    retireTimer = null;
+    if (disposed || retiring.size === 0) return;
+    const seqs = Array.from(retiring);
+    retiring.clear();
+    pg.query(`DELETE FROM ${OUTBOX_TABLE} WHERE seq IN (SELECT value::int FROM json_array_elements_text($1::text::json))`, [JSON.stringify(seqs)]).catch(
+      (e) => console.error("[jam] sync: retiring outbox entries failed", e),
+    );
+  };
+  /** Delete an entry and every older one for its key; a burst of echoes becomes one statement. */
   const retire = (seq: number) => {
     if (disposed) return;
-    pg.query(`DELETE FROM ${OUTBOX_TABLE} WHERE seq <= $1 AND key = (SELECT key FROM ${OUTBOX_TABLE} WHERE seq = $1)`, [seq]).catch((e) =>
-      console.error("[jam] sync: retiring an outbox entry failed", e),
-    );
+    retiring.add(seq);
+    const row = outboxRows.get(seq);
+    for (const s of (row && rowsByKey.get(row.key)) ?? []) if (s < seq) retiring.add(s);
+    if (!retireTimer) retireTimer = setTimeout(flushRetired, 0);
   };
   const retireAfterEcho = (seq: number) => {
     const timer = setTimeout(() => {
@@ -446,17 +438,22 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
     const batch = buffer;
     buffer = [];
     writing = writing
-      .then(async () => {
-        const values = batch.map((_c, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(", ");
-        const result = await pg.query<{ seq: number }>(
-          `INSERT INTO ${OUTBOX_TABLE} (key, op, scope) VALUES ${values} RETURNING seq`,
-          batch.flatMap((c) => [c.key, c.op, c.scope]),
-        );
-        result.rows.forEach((row, i) => {
-          const local = unflushed.get(batch[i].key);
-          if (local === batch[i]) local.seq = row.seq;
-        });
-      })
+      .then(() =>
+        pg.transaction(async (tx) => {
+          for (let start = 0; start < batch.length; start += OUTBOX_INSERT_CHUNK) {
+            const chunk = batch.slice(start, start + OUTBOX_INSERT_CHUNK);
+            const values = chunk.map((_c, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(", ");
+            const result = await tx.query<{ seq: number }>(
+              `INSERT INTO ${OUTBOX_TABLE} (key, op, scope) VALUES ${values} RETURNING seq`,
+              chunk.flatMap((c) => [c.key, c.op, c.scope]),
+            );
+            result.rows.forEach((row, i) => {
+              const local = unflushed.get(chunk[i].key);
+              if (local === chunk[i]) local.seq = row.seq;
+            });
+          }
+        }),
+      )
       .catch((e) => console.error("[jam] sync: writing the outbox failed", e));
     return writing;
   };
@@ -466,7 +463,7 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
     const change: LocalChange = {
       key,
       op: type === "delete" ? "delete" : info.replace ? "replace" : "upsert",
-      scope: type === "delete" ? GLOBAL_SCOPE : db.scopeOf(...fact),
+      scope: db.scopeOf(...fact),
     };
     buffer.push(change);
     unflushed.set(key, change);
@@ -478,25 +475,40 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
   let pushing: Promise<void> | null = null;
   let failures = 0;
 
+  /**
+   * Push a run of outbox rows in order. A batch the endpoint rejects for good
+   * is split in half and retried until the offending entries stand alone and
+   * can be dropped without taking the rest of the batch with them.
+   */
+  const pushRows = async (rows: OutboxRow[]): Promise<"pushed" | "dropped"> => {
+    try {
+      await transport.push(rows.map(({ key, op, scope }) => ({ key, op, scope })));
+    } catch (e) {
+      if (!(e instanceof SyncPushError && e.permanent)) throw e;
+      if (rows.length > 1) {
+        const half = Math.ceil(rows.length / 2);
+        const first = await pushRows(rows.slice(0, half));
+        const second = await pushRows(rows.slice(half));
+        return first === "dropped" || second === "dropped" ? "dropped" : "pushed";
+      }
+      console.error("[jam] sync: write endpoint rejected an entry; dropping it", rows[0].key, e);
+      setError(e.message);
+      await pg.query(`DELETE FROM ${OUTBOX_TABLE} WHERE seq = $1`, [rows[0].seq]);
+      return "dropped";
+    }
+    await pg.query(`UPDATE ${OUTBOX_TABLE} SET acked_at = now() WHERE seq BETWEEN $1 AND $2 AND acked_at IS NULL`, [
+      rows[0].seq,
+      rows[rows.length - 1].seq,
+    ]);
+    return "pushed";
+  };
+
   const pushOnce = async (): Promise<"empty" | "pushed" | "dropped"> => {
     const { rows } = await pg.query<OutboxRow & { op: FactOp }>(
       `SELECT seq, key, op, scope FROM ${OUTBOX_TABLE} WHERE acked_at IS NULL ORDER BY seq LIMIT 1000`,
     );
     if (rows.length === 0) return "empty";
-    const maxSeq = rows[rows.length - 1].seq;
-    try {
-      await transport.push(rows.map(({ key, op, scope }) => ({ key, op, scope })));
-    } catch (e) {
-      if (e instanceof SyncPushError && e.permanent) {
-        console.error("[jam] sync: write endpoint rejected a batch; dropping it", e);
-        setError(e.message);
-        await pg.query(`DELETE FROM ${OUTBOX_TABLE} WHERE seq <= $1 AND acked_at IS NULL`, [maxSeq]);
-        return "dropped";
-      }
-      throw e;
-    }
-    await pg.query(`UPDATE ${OUTBOX_TABLE} SET acked_at = now() WHERE seq <= $1 AND acked_at IS NULL`, [maxSeq]);
-    return "pushed";
+    return pushRows(rows);
   };
 
   const runPush = (): Promise<void> => {
@@ -632,8 +644,8 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
     const { where, params, id: table } = shape.compiled;
     const stale = staleTable(table);
     await pg.exec(`
-      CREATE TABLE IF NOT EXISTS "${table}" (key TEXT PRIMARY KEY, scope TEXT NOT NULL DEFAULT '');
-      CREATE TABLE IF NOT EXISTS "${stale}" (key TEXT PRIMARY KEY, scope TEXT NOT NULL DEFAULT '');
+      CREATE TABLE IF NOT EXISTS "${table}" (${SHAPE_TABLE_COLUMNS});
+      CREATE TABLE IF NOT EXISTS "${stale}" (${SHAPE_TABLE_COLUMNS});
     `);
     await pg.sync!.initMetadataTables();
     const registered = await pg.query<{ ready: boolean }>(`SELECT ready FROM ${SHAPES_TABLE} WHERE table_name = $1`, [table]);
@@ -643,16 +655,18 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
       await pg.sync!.deleteSubscription(table);
       await pg.query(
         `INSERT INTO ${SHAPES_TABLE} (table_name, filter, ready) VALUES ($1, $2, false)
-         ON CONFLICT (table_name) DO UPDATE SET ready = false`,
+         ON CONFLICT (table_name) DO UPDATE SET ready = false, last_used = now()`,
         [table, JSON.stringify(shape.filter)],
       );
+    } else {
+      await touchShape(table);
     }
 
     let refetching = false;
     const feed = await pg.live.changes<{ key: string; scope: string | null }>({
       query: `SELECT key, scope FROM "${table}"
               UNION ALL
-              SELECT s.key, s.scope FROM "${stale}" s WHERE NOT EXISTS (SELECT 1 FROM "${table}" t WHERE t.key = s.key)`,
+              SELECT s.key, s.scope FROM "${stale}" s WHERE NOT EXISTS (SELECT 1 FROM "${table}" t WHERE t.id = s.id)`,
       key: "key",
       callback: (changes) => applyShapeChanges(table, changes),
     });
@@ -675,12 +689,12 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
       const stream = await pg.sync!.syncShapeToTable({
         shape: {
           url: shapeUrl!,
-          params: { ...shapeParams, table: JAM_FACTS_TABLE, columns: ["key", "scope"], ...(where ? { where, params } : {}) },
+          params: { ...shapeParams, table: JAM_FACTS_TABLE, columns: [...JAM_FACTS_COLUMNS], ...(where ? { where, params } : {}) },
           runtimeVisibility: ALWAYS_VISIBLE,
           fetchClient: doFetch,
         },
         table,
-        primaryKey: ["key"],
+        primaryKey: ["id"],
         shapeKey: table,
         onInitialSync: () =>
           void pg
@@ -689,8 +703,8 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
         onMustRefetch: async (tx: Transaction) => {
           refetching = true;
           await tx.exec(`
-            INSERT INTO "${stale}" (key, scope) SELECT key, scope FROM "${table}"
-              ON CONFLICT (key) DO UPDATE SET scope = EXCLUDED.scope;
+            INSERT INTO "${stale}" (id, key, scope) SELECT id, key, scope FROM "${table}"
+              ON CONFLICT (id) DO UPDATE SET scope = EXCLUDED.scope;
             DELETE FROM "${table}";
           `);
         },
@@ -756,17 +770,97 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
         releaseShape(compiled.id);
         applyFacts(() => db.drop(SYNC_STATUS_FACT, "shape", compiled.id, "ready", _));
         updateStatus();
+        if (electric && !disposed) {
+          await touchShape(compiled.id);
+          await pruneShapes();
+        }
       },
     };
+  };
+
+  const follow = (patterns: Pattern[], wanted: (matches: Bindings[]) => FactFilter[]): (() => Promise<void>) => {
+    if (disposed) throw new Error("sync: disposed");
+    const index = db.index(...patterns);
+    let current = new Map<string, FactSubscription>();
+    let generation = 0;
+    const inflight = new Set<Promise<void>>();
+
+    const apply = async (filters: FactFilter[]) => {
+      const gen = ++generation;
+      const next = new Map<string, FactSubscription>();
+      const added: FactSubscription[] = [];
+      for (const filter of filters) {
+        const { id } = compileFilter(filter);
+        if (next.has(id)) continue;
+        const kept = current.get(id);
+        if (kept) {
+          next.set(id, kept);
+        } else {
+          const subscription = subscribe(filter);
+          next.set(id, subscription);
+          added.push(subscription);
+        }
+      }
+      await Promise.all(added.map((s) => s.ready));
+      if (gen !== generation) {
+        await Promise.all(added.map((s) => s.dispose()));
+        return;
+      }
+      const previous = current;
+      current = next;
+      await Promise.all(Array.from(previous, ([id, s]) => (next.has(id) ? undefined : s.dispose())));
+    };
+
+    const stopReaction = reaction(
+      () => index.get(),
+      (matches) => {
+        const run: Promise<void> = Promise.resolve()
+          .then(() => apply(wanted(matches)))
+          .catch((e) => console.error("[jam] sync: follow failed", e))
+          .finally(() => inflight.delete(run));
+        inflight.add(run);
+      },
+      { fireImmediately: true, equals: comparer.structural },
+    );
+    return async () => {
+      stopReaction();
+      generation++;
+      await Promise.all(inflight);
+      const held = current;
+      current = new Map();
+      await Promise.all(Array.from(held.values(), (s) => s.dispose()));
+    };
+  };
+
+  const touchShape = (table: string) =>
+    pg.query(`UPDATE ${SHAPES_TABLE} SET last_used = now() WHERE table_name = $1`, [table]).catch((e) => console.error("[jam] sync: touching a shape failed", e));
+
+  /** Drop a shape's local table, stale rows and resume state unless something subscribed to it meanwhile. */
+  const dropShape = async (id: string) => {
+    const dropped = await pg.transaction(async (tx) => {
+      if (shapes.has(id)) return false;
+      await tx.exec(`DROP TABLE IF EXISTS "${id}"; DROP TABLE IF EXISTS "${staleTable(id)}";`);
+      await tx.query(`DELETE FROM ${SHAPES_TABLE} WHERE table_name = $1`, [id]);
+      return true;
+    });
+    if (dropped) await pg.sync!.deleteSubscription(id);
+  };
+
+  /** Keep the `keepShapes` most recently used unsubscribed shapes; drop the rest. */
+  const pruneShapes = async () => {
+    if (!electric || !Number.isFinite(keepShapes)) return;
+    const { rows } = await pg.query<{ table_name: string }>(`SELECT table_name FROM ${SHAPES_TABLE} ORDER BY last_used DESC, table_name`);
+    const idle = rows.map((r) => r.table_name).filter((table) => !shapes.has(table));
+    for (const table of idle.slice(keepShapes)) {
+      await dropShape(table).catch((e) => console.error("[jam] sync: dropping a shape failed", table, e));
+    }
   };
 
   const forgetShape = async (filter: FactFilter = {}) => {
     const { id } = compileFilter(filter);
     if (shapes.has(id)) throw new Error(`sync: shape ${id} is still subscribed`);
     if (!electric) return;
-    await pg.sync!.deleteSubscription(id);
-    await pg.exec(`DROP TABLE IF EXISTS "${id}"; DROP TABLE IF EXISTS "${staleTable(id)}";`);
-    await pg.query(`DELETE FROM ${SHAPES_TABLE} WHERE table_name = $1`, [id]);
+    await dropShape(id);
   };
 
   const flush = async () => {
@@ -785,6 +879,7 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
     unobserve();
     await writeBuffer();
     if (pushTimer) clearTimeout(pushTimer);
+    if (retireTimer) clearTimeout(retireTimer);
     for (const timer of echoTimers) clearTimeout(timer);
     echoTimers.clear();
     for (const timer of dropTimers.values()) clearTimeout(timer);
@@ -809,6 +904,7 @@ export async function sync(options: SyncOptions): Promise<SyncHandle> {
   });
   updateStatus();
   updatePending();
+  await pruneShapes();
 
-  return { subscribe, forgetShape, flush, dispose };
+  return { subscribe, follow, forgetShape, flush, dispose };
 }

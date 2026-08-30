@@ -5,10 +5,13 @@
 // Shapes are recomputed by re-running their query after every commit and
 // diffing against what the shape last saw, which is exactly what the client
 // observes from real Electric: inserts, partial updates, deletes, then an
-// `up-to-date` carrying the global LSN.
+// `up-to-date` carrying the global LSN. Writes that go through the endpoint
+// (or `apply()`) are published incrementally instead, so the double's cost
+// stays proportional to the change, not the table.
 
 import type { PGlite } from "@electric-sql/pglite";
-import { applyFactChanges, parseFactChanges, JAM_FACTS_TABLE } from "../../server";
+import { compileFilter, parseFilter } from "../../filter";
+import { applyFactChanges, parseFactChanges, parseFactKey, JAM_FACTS_TABLE, type ApplyOptions, type FactChangeRow } from "../../server";
 
 interface ShapeMessage {
   offset: string;
@@ -19,13 +22,21 @@ interface ShapeLog {
   id: string;
   where: string;
   params: string[];
+  matches: (key: string, scope: string) => boolean;
   handle: string;
   messages: ShapeMessage[];
-  rows: Map<string, string>;
+  /** key → row for everything the shape currently holds. */
+  rows: Map<string, Row>;
   refetch: boolean;
 }
 
-const SCHEMA = JSON.stringify({ key: { type: "text" }, scope: { type: "text" } });
+interface Row {
+  id: string;
+  key: string;
+  scope: string;
+}
+
+const SCHEMA = JSON.stringify({ id: { type: "text" }, key: { type: "text" }, scope: { type: "text" } });
 
 // The Electric client remembers expired handles process-wide, so handles must
 // never repeat across FakeElectric instances.
@@ -38,6 +49,8 @@ export class FakeElectric {
   failWritesWith: number | null = null;
   /** Long-poll wait before answering 204 (kept short for tests). */
   pollTimeout = 150;
+  /** Passed to applyFactChanges for writes through the endpoint. */
+  applyOptions: ApplyOptions = {};
   requests: string[] = [];
   writes: unknown[] = [];
 
@@ -60,6 +73,33 @@ export class FakeElectric {
     await this.write((pg) => pg.query(query, params).then(() => {}));
   }
 
+  /** Apply changes the way the write endpoint does and publish exactly those rows. */
+  async apply(changes: FactChangeRow[]): Promise<void> {
+    const keys = Array.from(new Set(changes.map((c) => c.key)));
+    const attrs = changes.filter((c) => c.op === "replace").map((c) => c.key);
+    const before = await this.lookup(keys, attrs);
+    await this.pg.transaction((tx) => applyFactChanges((sql, params) => tx.query(sql, params), changes, this.applyOptions));
+    const after = await this.lookup(keys, attrs);
+    this.lsn++;
+    for (const shape of this.shapes.values()) {
+      const ops: Array<Record<string, unknown>> = [];
+      const touched = new Set([...before.keys(), ...after.keys()]);
+      for (const key of touched) {
+        const prev = before.get(key);
+        const next = after.get(key);
+        const was = prev !== undefined && shape.matches(key, prev.scope);
+        const is = next !== undefined && shape.matches(key, next.scope);
+        if (is && !was) ops.push(change("insert", next!));
+        else if (was && !is) ops.push(change("delete", prev!));
+        else if (is && was && prev!.scope !== next!.scope) ops.push(change("update", next!));
+        if (is) shape.rows.set(key, next!);
+        else shape.rows.delete(key);
+      }
+      this.publish(shape, ops);
+    }
+    this.wake();
+  }
+
   /** Publish whatever changed in jam_facts since the last commit as one LSN. */
   async commit(): Promise<void> {
     this.lsn++;
@@ -80,41 +120,61 @@ export class FakeElectric {
     this.waiters.clear();
   }
 
-  private async rowsFor(where: string, params: string[]): Promise<Map<string, string>> {
-    const result = await this.pg.query<{ key: string; scope: string }>(
-      `SELECT key, scope FROM ${JAM_FACTS_TABLE}${where ? ` WHERE ${where}` : ""} ORDER BY key`,
+  /** Current rows for the given keys plus every sibling of the given attributes (what a replace may delete). */
+  private async lookup(keys: string[], replaceKeys: string[]): Promise<Map<string, Row>> {
+    const result = await this.pg.query<Row>(
+      `SELECT id, key, scope FROM ${JAM_FACTS_TABLE}
+       WHERE id IN (SELECT md5(value) FROM json_array_elements_text($1::text::json))
+          OR attr IN (SELECT md5((value::jsonb - (jsonb_array_length(value::jsonb) - 1))::text) FROM json_array_elements_text($2::text::json))`,
+      [JSON.stringify(keys), JSON.stringify(replaceKeys)],
+    );
+    return new Map(result.rows.map((r) => [r.key, r]));
+  }
+
+  private async rowsFor(where: string, params: string[]): Promise<Map<string, Row>> {
+    const result = await this.pg.query<Row>(
+      `SELECT id, key, scope FROM ${JAM_FACTS_TABLE}${where ? ` WHERE ${where}` : ""} ORDER BY key`,
       params,
     );
-    return new Map(result.rows.map((r) => [r.key, r.scope]));
+    return new Map(result.rows.map((r) => [r.key, r]));
   }
 
   private async refresh(shape: ShapeLog) {
     const next = await this.rowsFor(shape.where, shape.params);
     const ops: Array<Record<string, unknown>> = [];
-    for (const [key, scope] of next) {
+    for (const [key, row] of next) {
       const prev = shape.rows.get(key);
-      if (prev === undefined) ops.push(change("insert", key, { key, scope }));
-      else if (prev !== scope) ops.push(change("update", key, { key, scope }));
+      if (prev === undefined) ops.push(change("insert", row));
+      else if (prev.scope !== row.scope) ops.push(change("update", row));
     }
-    for (const key of shape.rows.keys()) if (!next.has(key)) ops.push(change("delete", key, { key }));
+    for (const [key, row] of shape.rows) if (!next.has(key)) ops.push(change("delete", row));
+    this.publish(shape, ops);
+    shape.rows = next;
+  }
+
+  private publish(shape: ShapeLog, ops: Array<Record<string, unknown>>) {
     ops.forEach((op, i) => {
       Object.assign(op.headers as object, { lsn: String(this.lsn), op_position: i, last: i === ops.length - 1 });
       shape.messages.push({ offset: `${this.lsn}_${i}`, message: op });
     });
-    shape.rows = next;
   }
 
   private async createShape(where: string, params: string[]): Promise<ShapeLog> {
+    const filter = parseFilter(where, params);
+    if (!filter) throw new Error(`FakeElectric: unsupported where clause ${where}`);
+    const compiled = compileFilter(filter);
+    const rows = await this.rowsFor(where, params);
     const shape: ShapeLog = {
       id: shapeId(where, params),
       where,
       params,
+      matches: (key, scope) => compiled.matches(parseFactKey(key) ?? [], scope),
       handle: `handle-${++handles}`,
       messages: [],
-      rows: await this.rowsFor(where, params),
+      rows,
       refetch: false,
     };
-    for (const [key, scope] of shape.rows) shape.messages.push({ offset: "0_0", message: change("insert", key, { key, scope }) });
+    for (const row of rows.values()) shape.messages.push({ offset: "0_0", message: change("insert", row) });
     this.shapes.set(shape.id, shape);
     return shape;
   }
@@ -190,8 +250,12 @@ export class FakeElectric {
     } catch (e) {
       return new Response((e as Error).message, { status: 400 });
     }
-    await this.pg.transaction((tx) => applyFactChanges((sql, params) => tx.query(sql, params), changes));
-    await this.commit();
+    try {
+      await this.apply(changes);
+    } catch (e) {
+      const status = (e as { status?: number }).status ?? 500;
+      return new Response((e as Error).message, { status });
+    }
     return Response.json({ ok: true });
   }
 }
@@ -207,10 +271,13 @@ function compareOffsets(a: string, b: string): number {
   return al - bl || ap - bp;
 }
 
-function change(operation: "insert" | "update" | "delete", key: string, value: Record<string, string>) {
+/** Like Electric, deletes carry only the primary key and updates only the columns that changed. */
+function change(operation: "insert" | "update" | "delete", row: Row) {
+  const value: Record<string, string> =
+    operation === "insert" ? { id: row.id, key: row.key, scope: row.scope } : operation === "update" ? { id: row.id, scope: row.scope } : { id: row.id };
   return {
     headers: { operation, relation: ["public", JAM_FACTS_TABLE] },
-    key: `"public"."${JAM_FACTS_TABLE}"/"${key.replace(/"/g, '""')}"`,
+    key: `"public"."${JAM_FACTS_TABLE}"/"${row.id}"`,
     value,
   };
 }

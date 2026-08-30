@@ -68,9 +68,12 @@ All application state — including the VDOM — lives in a shared **fact databa
   - `renderer.ts` — Two-phase rendering: expand the tree in a tracked reaction, emit VDOM claims into the fact DB, then patch the real DOM
   - `select.ts` — CSS selector queries over VDOM facts
   - `pglite.ts` / `pglite-worker.ts` — `openDatabase`: PGlite (Postgres in WASM) in a shared worker, backed by IndexedDB
-  - `sync.ts` — `sync()`: every durable fact is stored in one `jam_facts` table as `(key, scope)`; subscriptions by scope/pattern decide which facts are in memory, standalone against local PGlite or streamed from Postgres through Electric shapes with a `jam_outbox` write path
-  - `server.ts` (`@jam/core/server`) — the Postgres side: `JAM_FACTS_SQL` DDL and `applyFactChanges` for a write endpoint; browser-safe, no dependencies
+  - `terms.ts` — `Fact`/`Term`/pattern types and the `_` wildcard, shared with server code that must not pull in the reactive runtime
+  - `filter.ts` — `FactFilter` and `compileFilter`/`parseFilter`: a subscription's `{ scope, pattern }` ↔ the where-clause a shape runs over `jam_facts`
+  - `sync.ts` — `sync()`: every durable fact is stored in one `jam_facts` table as `(id = md5(key), key, scope)`; subscriptions by scope/pattern (or `follow()` driven by other facts) decide which facts are in memory, standalone against local PGlite or streamed from Postgres through Electric shapes with a `jam_outbox` write path; released shapes are kept LRU (`keepShapes`)
+  - `server.ts` (`@jam/core/server`) — the Postgres side: `JAM_FACTS_SQL` DDL, `applyFactChanges` with a scope `allow` policy for a write endpoint, and `shapeProxy` fronting Electric with the same policy; browser-safe, no dependencies
   - `persist.ts` — mirrors device-local facts into `jam_local_facts` and restores them on load
+  - `__bench__/sync.bench.ts` — sync throughput: initial load, remote-change latency, write round-trips (vitest bench mode skips suite hooks, so fixtures use tinybench `setup`/`teardown`)
   - `tables.ts` — `syncTable`: live queries over existing PGlite tables ↔ facts, fact writes → SQL (escape hatch for relational data)
 
 - **@jam/ui** (`packages/ui/`): Port of tamagui's web style system and components onto the fact DB. `createJamUI(defaultConfig)` sets up tokens, 390 generated themes (CSS variables behind `t_light t_light_blue t_light_blue_Button` class chains), fonts, media queries and animations; `styled()` supports tamagui-style variants, styled contexts, pseudo/media props and sub-tree theming via `<Theme>`. Read `packages/ui/docs/STYLE-SYSTEM.md` before changing the style system; `docs/STATUS.md` tracks what is still rough.

@@ -12,8 +12,8 @@ const disposers: Array<() => Promise<void>> = [];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function rows(): Promise<Array<[string, unknown[]]>> {
-  const res = await pg.query<{ key: string; terms: unknown[] }>(`SELECT key, terms FROM jam_local_facts ORDER BY key`);
-  return res.rows.map((r) => [r.key, r.terms]);
+  const res = await pg.query<{ terms: unknown[] }>(`SELECT terms FROM jam_local_facts ORDER BY terms::text`);
+  return res.rows.map((r) => [JSON.stringify(r.terms), r.terms]);
 }
 
 async function start(opts: Parameters<typeof persist>[0] = {}) {
@@ -50,8 +50,8 @@ describe("persist", () => {
   });
 
   it("restores persisted facts on start with their original types", async () => {
-    await pg.exec(`CREATE TABLE jam_local_facts (key TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
-    await pg.query(`INSERT INTO jam_local_facts (key, terms) VALUES ($1, $2), ($3, $4)`, [
+    await pg.exec(`CREATE TABLE jam_local_facts (id TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
+    await pg.query(`INSERT INTO jam_local_facts (id, terms) VALUES (md5($1), $2), (md5($3), $4)`, [
       JSON.stringify(["todo", 1, "title", "A"]),
       JSON.stringify(["todo", 1, "title", "A"]),
       JSON.stringify(["counter", "n", 42]),
@@ -64,8 +64,8 @@ describe("persist", () => {
   });
 
   it("does not write restored facts back", async () => {
-    await pg.exec(`CREATE TABLE jam_local_facts (key TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
-    await pg.query(`INSERT INTO jam_local_facts (key, terms) VALUES ($1, $2)`, [
+    await pg.exec(`CREATE TABLE jam_local_facts (id TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
+    await pg.query(`INSERT INTO jam_local_facts (id, terms) VALUES (md5($1), $2)`, [
       JSON.stringify(["todo", 1, "title", "A"]),
       JSON.stringify(["todo", 1, "title", "A"]),
     ]);

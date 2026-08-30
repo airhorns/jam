@@ -4,7 +4,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { byTitle, expectCount, factKey, flushToDisk, issuesInMemory, newestFirst, query, sql, watchErrors } from "./helpers";
 
-test.skip(!!process.env.VITE_ELECTRIC_URL, "standalone-only: the database is seeded by the page");
+test.skip(!!process.env.VITE_SYNC_URL, "standalone-only: the database is seeded by the page");
 
 const SEED = 100;
 const PROJECTS = ["web", "mobile", "api", "design"];

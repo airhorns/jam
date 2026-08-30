@@ -274,33 +274,58 @@ await current.dispose();                                               // its fa
 
 Scopes are how a client decides what to load. Facts written without `scoped()` inherit the scope of the fact they replace, else of their `[entity, id]`, else the global scope `""`. A subscription's `FactFilter` is `{ scope?, pattern? }`, where a pattern narrows on literal terms in the first three positions (`["issue", _, "project"]`); subscribing to the same filter twice shares one stream, and facts stay in memory while any subscription holds them.
 
+Most apps want subscriptions to track some other fact — the route, the selected workspace — rather than being managed by hand. `follow()` takes patterns and a function from their matches to the filters that should be live, and keeps the two in step: new filters are subscribed and ready before the ones they replace are released, so a switch never empties the screen first, and a burst of changes settles on the last one.
+
+```typescript
+const stop = handle.follow([["route", "project", $.id]], ([route]) => [
+  { scope: "" },
+  ...(route ? [{ scope: `project:${route.id}` }] : []),
+]);
+await stop();   // releases everything it holds
+```
+
 Point the same call at [Electric](https://electric-sql.com) and the table lives in Postgres:
 
 ```typescript
 const handle = await sync({
   pg,
-  shapeUrl: "http://localhost:3000/v1/shape",   // Electric
-  writeUrl: "http://localhost:3001/jam/changes", // your write endpoint
+  shapeUrl: "http://localhost:3001/jam/shape",   // your sync server, fronting Electric
+  writeUrl: "http://localhost:3001/jam/changes", // your sync server's write endpoint
   exclude: (fact) => fact[0] === "ui",           // local-only facts; default excludes VDOM facts
 });
 ```
 
-Each subscription becomes an Electric shape over `jam_facts` (`WHERE scope = $1`, plus `t0..t2` for pattern terms) mirrored into a local table, so the browser only ever downloads the partitions it asked for and resumes from its local copy on reload. Local writes go to a `jam_outbox` table and are posted to `writeUrl` as `{ changes: [{ op: "upsert" | "delete" | "replace", key, scope }] }`, retried with backoff, and reconciled when Electric echoes them back. The write endpoint is a few lines with `@jam/core/server`, which is dependency-free and runs anywhere a Postgres client does:
+Each subscription becomes an Electric shape over `jam_facts` (`WHERE scope = $1`, plus `t0..t2` for pattern terms) mirrored into a local table, so the browser only ever downloads the partitions it asked for and resumes from its local copy on reload. Released shapes keep their table and offset so coming back is a catch-up rather than a reload; the `keepShapes` most recently used ones are retained (default 16) and older ones are dropped on release and on start. Local writes go to a `jam_outbox` table and are posted to `writeUrl` as `{ changes: [{ op: "upsert" | "delete" | "replace", key, scope }] }`, retried with backoff, and reconciled when Electric echoes them back.
+
+The server side is a few lines with `@jam/core/server`, which is dependency-free and runs anywhere a Postgres client does. Authorization lives here, in one `allow` policy applied to both directions: `shapeProxy` admits shape requests whose filter the policy accepts and forwards them to Electric (validating the table, columns and where-clause, passing only Electric's own protocol params through, and marking responses `private` so shared caches don't serve one user's partition to another), and `applyFactChanges` refuses to write into — or move facts out of — a scope the policy rejects:
 
 ```typescript
-import { JAM_FACTS_SQL, applyFactChanges, parseFactChanges } from "@jam/core/server";
+import { JAM_FACTS_SQL, applyFactChanges, parseFactChanges, shapeProxy, ForbiddenScopeError, isDataError } from "@jam/core/server";
 
 await sql.unsafe(JAM_FACTS_SQL);   // idempotent: table, trigger deriving terms/t0..t2 from key, indexes
+const allow = (scope: string) => scope === "" || scope.startsWith("project:");   // or look the session up
+
+const shape = shapeProxy({ electricUrl: "http://localhost:3000", allow: (filter) => filter.scope !== undefined && allow(filter.scope) });
+app.get("/jam/shape", (c) => shape(c.req.raw));
+
 app.post("/jam/changes", async (c) => {
   const changes = parseFactChanges(await c.req.json());
-  await sql.begin((tx) => applyFactChanges((q, p) => tx.unsafe(q, p), changes));
+  try {
+    await sql.begin((tx) => applyFactChanges((q, p) => tx.unsafe(q, p), changes, { allow }));
+  } catch (error) {
+    if (error instanceof ForbiddenScopeError) return c.text(error.message, 403);
+    if (isDataError(error)) return c.text("invalid change", 400);
+    throw error;
+  }
   return c.json({ success: true });
 });
 ```
 
-`replace` on the server removes every other fact sharing all but the last term, so two clients replacing the same attribute converge on the last write. Authorization belongs in front of both URLs (a proxy that pins `scope` to the session is the natural shape); `shapeParams` passes extra query params through to Electric.
+Electric itself never has to be reachable from the browser. `replace` on the server removes every other fact sharing all but the last term, so two clients replacing the same attribute converge on the last write. When the endpoint rejects part of a batch with a 4xx, the client bisects it so one bad entry is dropped and the rest still land.
 
 The handle publishes its state as facts: `["sync", "status", "standalone" | "syncing" | "live"]`, `["sync", "pending", n]` unpushed changes, `["sync", "shape", id, "ready", bool]` per subscription (`compileFilter(filter).id`), and `["sync", "error", message]` when the write endpoint rejects a batch. `handle.flush()` pushes now; `handle.dispose()` stops.
+
+Scaling notes: rows are keyed by `md5(key)`, so a fact can be as large as a Postgres row allows rather than as large as a btree entry. Each shape is read through a PGlite `live.changes` feed that re-diffs the whole shape per Electric commit — a remote change costs ~7 ms against a 1k-fact shape and ~35 ms against 10k, so keep individual shapes in the low tens of thousands of facts and split bigger partitions with `pattern`. `packages/core/src/__bench__/sync.bench.ts` (`pnpm bench`) measures initial load, remote-change latency and write round-trips.
 
 ### Persisting facts locally
 

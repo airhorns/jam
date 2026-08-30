@@ -1,6 +1,6 @@
-// Electric mode: the page streams facts out of Postgres through Electric and
-// pushes its edits through the write server. Needs `pnpm backend:up` and
-// `pnpm write-server`; run with `pnpm test:e2e:electric`.
+// Electric mode: the page streams facts out of Postgres through the sync
+// server (which fronts Electric) and pushes its edits back through it. Needs
+// `pnpm backend:up` and `pnpm sync-server`; run with `pnpm test:e2e:electric`.
 
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import type postgres from "postgres";
@@ -8,10 +8,10 @@ import { connect } from "../db/connection";
 import { insertSeedFacts, seedFacts } from "../src/seed";
 import { expectCount, factKey, issuesInMemory, keysInMemory, query, watchErrors } from "./helpers";
 
-test.skip(!process.env.VITE_ELECTRIC_URL, "needs the Electric backend: pnpm backend:up && pnpm write-server");
+test.skip(!process.env.VITE_SYNC_URL, "needs the Electric backend: pnpm backend:up && pnpm sync-server");
 test.describe.configure({ mode: "serial" });
 
-const WRITE_SERVER_URL = process.env.VITE_WRITE_SERVER_URL ?? "http://localhost:3001";
+const SYNC_URL = process.env.VITE_SYNC_URL ?? "http://localhost:3001";
 const SEED = 100;
 const PER_PROJECT = 25;
 const WEB = "web";
@@ -21,8 +21,8 @@ const scopeOf = (project: string) => `project:${project}`;
 let sql: postgres.Sql;
 
 test.beforeAll(async () => {
-  const health = await fetch(WRITE_SERVER_URL).catch(() => undefined);
-  if (!health?.ok) throw new Error(`write server not reachable at ${WRITE_SERVER_URL}: run pnpm write-server`);
+  const health = await fetch(SYNC_URL).catch(() => undefined);
+  if (!health?.ok) throw new Error(`sync server not reachable at ${SYNC_URL}: run pnpm sync-server`);
   sql = connect();
   await sql.begin(async (tx) => {
     await tx`DELETE FROM jam_facts`;
@@ -164,5 +164,19 @@ test.describe("LinearLite on Electric", () => {
     await expectMirrored(b, scopeOf(WEB));
     await expectMirrored(a, scopeOf(WEB));
     await Promise.all([a.context().close(), b.context().close()]);
+  });
+
+  test("the sync server refuses shapes and writes outside the project partitions", async () => {
+    const everything = await fetch(`${SYNC_URL}/jam/shape?table=jam_facts&offset=-1`);
+    expect(everything.status).toBe(403);
+    const project = await fetch(`${SYNC_URL}/jam/shape?table=jam_facts&offset=-1&where=scope+%3D+%241&params[1]=${scopeOf(WEB)}`);
+    expect(project.status).toBe(200);
+    expect(project.headers.get("cache-control")).toMatch(/^private\b/);
+
+    const post = (changes: unknown[]) =>
+      fetch(`${SYNC_URL}/jam/changes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ changes }) });
+    expect((await post([{ op: "upsert", key: factKey(["secret", 1, "value", "x"]), scope: "admin" }])).status).toBe(403);
+    expect(await sql`SELECT 1 FROM jam_facts WHERE scope = 'admin'`).toEqual([]);
+    expect((await post([{ op: "upsert", key: "not json", scope: scopeOf(WEB) }])).status).toBe(400);
   });
 });

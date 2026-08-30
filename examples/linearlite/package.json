@@ -9,13 +9,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:electric": "VITE_ELECTRIC_URL=http://localhost:3033 playwright test e2e/electric.spec.ts",
+    "test:e2e:electric": "VITE_SYNC_URL=http://localhost:3001 playwright test e2e/electric.spec.ts",
     "backend:up": "tsx backend/containers.ts up && pnpm db:migrate && pnpm db:load-data",
     "backend:down": "tsx backend/containers.ts down",
     "backend:logs": "tsx backend/containers.ts logs",
     "db:migrate": "tsx db/migrate.ts",
     "db:load-data": "tsx db/load-data.ts",
-    "write-server": "tsx server.ts"
+    "sync-server": "tsx server.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",
