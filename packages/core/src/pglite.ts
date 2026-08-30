@@ -1,12 +1,14 @@
 import { live, type PGliteWithLive } from "@electric-sql/pglite/live";
 import { PGliteWorker } from "@electric-sql/pglite/worker";
+import { electricSync, type SyncNamespaceObj } from "@electric-sql/pglite-sync";
 import { requestSyncToDisk } from "./pglite-durability";
 
 /**
- * The PGlite surface jam needs: queries, transactions, and the `live` extension.
- * `syncToDisk`, when present, resolves once committed data has reached storage.
+ * The PGlite surface jam needs: queries, transactions, the `live` extension and,
+ * for `sync()` against Electric, the pglite-sync namespace. `syncToDisk`, when
+ * present, resolves once committed data has reached storage.
  */
-export type JamPGlite = PGliteWithLive & { syncToDisk?(): Promise<void> };
+export type JamPGlite = PGliteWithLive & { sync?: SyncNamespaceObj; syncToDisk?(): Promise<void> };
 
 export interface OpenDatabaseOptions {
   /** Database name; becomes `idb://${name}` unless `dataDir` is given. */
@@ -23,14 +25,14 @@ export interface OpenDatabaseOptions {
  */
 export async function openDatabase(
   options: OpenDatabaseOptions = {},
-): Promise<JamPGlite & PGliteWorker & { syncToDisk(): Promise<void> }> {
+): Promise<JamPGlite & PGliteWorker & { sync: SyncNamespaceObj; syncToDisk(): Promise<void> }> {
   const name = options.name ?? "jam";
   const dataDir = options.dataDir ?? `idb://${name}`;
   const workerInstance = new Worker(new URL("./pglite-worker.ts", import.meta.url), { type: "module" });
   const pg = await PGliteWorker.create(workerInstance, {
     dataDir,
     relaxedDurability: options.relaxedDurability ?? true,
-    extensions: { live },
+    extensions: { live, sync: electricSync() },
   });
   await pg.waitReady;
   return Object.assign(pg, {

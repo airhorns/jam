@@ -1,6 +1,6 @@
-export { db } from "./db";
-export type { Fact, FactChange, FactListener } from "./db";
-export { $, _, claim, remember, replace, forget, when, whenever, transaction } from "./primitives";
+export { db, GLOBAL_SCOPE } from "./db";
+export type { Fact, FactChange, FactChangeInfo, FactListener } from "./db";
+export { $, _, claim, remember, replace, forget, when, whenever, scoped, transaction } from "./primitives";
 export type { Term, Pattern, Bindings } from "./primitives";
 export { h, Fragment, ImperativeHost, injectVdom, createContext, useContext, useComponentId, Portal } from "./jsx";
 export type { VNode, VChild, Context, ElementRef, ImperativeHostProps } from "./jsx";
@@ -11,6 +11,8 @@ export { persist, defaultExclude } from "./persist";
 export type { PersistOptions, PersistHandle } from "./persist";
 export { openDatabase } from "./pglite";
 export type { JamPGlite, OpenDatabaseOptions } from "./pglite";
+export { sync, compileFilter, SyncPushError, SYNC_STATUS_FACT } from "./sync";
+export type { SyncOptions, SyncHandle, FactFilter, FactSubscription, CompiledFilter } from "./sync";
 export { syncTable } from "./tables";
 export type { SyncTableOptions, SyncedTable } from "./tables";
 export { createProgramAPI, listPrograms, loadProgramSource, program, registerProgram, removeProgram } from "./programs";
