@@ -4,7 +4,8 @@
 // so components only ever read facts. Only the current project's facts are in
 // memory (see subscriptions.ts), which keeps these passes small.
 
-import { $, claim, compileFilter, replace, whenever, type Bindings } from "@jam/core";
+import { $, claim, compileFilter, replace, whenever } from "@jam/core";
+import { collect } from "../facts";
 import { filterIssues, sortIssues, type FilterState } from "../filter-state";
 import { projectScope } from "../projects";
 import { StatusValues, type Comment, type Issue } from "../types";
@@ -20,20 +21,6 @@ export function windowFor(scrollTop: number): { offset: number; limit: number } 
   const firstVisible = Math.floor(Math.max(0, scrollTop) / ROW_HEIGHT);
   const offset = Math.max(0, Math.floor(firstVisible / LIST_CHUNK) * LIST_CHUNK - LIST_CHUNK);
   return { offset, limit: LIST_WINDOW };
-}
-
-export type Entity<T> = Partial<T> & { id: string };
-
-/** Group [entity, id, column, value] bindings into one record per id. */
-export function collect<T>(rows: Bindings[]): Entity<T>[] {
-  const records = new Map<string, Entity<T>>();
-  for (const { id, col, val } of rows) {
-    const key = String(id);
-    const record = records.get(key) ?? ({ id: key } as Entity<T>);
-    (record as { [column: string]: unknown })[String(col)] = val;
-    records.set(key, record);
-  }
-  return [...records.values()];
 }
 
 const ISSUE = ["issue", $.id, $.col, $.val] as const;

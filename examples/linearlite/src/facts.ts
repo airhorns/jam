@@ -1,4 +1,18 @@
-import { $, when, type Term } from "@jam/core";
+import { $, when, type Bindings, type Term } from "@jam/core";
+
+export type Entity<T> = Partial<T> & { id: string };
+
+/** Group [entity, id, column, value] bindings into one record per id. */
+export function collect<T>(rows: Bindings[]): Entity<T>[] {
+  const records = new Map<string, Entity<T>>();
+  for (const { id, col, val } of rows) {
+    const key = String(id);
+    const record = records.get(key) ?? ({ id: key } as Entity<T>);
+    (record as { [column: string]: unknown })[String(col)] = val;
+    records.set(key, record);
+  }
+  return [...records.values()];
+}
 
 /** Collect an entity's [entity, id, column, value] facts into a record; undefined when there are none. */
 export function readEntity<T extends object>(entity: string, id: string): Partial<T> | undefined {
