@@ -19,6 +19,9 @@ import { clearSelectCache } from "./select";
 export type Term = string | number | boolean;
 export type Fact = Term[];
 
+export type FactChange = "add" | "delete";
+export type FactListener = (type: FactChange, key: string, fact: Fact) => void;
+
 // --- Pattern types ---
 
 export interface BindingMarker {
@@ -173,6 +176,8 @@ export class FactDB {
    */
   private patternsByFirstTerm = new Map<Term | null, Set<string>>();
 
+  private listeners: FactListener[] = [];
+
   constructor() {
     makeObservable(this, {
       assert: action,
@@ -291,11 +296,36 @@ export class FactDB {
     }
   }
 
-  private deleteFactRecord(key: string, fact: Fact): void {
+  private deleteFactRecord(key: string, fact: Fact, invalidate = true): void {
     this.facts.delete(key);
     this.factsPlain.delete(key);
     this.factsByFirstTerm.get(fact[0])?.delete(key);
-    this.invalidatePatterns(fact);
+    if (invalidate) this.invalidatePatterns(fact);
+    this.notify("delete", key, fact);
+  }
+
+  /**
+   * Subscribe to every fact add/delete. Listeners fire synchronously at the
+   * mutation point (inside the caller's action), after all indexes are updated,
+   * and receive the stored plain array — treat it as read-only.
+   */
+  observe(listener: FactListener): () => void {
+    this.listeners.push(listener);
+    return () => {
+      const i = this.listeners.indexOf(listener);
+      if (i >= 0) this.listeners.splice(i, 1);
+    };
+  }
+
+  private notify(type: FactChange, key: string, fact: Fact): void {
+    if (this.listeners.length === 0) return;
+    for (const listener of this.listeners.slice()) {
+      try {
+        listener(type, key, fact);
+      } catch (e) {
+        console.error("[jam] fact listener threw", e);
+      }
+    }
   }
 
   private detachFactOwner(key: string, ownerId: string): void {
@@ -381,6 +411,7 @@ export class FactDB {
       }
       bucket.add(key);
       this.invalidatePatterns(terms);
+      this.notify("add", key, terms);
     }
     this.attachFactOwner(key, ownerId);
   }
@@ -393,49 +424,61 @@ export class FactDB {
     this.addFact(terms, this.rootOwner);
   }
 
+  private dropFact(key: string, fact: Fact, invalidate = true): void {
+    for (const ownerId of Array.from(this.factOwners.get(key) ?? [])) {
+      this.ownerFacts.get(ownerId)?.delete(key);
+    }
+    this.factOwners.delete(key);
+    this.deleteFactRecord(key, fact, invalidate);
+  }
+
+  /** Facts matching a wildcard pattern, narrowed by the first-term index when the first term is literal. */
+  private matchingFacts(terms: (Term | Wildcard)[]): [string, Fact][] {
+    const first = terms[0];
+    const keys =
+      first === _
+        ? this.factsPlain.keys()
+        : (this.factsByFirstTerm.get(first) ?? []);
+    const matches: [string, Fact][] = [];
+    for (const key of keys) {
+      const fact = this.factsPlain.get(key)!;
+      if (fact.length !== terms.length) continue;
+      let ok = true;
+      for (let i = 1; i < terms.length; i++) {
+        if (terms[i] === _) continue;
+        if (terms[i] !== fact[i]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) matches.push([key, fact]);
+    }
+    return matches;
+  }
+
   drop(...terms: (Term | Wildcard)[]): void {
     if (!terms.includes(_)) {
       const key = this.factKey(terms as Term[]);
       const fact = this.factsPlain.get(key);
-      if (fact) {
-        for (const ownerId of Array.from(this.factOwners.get(key) ?? [])) {
-          this.ownerFacts.get(ownerId)?.delete(key);
-        }
-        this.factOwners.delete(key);
-        this.deleteFactRecord(key, fact);
-      }
+      if (fact) this.dropFact(key, fact);
       return;
     }
-    const toRemove: [string, Fact][] = [];
-    for (const [key, fact] of this.facts) {
-      if (fact.length !== terms.length) continue;
-      let matches = true;
-      for (let i = 0; i < terms.length; i++) {
-        if (terms[i] === _) continue;
-        if (terms[i] !== fact[i]) {
-          matches = false;
-          break;
-        }
-      }
-      if (matches) toRemove.push([key, fact]);
-    }
-    for (const [key, fact] of toRemove) {
-      for (const ownerId of Array.from(this.factOwners.get(key) ?? [])) {
-        this.ownerFacts.get(ownerId)?.delete(key);
-      }
-      this.factOwners.delete(key);
-      this.deleteFactRecord(key, fact);
+    for (const [key, fact] of this.matchingFacts(terms)) {
+      this.dropFact(key, fact);
     }
   }
 
   replace(...terms: Term[]): void {
     if (terms.length < 2)
       throw new Error("replace() requires at least 2 terms");
+    const key = this.factKey(terms);
     const pattern = [...terms.slice(0, terms.length - 1), _] as (
       | Term
       | Wildcard
     )[];
-    this.drop(...pattern);
+    for (const [otherKey, fact] of this.matchingFacts(pattern)) {
+      if (otherKey !== key) this.dropFact(otherKey, fact);
+    }
     this.insert(...terms);
   }
 
@@ -656,15 +699,13 @@ export class FactDB {
   /** Delete a fact by its serialized key, maintaining all indexes. */
   deleteByKey(key: string): void {
     const fact = this.factsPlain.get(key);
-    if (fact) {
-      this.facts.delete(key);
-      this.factsPlain.delete(key);
-      this.factsByFirstTerm.get(fact[0])?.delete(key);
-    }
+    if (fact) this.dropFact(key, fact, false);
   }
 
   /** Clear all facts, pattern versions, and refs. */
   clear(): void {
+    const removed =
+      this.listeners.length > 0 ? Array.from(this.factsPlain) : null;
     this.facts.clear();
     this.factsPlain.clear();
     this.factsByFirstTerm.clear();
@@ -672,6 +713,9 @@ export class FactDB {
     this.patternsByFirstTerm.clear();
     this.refs.clear();
     clearSelectCache();
+    if (removed) {
+      for (const [key, fact] of removed) this.notify("delete", key, fact);
+    }
   }
 
   // --- Refs ---
