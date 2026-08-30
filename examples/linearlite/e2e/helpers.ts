@@ -3,7 +3,7 @@ import { expect, type Page } from "@playwright/test";
 declare global {
   interface Window {
     __jam: { $: Record<string, unknown>; _: unknown };
-    __db: { query(...patterns: unknown[][]): Record<string, unknown>[] };
+    __db: { query(...patterns: unknown[][]): Record<string, unknown>[]; scopeOf(...terms: unknown[]): string };
     __pg: { query<T = unknown>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>; syncToDisk(): Promise<void> };
     __sync: { flush(): Promise<void> };
     __persist: { flush(): Promise<void> };
@@ -44,6 +44,21 @@ export async function issuesInMemory(page: Page, project?: string): Promise<Issu
     records.set(String(id), record);
   }
   return [...records.values()].filter((issue) => project === undefined || issue.project === project);
+}
+
+/** Keys of the issue and comment facts the page holds in `scope`, sorted, for comparing against a server-side scope. */
+export async function keysInMemory(page: Page, scope: string): Promise<string[]> {
+  return page.evaluate((scope) => {
+    const { $ } = window.__jam;
+    const keys: string[] = [];
+    for (const entity of ["issue", "comment"]) {
+      for (const { id, col, val } of window.__db.query([entity, $.id, $.col, $.val])) {
+        const fact = [entity, id, col, val];
+        if (window.__db.scopeOf(...fact) === scope) keys.push(JSON.stringify(fact));
+      }
+    }
+    return keys.sort();
+  }, scope);
 }
 
 export async function sql<T = Record<string, unknown>>(page: Page, statement: string, params: unknown[] = []): Promise<T[]> {

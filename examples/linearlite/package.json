@@ -9,6 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:electric": "VITE_ELECTRIC_URL=http://localhost:3033 playwright test e2e/electric.spec.ts",
     "backend:up": "tsx backend/containers.ts up && pnpm db:migrate && pnpm db:load-data",
     "backend:down": "tsx backend/containers.ts down",
     "backend:logs": "tsx backend/containers.ts logs",

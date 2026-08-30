@@ -257,7 +257,7 @@ test.describe("LinearLite", () => {
     await expect(row.locator(".issue-row-title")).toHaveText("Changed behind jam's back");
 
     const remote = "00000000-0000-4000-8000-000000000001";
-    const facts = { project: WEB, title: "Arrived from elsewhere", description: "", priority: "low", status: "todo", created: "2026-08-01T00:00:00.000Z", modified: "2026-08-01T00:00:00.000Z", kanbanorder: "zz", username: "remote" };
+    const facts = { project: WEB, title: "Arrived from elsewhere", description: "", priority: "low", status: "todo", created: "2026-08-01T00:00:00.000Z", modified: "2026-08-01T00:00:00.000Z", kanbanorder: "a0", username: "remote" };
     await sql(page, `INSERT INTO jam_facts (key, scope) SELECT key, $2 FROM json_to_recordset($1) AS t(key TEXT)`, [
       JSON.stringify(Object.entries(facts).map(([col, val]) => ({ key: factKey(["issue", remote, col, val]) }))),
       `project:${WEB}`,
