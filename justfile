@@ -9,6 +9,8 @@ test-swift:
 
 test-e2e:
     corepack pnpm --dir examples/folk-todo test:e2e
+    corepack pnpm --dir examples/puddy-vite test:e2e
+    corepack pnpm --dir examples/linearlite test:e2e
 
 typecheck:
     corepack pnpm -r typecheck

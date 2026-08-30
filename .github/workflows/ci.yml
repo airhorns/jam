@@ -27,6 +27,7 @@ jobs:
       - run: corepack pnpm test
       - run: corepack pnpm --dir examples/folk-todo exec playwright install --with-deps chromium
       - run: corepack pnpm --dir examples/puddy-vite exec playwright install --with-deps chromium
+      - run: corepack pnpm --dir examples/linearlite exec playwright install --with-deps chromium
       - run: corepack pnpm test:e2e
 
   core-benchmarks:
