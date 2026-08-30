@@ -1,4 +1,4 @@
-import { $, replace, useComponentId, when } from "@jam/core";
+import { $, _, forget, replace, useCleanup, useComponentId, when } from "@jam/core";
 import type { Term } from "@jam/core";
 
 export type ControllableStateOptions<T> = {
@@ -8,10 +8,15 @@ export type ControllableStateOptions<T> = {
   onChange?: (value: T) => void;
 };
 
+/** Ids of components currently in the tree; a setter invoked after unmount (a late blur, image error or timer) must not write. */
+const mounted = new Set<string>();
+
 /**
  * Controlled/uncontrolled state for the component being rendered. The
  * uncontrolled value lives in the fact DB under the component's id, so it
- * survives re-renders and can be inspected or driven by other programs.
+ * survives re-renders and can be inspected or driven by other programs; it is
+ * forgotten when the component leaves the tree, so a later component at the
+ * same position starts from its default.
  */
 export function useControllableState<T extends Term>(
   key: string,
@@ -19,10 +24,15 @@ export function useControllableState<T extends Term>(
 ): [T | undefined, (value: T) => void] {
   const id = useComponentId();
   const controlled = options.value !== undefined;
+  mounted.add(id);
+  useCleanup(() => {
+    mounted.delete(id);
+    forget(id, key, _);
+  });
   const stored = when([id, key, $.value]);
   const current = controlled ? options.value : stored.length > 0 ? (stored[0].value as T) : options.defaultValue;
   const update = (next: T) => {
-    if (next === current) return;
+    if (next === current || !mounted.has(id)) return;
     options.onChange?.(next);
     if (!controlled) replace(id, key, next);
   };

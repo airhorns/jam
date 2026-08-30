@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { db } from "../db";
-import { $, when, replace, remember } from "../primitives";
-import { h, createContext, useContext, useComponentId, Portal, injectVdom, Fragment } from "../jsx";
+import { $, when, replace, remember, forget } from "../primitives";
+import { h, createContext, useContext, useComponentId, useCleanup, Portal, injectVdom, Fragment } from "../jsx";
 import { mount } from "../renderer";
 
 let container: HTMLElement;
@@ -348,5 +348,109 @@ describe("mount", () => {
     dispose = mount(h(Root, null), container);
     replace("ui", "show", true);
     expect(document.activeElement).toBe(container.querySelector("input"));
+  });
+
+  describe("useCleanup", () => {
+    it("runs when the component leaves the tree, with the latest render's closure", () => {
+      replace("ui", "show", true);
+      replace("ui", "label", "a");
+      const seen: string[] = [];
+      const Child = () => {
+        const [{ label }] = when(["ui", "label", $.label]);
+        useCleanup(() => seen.push(`cleanup:${label}`));
+        return h("span", null, String(label));
+      };
+      const Root = () => (when(["ui", "show", true]).length > 0 ? h("div", null, h(Child, null)) : h("div", null));
+      dispose = mount(h(Root, null), container);
+
+      replace("ui", "label", "b");
+      expect(seen).toEqual([]);
+      replace("ui", "show", false);
+      expect(seen).toEqual(["cleanup:b"]);
+      replace("ui", "show", true);
+      replace("ui", "show", false);
+      expect(seen).toEqual(["cleanup:b", "cleanup:b"]);
+    });
+
+    it("runs every registered cleanup, in order, and once per removal", () => {
+      replace("ui", "show", true);
+      const seen: string[] = [];
+      const Child = () => {
+        useCleanup(() => seen.push("first"));
+        useCleanup(() => seen.push("second"));
+        return h("i", null);
+      };
+      const Root = () => h("div", null, when(["ui", "show", true]).length > 0 ? h(Child, null) : null);
+      dispose = mount(h(Root, null), container);
+      replace("ui", "show", false);
+      replace("ui", "other", 1);
+      expect(seen).toEqual(["first", "second"]);
+    });
+
+    it("is keyed by component identity so a surviving sibling keeps its cleanup", () => {
+      remember("item", "a");
+      remember("item", "b");
+      const removed: string[] = [];
+      const Item = ({ name }: { name: string }) => {
+        useCleanup(() => removed.push(name));
+        return h("li", null, name);
+      };
+      const Root = () => h("ul", null, when(["item", $.name]).map(({ name }) => h(Item, { key: String(name), name: String(name) })));
+      dispose = mount(h(Root, null), container);
+      forget("item", "a");
+      expect(removed).toEqual(["a"]);
+    });
+
+    it("runs all cleanups when the tree is unmounted", () => {
+      const seen: string[] = [];
+      const Child = ({ name }: { name: string }) => {
+        useCleanup(() => seen.push(name));
+        return h("i", null);
+      };
+      const Root = () => h("div", null, h(Child, { name: "x" }), h(Child, { name: "y" }));
+      const unmount = mount(h(Root, null), container);
+      expect(seen).toEqual([]);
+      unmount();
+      expect(seen.sort()).toEqual(["x", "y"]);
+    });
+
+    it("throws outside a component and is ignored outside a mounted tree", () => {
+      expect(() => useCleanup(() => {})).toThrow(/while a component is rendering/);
+      const seen: string[] = [];
+      const Child = () => {
+        useCleanup(() => seen.push("never"));
+        return h("i", null);
+      };
+      const Root = () => h("div", { id: "host" });
+      dispose = mount(h(Root, null), container);
+      expect(() => injectVdom("host", 1000, h(Child, null))).not.toThrow();
+      dispose();
+      dispose = null;
+      expect(seen).toEqual([]);
+    });
+
+    it("a throwing cleanup does not stop the others", () => {
+      replace("ui", "show", true);
+      const seen: string[] = [];
+      const errors: unknown[] = [];
+      const original = console.error;
+      console.error = (...args: unknown[]) => errors.push(args);
+      try {
+        const Child = () => {
+          useCleanup(() => {
+            throw new Error("boom");
+          });
+          useCleanup(() => seen.push("after"));
+          return h("i", null);
+        };
+        const Root = () => h("div", null, when(["ui", "show", true]).length > 0 ? h(Child, null) : null);
+        dispose = mount(h(Root, null), container);
+        replace("ui", "show", false);
+      } finally {
+        console.error = original;
+      }
+      expect(seen).toEqual(["after"]);
+      expect(errors.length).toBe(1);
+    });
   });
 });

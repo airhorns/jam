@@ -77,6 +77,15 @@ describe("Toast", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it("drops its dismiss timer when it unmounts", async () => {
+    const onOpenChange = vi.fn();
+    const { get, unmount } = render(h(Example, { defaultOpen: true, duration: 40, onOpenChange }));
+    get("[data-testid=toast]");
+    unmount();
+    await tick(60);
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
   it("closes from the Close part and never dismisses with an infinite duration", async () => {
     const { get, query } = render(h(Example, { defaultOpen: true, duration: Infinity }));
     await tick(20);

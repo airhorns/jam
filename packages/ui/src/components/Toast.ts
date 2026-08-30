@@ -1,4 +1,4 @@
-import { $, Portal, db, replace, when } from "@jam/core";
+import { $, Portal, db, replace, when, useCleanup } from "@jam/core";
 import { createContext, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { styled } from "../styled";
@@ -293,6 +293,7 @@ function ToastRoot(props: ToastProps): VNode | null {
   const config = useContext(ToastConfigContext);
   const insideViewport = useContext(InsideViewportContext);
   const id = useStableId("toast");
+  useCleanup(() => cancelDismiss(id));
   const { open: openProp, defaultOpen, onOpenChange, duration = config.duration, type = "background", children, ...rest } = props;
   const [openState, setOpen] = useControllableState<boolean>("open", {
     value: openProp,

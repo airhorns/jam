@@ -1,4 +1,4 @@
-import { Portal } from "@jam/core";
+import { Portal, useCleanup } from "@jam/core";
 import { createContext, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { styled } from "../styled";
@@ -61,6 +61,11 @@ const hoverState = new Map<string, { timer?: ReturnType<typeof setTimeout>; setO
 
 function PopoverRoot(props: PopoverProps): VNode {
   const id = useStableId("popover");
+  useCleanup(() => {
+    const state = hoverState.get(id);
+    if (state?.timer !== undefined) clearTimeout(state.timer);
+    hoverState.delete(id);
+  });
   const placement = props.placement ?? "bottom";
   const offset = props.offset ?? 8;
   const hoverable = props.hoverable !== undefined && props.hoverable !== false;

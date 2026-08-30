@@ -131,6 +131,29 @@ export function useComponentId(): string {
   return currentComponentId;
 }
 
+// ---- Cleanup ----
+
+export type Cleanup = () => void;
+
+let currentCleanups: Map<string, Cleanup[]> | null = null;
+
+/**
+ * Run `fn` when the currently-executing component leaves the tree (or the
+ * tree is unmounted). Call it on every render, like `useComponentId`: the
+ * functions registered by the latest render are the ones that run, so they
+ * see the component's newest props. Outside `mount()` (`emitVdom`,
+ * `injectVdom`) nothing tracks a component's lifetime and the call is ignored.
+ */
+export function useCleanup(fn: Cleanup): void {
+  if (currentComponentId == null) {
+    throw new Error("useCleanup() can only be called while a component is rendering");
+  }
+  if (!currentCleanups) return;
+  const list = currentCleanups.get(currentComponentId);
+  if (list) list.push(fn);
+  else currentCleanups.set(currentComponentId, [fn]);
+}
+
 // ---- Portals ----
 
 /**
@@ -316,16 +339,35 @@ export function expandVdom(
   out.push({ kind: "element", id: elId, tag: vnode.tag, props: vnode.props, children });
 }
 
+export type Expansion = {
+  nodes: ExpandedNode[];
+  /** Cleanups registered with `useCleanup`, by component id. */
+  cleanups: Map<string, Cleanup[]>;
+};
+
 /**
- * Expand a complete tree from the root. Resets per-render counters so
- * portal ordering is deterministic.
+ * Expand a complete tree from the root, collecting the cleanups its
+ * components registered. Resets per-render counters so portal ordering is
+ * deterministic.
  */
-export function expandRoot(node: VChild, rootId = "dom"): ExpandedNode[] {
+export function expandTree(node: VChild, rootId = "dom"): Expansion {
   portalCounter = 0;
   contextStack = [];
-  const out: ExpandedNode[] = [];
-  expandVdom(out, node, rootId, 0);
-  return out;
+  const nodes: ExpandedNode[] = [];
+  const cleanups = new Map<string, Cleanup[]>();
+  const prevCleanups = currentCleanups;
+  currentCleanups = cleanups;
+  try {
+    expandVdom(nodes, node, rootId, 0);
+  } finally {
+    currentCleanups = prevCleanups;
+  }
+  return { nodes, cleanups };
+}
+
+/** `expandTree` without the cleanups, for callers that only need the nodes. */
+export function expandRoot(node: VChild, rootId = "dom"): ExpandedNode[] {
+  return expandTree(node, rootId).nodes;
 }
 
 function serializeStyle(style: Record<string, unknown>): string {

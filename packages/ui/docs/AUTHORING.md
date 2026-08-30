@@ -16,7 +16,12 @@ Read `STYLE-SYSTEM.md` first.
 - Stateful parts share state through `createStyledContext` (for style props
   like `size`) or `createContext` from `@jam/core` (for behaviour like
   `open`/`onOpenChange`). Store uncontrolled state with `useControllableState`
-  from `../state`.
+  from `../state`; it is forgotten when the component unmounts and its setter
+  is a no-op afterwards, so a late blur, image error or timer cannot resurrect it.
+- Anything else keyed by the component id — hover/dismiss timers, entries in a
+  module-level `Map`, a registered layer — must be released with `useCleanup`
+  from `@jam/core`. The catalog's `leaks.spec.ts` mounts and unmounts every
+  demo and fails on leftover facts, layers, a stuck scroll lock or pending timers.
 - Interactive elements render real `<button>`/`<input>` elements so keyboard
   and focus work for free; use `role`/`aria-*` for anything else.
 - Overlays register with `useDismissableLayer` (`../layers`) and position with

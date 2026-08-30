@@ -8,7 +8,7 @@
 // optionally `data-layer-anchor={id}` so the program can tell inside from
 // outside and floating.ts knows what to position against.
 
-import { $, _, db, forget, replace, when } from "@jam/core";
+import { $, _, db, forget, replace, useCleanup, when } from "@jam/core";
 
 export type LayerOptions = {
   onDismiss: () => void;
@@ -36,7 +36,6 @@ type Layer = LayerOptions & {
 
 const layers = new Map<string, Layer>();
 let listenersInstalled = false;
-let removalObserver: MutationObserver | null = null;
 let scrollLocked: string | null = null;
 
 function contentElement(id: string): HTMLElement | null {
@@ -48,14 +47,18 @@ function isInsideLayer(id: string, target: Node | null): boolean {
   return target.closest(`[data-layer="${id}"], [data-layer-trigger="${id}"], [data-layer-anchor="${id}"]`) != null;
 }
 
-/** Drop layers whose content has left the document (component unmounted while open). */
+/** Drop layers whose content has left the document without their component being cleaned up. */
 function prune(): void {
-  for (const [id, layer] of layers) {
-    if (!contentElement(id)) {
-      layers.delete(id);
-      finishLayer(layer);
-    }
+  for (const id of Array.from(layers.keys())) {
+    if (!contentElement(id)) closeLayer(id);
   }
+}
+
+function closeLayer(id: string): void {
+  const layer = layers.get(id);
+  if (!layer) return;
+  layers.delete(id);
+  finishLayer(layer);
 }
 
 function topmost(): Layer | undefined {
@@ -132,21 +135,6 @@ function installListeners(): void {
   window.addEventListener("resize", onReposition);
 }
 
-/** While layers are open, prune as soon as content leaves the document (e.g. the tree unmounting) rather than on the next user event. */
-function watchRemovals(): void {
-  if (removalObserver || typeof MutationObserver === "undefined") return;
-  removalObserver = new MutationObserver((records) => {
-    if (records.some((record) => record.removedNodes.length > 0)) prune();
-  });
-  removalObserver.observe(document.body, { childList: true, subtree: true });
-}
-
-function unwatchRemovals(): void {
-  if (!removalObserver || layers.size > 0) return;
-  removalObserver.disconnect();
-  removalObserver = null;
-}
-
 function updateScrollLock(): void {
   if (typeof document === "undefined") return;
   let modal: Layer | undefined;
@@ -162,7 +150,6 @@ function updateScrollLock(): void {
 
 function startLayer(layer: Layer): void {
   installListeners();
-  watchRemovals();
   updateScrollLock();
   queueMicrotask(() => {
     if (!layers.has(layer.id)) return;
@@ -181,7 +168,6 @@ function startLayer(layer: Layer): void {
 
 function finishLayer(layer: Layer): void {
   updateScrollLock();
-  unwatchRemovals();
   queueMicrotask(() => clearFloatingPosition(layer.id));
   const previous = layer.previouslyFocused;
   if ((layer.restoreFocus ?? layer.modal) && previous) {
@@ -196,10 +182,11 @@ function finishLayer(layer: Layer): void {
 /**
  * Register (while `open`) or unregister the current component as a
  * dismissable layer. Call it on every render; the options are refreshed so
- * handlers never go stale. Returns the attributes to spread on the content
- * element.
+ * handlers never go stale, and the layer is closed when the component leaves
+ * the tree. Returns the attributes to spread on the content element.
  */
 export function useDismissableLayer(id: string, open: boolean, options: LayerOptions): { "data-layer": string; tabIndex: number } {
+  useCleanup(() => closeLayer(id));
   if (typeof document !== "undefined") {
     const existing = layers.get(id);
     if (open && !existing) {
@@ -214,8 +201,7 @@ export function useDismissableLayer(id: string, open: boolean, options: LayerOpt
     } else if (open && existing) {
       Object.assign(existing, options);
     } else if (!open && existing) {
-      layers.delete(id);
-      finishLayer(existing);
+      closeLayer(id);
     }
   }
   return { "data-layer": id, tabIndex: -1 };
@@ -229,7 +215,6 @@ export function isTopmostLayer(id: string): boolean {
 /** Forget every layer and release the scroll lock (for tests and hot reload). */
 export function resetLayers(): void {
   layers.clear();
-  unwatchRemovals();
   if (typeof document !== "undefined" && scrollLocked != null) {
     document.body.style.overflow = scrollLocked;
     scrollLocked = null;

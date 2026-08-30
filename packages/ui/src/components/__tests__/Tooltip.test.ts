@@ -50,6 +50,16 @@ describe("Tooltip", () => {
     expect(query("[data-testid=content]")).toBeNull();
   });
 
+  it("drops a pending open when the tooltip unmounts", async () => {
+    const onOpenChange = vi.fn();
+    const { get, unmount } = render(h(Example, { delay: 50, onOpenChange }));
+    pointerEnter(get("[data-testid=trigger]"));
+    unmount();
+    await tick(80);
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(document.querySelector("[data-testid=content]")).toBeNull();
+  });
+
   it("opens immediately on focus and closes on blur, Escape or press", async () => {
     const { get, query } = render(h(Example, { delay: 500 }));
     const trigger = get("[data-testid=trigger]");

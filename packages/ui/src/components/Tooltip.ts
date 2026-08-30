@@ -1,4 +1,4 @@
-import { Portal } from "@jam/core";
+import { Portal, useCleanup } from "@jam/core";
 import { createContext, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { styled } from "../styled";
@@ -71,6 +71,7 @@ export type TooltipProps = {
 
 function TooltipRoot(props: TooltipProps): VNode {
   const id = useStableId("tooltip");
+  useCleanup(() => cancelOpen(id));
   const placement = props.placement ?? "top";
   const offset = props.offset ?? 6;
   const [openState, setOpen] = useControllableState<boolean>("open", {

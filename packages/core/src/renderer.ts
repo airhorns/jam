@@ -10,7 +10,7 @@
 
 import { autorun, reaction, runInAction } from "mobx";
 import { db, type Term } from "./db";
-import { type VChild, type ElementRef, expandRoot, emitExpanded } from "./jsx";
+import { type VChild, type ElementRef, type Cleanup, expandTree, emitExpanded } from "./jsx";
 
 // Props applied as element properties (so form state updates live).
 const DOM_PROPERTIES = new Set([
@@ -80,16 +80,33 @@ function attributeName(key: string, svg: boolean): string {
 export function mount(rootVnode: VChild, container: HTMLElement): () => void {
   const mountOwner = db.createChildOwner(db.getCurrentOwnerId(), "mount");
 
+  // Cleanups registered by the components in the latest render, by component id.
+  let cleanups = new Map<string, Cleanup[]>();
+  function runCleanups(fns: Cleanup[]) {
+    for (const fn of fns) {
+      try {
+        fn();
+      } catch (error) {
+        console.error("useCleanup callback threw", error);
+      }
+    }
+  }
+
   // --- Phase 1: Expand and emit VDOM claims from component tree ---
   const emitDisposer = reaction(
-    () => expandRoot(rootVnode, "dom"),
-    (nodes) => {
+    () => expandTree(rootVnode, "dom"),
+    (expansion) => {
       // Writes to db.facts but doesn't re-trigger the data function because
       // reaction separates tracking from effects. Revoking the mount owner
-      // drops the previous render's claims.
+      // drops the previous render's claims. Components that left the tree
+      // run their cleanups before the DOM is patched.
       runInAction(() => {
         db.revokeOwner(mountOwner);
-        db.withOwnerScope(mountOwner, () => emitExpanded(nodes, "dom", 0));
+        db.withOwnerScope(mountOwner, () => emitExpanded(expansion.nodes, "dom", 0));
+        for (const [id, fns] of cleanups) {
+          if (!expansion.cleanups.has(id)) runCleanups(fns);
+        }
+        cleanups = expansion.cleanups;
       });
     },
     // Always fire effect when data function re-runs — expanded trees are new
@@ -313,7 +330,11 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
 
   return () => {
     emitDisposer();
-    runInAction(() => db.revokeOwner(mountOwner));
+    runInAction(() => {
+      for (const fns of cleanups.values()) runCleanups(fns);
+      cleanups = new Map();
+      db.revokeOwner(mountOwner);
+    });
     patchDisposer();
     for (const id of Array.from(mountedRefs.keys())) releaseElementRef(id);
   };

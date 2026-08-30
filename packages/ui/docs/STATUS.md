@@ -56,12 +56,12 @@ placeholder`) and media props emit real CSS rules. Fonts follow tamagui's
 `Button` (`Frame`/`Text`/`Icon`/`Apply`) match tamagui's composition.
 
 **Core.** Component expansion is tracked, so `when()` in nested components
-re-renders; `createContext`/`useContext`, `useComponentId`, `Portal`; `mount`'s
-disposer removes the tree's facts.
+re-renders; `createContext`/`useContext`, `useComponentId`, `useCleanup`,
+`Portal`; `mount`'s disposer runs every cleanup and removes the tree's facts.
 
 **QA.** DOM tests through `@jam/ui/testing` (`render`, `css`, `mediaCss`,
 events, `resetUI`) — 212 unit tests across 13 files. `examples/catalog` renders
-every component in both themes; Playwright smoke suite in CI, `pnpm shots` for
+every component in both themes; Playwright smoke and leak sweeps in CI, `pnpm shots` for
 visual review.
 
 ## After the component pass
@@ -70,9 +70,10 @@ Every component now has real behaviour, tokenised styling, a DOM test file and
 a `docs/<Component>.md` (usage, props, parts, keyboard, theming, accessibility).
 
 **Behaviour helpers** (`state.ts`, `layers.ts`, `floating.ts`,
-`components/roving-focus.ts`): `useControllableState`, `useStableId`,
-`useDismissableLayer` (Escape/outside-press dismissal, focus trap, autofocus
-and focus restore, scroll lock), `repositionLayer`/`floatingStyle` (placement
+`components/roving-focus.ts`): `useControllableState` (forgotten on unmount,
+setter inert afterwards), `useStableId`, `useDismissableLayer` (Escape/outside-press
+dismissal, focus trap, autofocus and focus restore, scroll lock; closed by
+`useCleanup` when its component unmounts), `repositionLayer`/`floatingStyle` (placement
 against an anchor, flipping and shifting to stay in the viewport),
 `rovingFocus`/`rovingTabIndex` for arrow-key groups. Overlays portal to the mount root and
 sit at `zIndex` 100000 (toasts 100001).

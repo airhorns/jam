@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { h, Portal } from "@jam/core";
+import { db, h, Portal, replace, when } from "@jam/core";
 import { render, resetUI, click, keydown, tick } from "../testing";
 import { useControllableState, useControllableList, useStableId } from "../state";
 import { useDismissableLayer, isTopmostLayer } from "../layers";
@@ -57,6 +57,45 @@ describe("useControllableState", () => {
     expect(get("button").textContent).toBe("a");
     click(get("button"));
     expect(get("button").textContent).toBe("a,b");
+  });
+
+  it("forgets uncontrolled state when the component leaves the tree", () => {
+    replace("ui", "show", true);
+    function Host() {
+      const show = when(["ui", "show", true]).length > 0;
+      return h("div", null, show ? h(Toggle, { defaultOpen: false }) : null);
+    }
+    const { get, query } = render(h(Host, {}));
+    click(get("button"));
+    expect(get("button").dataset.open).toBe("true");
+    replace("ui", "show", false);
+    expect(query("button")).toBeNull();
+    replace("ui", "show", true);
+    expect(get("button").dataset.open).toBe("false");
+  });
+
+  it("ignores a setter invoked after the component has unmounted", () => {
+    replace("ui", "show", true);
+    const onOpenChange = vi.fn();
+    let lateSetOpen: ((open: boolean) => void) | undefined;
+    function Late() {
+      const [open, setOpen] = useControllableState<boolean>("open", { defaultValue: false, onChange: onOpenChange });
+      lateSetOpen = setOpen;
+      return h("button", { "data-open": String(open) }, "late");
+    }
+    function Host() {
+      const show = when(["ui", "show", true]).length > 0;
+      return h("div", null, show ? h(Late, {}) : null);
+    }
+    const { get, query } = render(h(Host, {}));
+    const before = db.facts.size;
+    replace("ui", "show", false);
+    expect(query("button")).toBeNull();
+    lateSetOpen!(true);
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(db.facts.size).toBeLessThan(before);
+    replace("ui", "show", true);
+    expect(get("button").dataset.open).toBe("false");
   });
 
   it("derives DOM-safe stable ids", () => {
@@ -162,6 +201,36 @@ describe("computePosition", () => {
     const pos = computePosition(edge, floating, { viewport, placement: "bottom" });
     expect(pos.x).toBe(1000 - 8 - 200);
     expect(pos.arrowX).toBe(192);
+  });
+});
+
+describe("layer lifecycle", () => {
+  function ModalHost() {
+    const show = when(["ui", "show", true]).length > 0;
+    return h("div", null, show ? h(Modal, {}) : h("p", null, "gone"));
+  }
+  function Modal() {
+    const id = useStableId();
+    useDismissableLayer(id, true, { onDismiss: () => {}, modal: true });
+    return h("div", { "data-layer": id, "data-testid": "modal" }, "modal");
+  }
+
+  it("closes a layer whose component is conditionally unmounted while open", () => {
+    replace("ui", "show", true);
+    render(h(ModalHost, {}));
+    expect(document.body.style.overflow).toBe("hidden");
+    replace("ui", "show", false);
+    expect(document.body.style.overflow).toBe("");
+    replace("ui", "show", true);
+    expect(document.body.style.overflow).toBe("hidden");
+  });
+
+  it("releases the scroll lock when the whole tree unmounts", () => {
+    replace("ui", "show", true);
+    const { unmount } = render(h(ModalHost, {}));
+    expect(document.body.style.overflow).toBe("hidden");
+    unmount();
+    expect(document.body.style.overflow).toBe("");
   });
 });
 
