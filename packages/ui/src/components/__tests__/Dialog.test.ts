@@ -120,6 +120,15 @@ describe("Dialog", () => {
     expect(document.body.style.overflow).toBe("");
   });
 
+  it("releases the scroll lock when the tree unmounts while open", async () => {
+    const { get, unmount } = render(h(Example, {}));
+    click(get("[data-testid=trigger]"));
+    expect(document.body.style.overflow).toBe("hidden");
+    unmount();
+    await tick();
+    expect(document.body.style.overflow).toBe("");
+  });
+
   it("supports controlled open state", () => {
     const onOpenChange = vi.fn();
     const { get, query } = render(h(Example, { open: false, onOpenChange }));

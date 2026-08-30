@@ -103,7 +103,7 @@ describe("Slider", () => {
 
     expect(keydown(thumb(), "ArrowRight").defaultPrevented).toBe(true);
     expect(onValueChange).toHaveBeenCalledWith([51]);
-    expect(onSlideEnd).toHaveBeenCalledWith([50]);
+    expect(onSlideEnd).toHaveBeenCalledWith([51]);
     keydown(thumb(), "ArrowLeft");
     keydown(thumb(), "ArrowLeft");
     expect(thumb().getAttribute("aria-valuenow")).toBe("49");

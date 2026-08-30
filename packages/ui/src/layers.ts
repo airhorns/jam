@@ -36,6 +36,7 @@ type Layer = LayerOptions & {
 
 const layers = new Map<string, Layer>();
 let listenersInstalled = false;
+let removalObserver: MutationObserver | null = null;
 let scrollLocked: string | null = null;
 
 function contentElement(id: string): HTMLElement | null {
@@ -131,6 +132,21 @@ function installListeners(): void {
   window.addEventListener("resize", onReposition);
 }
 
+/** While layers are open, prune as soon as content leaves the document (e.g. the tree unmounting) rather than on the next user event. */
+function watchRemovals(): void {
+  if (removalObserver || typeof MutationObserver === "undefined") return;
+  removalObserver = new MutationObserver((records) => {
+    if (records.some((record) => record.removedNodes.length > 0)) prune();
+  });
+  removalObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+function unwatchRemovals(): void {
+  if (!removalObserver || layers.size > 0) return;
+  removalObserver.disconnect();
+  removalObserver = null;
+}
+
 function updateScrollLock(): void {
   if (typeof document === "undefined") return;
   let modal: Layer | undefined;
@@ -146,6 +162,7 @@ function updateScrollLock(): void {
 
 function startLayer(layer: Layer): void {
   installListeners();
+  watchRemovals();
   updateScrollLock();
   queueMicrotask(() => {
     if (!layers.has(layer.id)) return;
@@ -164,6 +181,7 @@ function startLayer(layer: Layer): void {
 
 function finishLayer(layer: Layer): void {
   updateScrollLock();
+  unwatchRemovals();
   queueMicrotask(() => clearFloatingPosition(layer.id));
   const previous = layer.previouslyFocused;
   if ((layer.restoreFocus ?? layer.modal) && previous) {
@@ -211,6 +229,7 @@ export function isTopmostLayer(id: string): boolean {
 /** Forget every layer and release the scroll lock (for tests and hot reload). */
 export function resetLayers(): void {
   layers.clear();
+  unwatchRemovals();
   if (typeof document !== "undefined" && scrollLocked != null) {
     document.body.style.overflow = scrollLocked;
     scrollLocked = null;

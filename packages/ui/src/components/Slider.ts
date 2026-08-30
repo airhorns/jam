@@ -26,8 +26,8 @@ type SliderStateValue = {
   /** Position of a value along the track, 0–100. */
   percent: (value: number) => number;
   setAt: (index: number, value: number) => void;
-  nudge: (index: number, steps: number | "min" | "max") => void;
-  slideEnd: () => void;
+  nudge: (index: number, steps: number | "min" | "max") => number[];
+  slideEnd: (values: number[]) => void;
 };
 
 const SliderState = createContext<SliderStateValue>({
@@ -38,7 +38,7 @@ const SliderState = createContext<SliderStateValue>({
   disabled: false,
   percent: () => 0,
   setAt: () => {},
-  nudge: () => {},
+  nudge: () => [],
   slideEnd: () => {},
 });
 
@@ -281,8 +281,7 @@ function SliderThumbComponent(props: SliderThumbProps): VNode {
       const steps = keySteps(event.key);
       if (steps === undefined) return;
       event.preventDefault();
-      state.nudge(index, steps);
-      state.slideEnd();
+      state.slideEnd(state.nudge(index, steps));
     },
   });
 }
@@ -383,11 +382,11 @@ function SliderComponent(props: SliderProps): VNode {
     },
     nudge: (index, steps) => {
       const current = values[index] ?? min;
-      if (steps === "min") commit(index, min);
-      else if (steps === "max") commit(index, max);
-      else commit(index, current + steps * step);
+      if (steps === "min") return commit(index, min);
+      if (steps === "max") return commit(index, max);
+      return commit(index, current + steps * step);
     },
-    slideEnd: () => onSlideEnd?.(values),
+    slideEnd: (next) => onSlideEnd?.(next),
   };
 
   const valueFromPoint = (rect: DOMRect, clientX: number, clientY: number): number => {
