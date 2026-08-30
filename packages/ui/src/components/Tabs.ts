@@ -24,6 +24,7 @@ type TabsStateValue = {
   select: (value: string) => void;
   orientation: TabsOrientation;
   activationMode: TabsActivationMode;
+  dir?: "ltr" | "rtl";
   baseId: string;
 };
 
@@ -32,6 +33,7 @@ const TabsState = createContext<TabsStateValue>({
   select: () => {},
   orientation: "horizontal",
   activationMode: "automatic",
+  dir: undefined,
   baseId: "tabs",
 });
 
@@ -260,6 +262,7 @@ function TabsListComponent(props: TabsListProps): VNode {
         onKeyDown?.(event);
         rovingFocus(event, "[role=tab]", {
           orientation: state.orientation,
+          dir: state.dir,
           loop,
           onMove:
             state.activationMode === "automatic"
@@ -305,6 +308,15 @@ function TabsTabComponent(props: TabsTabProps): VNode {
       "data-value": value,
       // Only the selected tab is a tab stop; the arrows reach the rest.
       tabIndex: state.value === "" ? 0 : selected ? 0 : -1,
+      onMouseDown: (event: MouseEvent) => {
+        if (disabled) return;
+        if (event.button === 0 && !event.ctrlKey) {
+          (event.currentTarget as HTMLElement).focus();
+          state.select(value);
+        } else {
+          event.preventDefault();
+        }
+      },
       onClick: (event: MouseEvent) => {
         onClick?.(event);
         if (disabled) return;
@@ -355,6 +367,8 @@ export type TabsProps = StyledProps & {
   orientation?: TabsOrientation;
   /** `automatic` (default) selects on arrow-key focus; `manual` waits for a click or Space. */
   activationMode?: TabsActivationMode;
+  /** Reading direction; reverses which arrow moves to the next tab. */
+  dir?: "ltr" | "rtl";
   size?: string | number;
   children?: VChild | VChild[];
 };
@@ -370,6 +384,7 @@ function TabsComponent(props: TabsProps): VNode {
     onValueChange,
     orientation = "horizontal",
     activationMode = "automatic",
+    dir,
     children,
     ...frameProps
   } = props;
@@ -386,6 +401,7 @@ function TabsComponent(props: TabsProps): VNode {
     select: setValue,
     orientation,
     activationMode,
+    dir,
     baseId,
   };
 
@@ -394,6 +410,7 @@ function TabsComponent(props: TabsProps): VNode {
     {
       ...(frameProps as Record<string, unknown>),
       orientation,
+      dir,
       "data-orientation": orientation,
       "data-value": value || undefined,
     },

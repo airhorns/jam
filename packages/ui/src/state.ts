@@ -29,14 +29,17 @@ export function useControllableState<T extends Term>(
     mounted.delete(id);
     forget(id, key, _);
   });
-  const stored = when([id, key, $.value]);
-  const current = controlled ? options.value : stored.length > 0 ? (stored[0].value as T) : options.defaultValue;
+  const read = (): T | undefined => {
+    const stored = when([id, key, $.value]);
+    return controlled ? options.value : stored.length > 0 ? (stored[0].value as T) : options.defaultValue;
+  };
+  // Compare against the live value so a setter kept from an earlier render (a timer, another component's close) still sees changes made since.
   const update = (next: T) => {
-    if (next === current || !mounted.has(id)) return;
+    if (!mounted.has(id) || next === read()) return;
     options.onChange?.(next);
     if (!controlled) replace(id, key, next);
   };
-  return [current, update];
+  return [read(), update];
 }
 
 /** Like `useControllableState` for string arrays, stored as one JSON fact. */

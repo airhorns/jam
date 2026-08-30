@@ -40,6 +40,7 @@ import { Accordion } from "@jam/ui";
 | `onValueChange` | `(value: string) => void` / `(value: string[]) => void` | — | Called with the new value; in single mode closing reports `""`. |
 | `collapsible` | `boolean` | `false` | Single mode only: pressing the open trigger closes it. |
 | `orientation` | `"vertical" \| "horizontal"` | `"vertical"` | Layout direction and which arrows navigate. |
+| `dir` | `"ltr" \| "rtl"` | `"ltr"` | Reading direction; reverses which arrow moves to the next trigger. |
 | `disabled` | `boolean` | `false` | Disables every trigger. |
 | `size` | size token or number | `"$true"` | Frame radius, trigger height and padding, content padding. |
 
@@ -52,15 +53,18 @@ mode with no casts.
 
 ## Parts
 
-`Accordion.Item` — one section. Carries `data-state` (`open` / `closed`) and
-`data-value`, and provides its open state to the trigger, indicator and
-content, so nothing below it needs the item's value.
+`Accordion.Item` — one section. Carries `data-state` (`open` / `closed`),
+`data-value`, `data-disabled` and `data-orientation`, and provides its open
+state to the header, trigger, indicator and content, so nothing below it needs
+the item's value.
 
 `Accordion.Header` — an `<h3>` wrapper with no margin, for the heading level
-the ARIA pattern expects. Optional: the trigger works on its own.
+the ARIA pattern expects. Carries `data-state`, `data-orientation` and
+`data-disabled` from the item. Optional: the trigger works on its own.
 
-`Accordion.Trigger` — `<button aria-expanded aria-controls id>` with
-`data-state`. Toggles its item on click.
+`Accordion.Trigger` — `<button aria-expanded id>` with `data-state` and
+`data-disabled`. `aria-controls` is only set while the item is open. Toggles
+its item on click.
 
 `Accordion.Indicator` — a `1em` chevron (override by passing children) that
 rotates 180° when the item opens, animated by the shared `quick` transition.
@@ -105,9 +109,11 @@ stack.
 - Every trigger is a real button, so all of them are tab stops and Space/Enter
   toggles. Arrow keys along the orientation additionally move focus between the
   enabled triggers and wrap at the ends; Home and End jump to the first and
-  last. Cross-axis arrows are left alone.
+  last regardless of orientation. `dir="rtl"` swaps which arrow moves forward.
+  Any of the six keys is prevented once the target is an enabled trigger, even
+  one that doesn't move focus in the current orientation, matching Radix.
 - In single, non-collapsible mode the open trigger simply does nothing when
-  pressed. It deliberately does not get `aria-disabled`, which the style system
-  treats as `:disabled` and would dim the open row.
+  pressed. It deliberately does not get `aria-disabled` (as Radix does), which
+  the style system treats as `:disabled` and would dim the open row.
 - A disabled item's trigger gets the real `disabled` attribute and is skipped
   by both Tab and the arrow keys.

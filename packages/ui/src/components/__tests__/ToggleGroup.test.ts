@@ -154,6 +154,25 @@ describe("ToggleGroup", () => {
     expect(onValueChange).not.toHaveBeenCalled();
   });
 
+  it("sets data-disabled on a disabled item", () => {
+    const r = items({}, { disabled: true });
+    expect(buttons(r)[2].dataset.disabled).toBe("");
+  });
+
+  it("reverses the arrow keys with dir=\"rtl\"", () => {
+    const r = items({ dir: "rtl" });
+    buttons(r)[0].focus();
+    keydown(buttons(r)[0], "ArrowRight");
+    expect(document.activeElement).toBe(buttons(r)[2]);
+  });
+
+  it("stops at the ends when loop is false", () => {
+    const r = items({ loop: false });
+    buttons(r)[2].focus();
+    keydown(buttons(r)[2], "ArrowRight");
+    expect(document.activeElement).toBe(buttons(r)[2]);
+  });
+
   it("strips the default look when unstyled", () => {
     const r = items({}, {});
     expect(css(buttons(r)[0]).height).toBe("44px");

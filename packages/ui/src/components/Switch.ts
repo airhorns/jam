@@ -1,14 +1,15 @@
-import { createContext, h, useContext } from "@jam/core/jsx";
+import { createContext, Fragment, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { createStyledContext, styled } from "../styled";
 import type { StyledProps, VariantExtras } from "../styled";
 import { tokenValue } from "../variants";
 import { useControllableState } from "../state";
+import { useFormReset } from "../form";
 
 /** Size flows from the Switch to its Thumb so the thumb and its travel scale together. */
 export const SwitchContext = createStyledContext<{ size?: string | number }>({ size: undefined });
 
-const SwitchState = createContext<{ checked: boolean }>({ checked: false });
+const SwitchState = createContext<{ checked: boolean; disabled: boolean }>({ checked: false, disabled: false });
 
 /** tamagui's ratio: the track is 65% of the size token tall and twice that wide. */
 function trackHeight(value: unknown, tokens: VariantExtras["tokens"]): number {
@@ -147,13 +148,14 @@ export type SwitchThumbProps = StyledProps & {
   unstyled?: boolean;
 };
 
-/** The sliding knob; reads `checked` from the Switch so it can translate itself. */
+/** The sliding knob; reads `checked` and `disabled` from the Switch so it can translate itself. */
 function SwitchThumbComponent(props: SwitchThumbProps): VNode {
-  const { checked } = useContext(SwitchState);
+  const { checked, disabled } = useContext(SwitchState);
   return h(SwitchThumbFrame, {
     ...(props as Record<string, unknown>),
     checkedState: checked || undefined,
     "data-state": checked ? "checked" : "unchecked",
+    "data-disabled": disabled ? "" : undefined,
   });
 }
 SwitchThumbComponent.displayName = "Switch.Thumb";
@@ -166,6 +168,10 @@ export type SwitchProps = StyledProps & {
   size?: string | number;
   unstyled?: boolean;
   id?: string;
+  /** Submitted with a form through a mirrored hidden checkbox input. */
+  name?: string;
+  value?: string;
+  required?: boolean;
   children?: VChild | VChild[];
   onClick?: (event: MouseEvent) => void;
   onKeyDown?: (event: KeyboardEvent) => void;
@@ -177,7 +183,7 @@ export type SwitchProps = StyledProps & {
  * set it off and on explicitly.
  */
 function SwitchComponent(props: SwitchProps): VNode {
-  const { defaultChecked, onCheckedChange, children, onClick, onKeyDown, ...frameProps } = props;
+  const { defaultChecked, onCheckedChange, children, name, value, required, onClick, onKeyDown, ...frameProps } = props;
   const [checked, setChecked] = useControllableState<boolean>("checked", {
     value: props.checked,
     defaultValue: defaultChecked ?? false,
@@ -185,30 +191,53 @@ function SwitchComponent(props: SwitchProps): VNode {
   });
   const on = checked === true;
   const size = props.size ?? (props.unstyled ? undefined : "$true");
+  const disabled = props.disabled === true;
+  const resetProps = useFormReset(() => setChecked(defaultChecked ?? false));
 
-  return h(
+  const frame = h(
     SwitchFrame,
     {
       ...(frameProps as Record<string, unknown>),
+      ...resetProps,
       size,
       checked: undefined,
       checkedState: on || undefined,
       "aria-checked": String(on),
+      "aria-required": required || undefined,
       "data-state": on ? "checked" : "unchecked",
+      "data-disabled": disabled ? "" : undefined,
       onClick: (event: MouseEvent) => {
         onClick?.(event);
-        if (props.disabled) return;
+        if (disabled) return;
         setChecked(!on);
       },
       onKeyDown: (event: KeyboardEvent) => {
         onKeyDown?.(event);
-        if (props.disabled) return;
+        if (disabled) return;
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault();
         setChecked(event.key === "ArrowRight");
       },
     },
-    h(SwitchState.Provider, { value: { checked: on } }, ...(([] as VChild[]).concat(children ?? []))),
+    h(SwitchState.Provider, { value: { checked: on, disabled } }, ...(([] as VChild[]).concat(children ?? []))),
+  );
+  if (name == null) return frame;
+
+  return h(
+    Fragment,
+    null,
+    frame,
+    h("input", {
+      type: "checkbox",
+      name,
+      value: value ?? "on",
+      checked: on,
+      required: required || undefined,
+      disabled: disabled || undefined,
+      tabIndex: -1,
+      "aria-hidden": "true",
+      style: { position: "absolute", width: "1px", height: "1px", opacity: 0, pointerEvents: "none", margin: 0 },
+    }),
   );
 }
 SwitchComponent.displayName = "Switch";

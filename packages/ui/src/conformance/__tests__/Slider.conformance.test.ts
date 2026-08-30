@@ -95,9 +95,9 @@ describe("Slider conformance", () => {
     // neighbour (values array is re-sorted, slider.tsx:190-212). Ours never crosses — it always
     // clamps to the neighbour's current value, matching preserveThumbOrder=true + gap 0.
     it("a thumb stepped repeatedly clamps exactly at its neighbour's current value and never crosses it (deliberate divergence from Radix's default crossing behaviour, slider.tsx:190-212)", () => {
-      const r = renderSlider({ defaultValue: [20, 60] }, 2);
+      const r = renderSlider({ defaultValue: [20, 60], step: 5 }, 2);
       const thumb0 = () => thumbsOf(r)[0];
-      for (let i = 0; i < 50; i++) keydown(thumb0(), "ArrowRight");
+      for (let i = 0; i < 12; i++) keydown(thumb0(), "ArrowRight");
       expect(thumbsOf(r)[0].getAttribute("aria-valuenow")).toBe("60");
       expect(thumbsOf(r)[1].getAttribute("aria-valuenow")).toBe("60");
     });

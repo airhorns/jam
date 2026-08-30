@@ -41,6 +41,9 @@ replaced without an `unstyled` escape hatch.
 | `disabled` | `boolean` | `false` | Sets the real `disabled` attribute and applies `disabledStyle`. |
 | `size` | size token or number | `"$true"` | Track height, width, thumb size and travel. |
 | `unstyled` | `boolean` | `false` | Drop the default look. |
+| `name` | `string` | — | Submits with the owning form through a hidden checkbox input. |
+| `value` | `string` | `"on"` | The hidden input's value when checked. |
+| `required` | `boolean` | `false` | Sets `aria-required` on the root and `required` on the hidden input. |
 
 Uncontrolled state lives in the fact database under the switch's component id.
 
@@ -82,5 +85,11 @@ Switch recolours the pair together.
 - ArrowRight turns it on and ArrowLeft turns it off, matching platform
   switches; both call `preventDefault`.
 - Focus shows a 2px `$outlineColor` outline via `focusVisibleStyle`.
-- `disabled` sets the real attribute, so clicks and keys do nothing and the
-  control leaves the tab order.
+- `disabled` sets the real attribute and `data-disabled` on both the track and
+  the thumb, so clicks and keys do nothing and the control leaves the tab
+  order.
+- `required` sets `aria-required` on the root and `required` on the hidden
+  input when `name` is set.
+- A `name` renders a visually-hidden `<input type="checkbox">` so the switch
+  contributes to `FormData`. Resetting the owning form restores
+  `defaultChecked`, with or without `name` set.

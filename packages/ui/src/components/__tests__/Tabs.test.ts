@@ -89,6 +89,19 @@ describe("Tabs", () => {
     expect(panels(r)[0].textContent).toBe("Panel C");
   });
 
+  it("focuses a tab when it is clicked", () => {
+    const r = tabs({ defaultValue: "a" });
+    click(tabList(r)[2]);
+    expect(document.activeElement).toBe(tabList(r)[2]);
+  });
+
+  it("reverses the arrow keys with dir=\"rtl\"", () => {
+    const r = tabs({ defaultValue: "a", dir: "rtl" });
+    tabList(r)[0].focus();
+    keydown(tabList(r)[0], "ArrowLeft");
+    expect(document.activeElement).toBe(tabList(r)[1]);
+  });
+
   it("stays controlled when a value is passed", () => {
     const onValueChange = vi.fn();
     const r = tabs({ value: "a", onValueChange });

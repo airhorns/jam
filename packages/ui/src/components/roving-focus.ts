@@ -32,10 +32,10 @@ function allowedKey(key: string, orientation: RovingOrientation): boolean {
   return key !== "ArrowUp" && key !== "ArrowDown";
 }
 
-/** Enabled, focusable items of a group, in DOM order. */
+/** Enabled items of a group, in DOM order. `aria-disabled` items stay reachable, as in Radix. */
 export function rovingItems(container: Element, selector: string): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(selector)).filter(
-    (el) => !el.hasAttribute("disabled") && el.getAttribute("aria-disabled") !== "true" && !el.hasAttribute("data-disabled"),
+    (el) => !el.hasAttribute("disabled") && !el.hasAttribute("data-disabled"),
   );
 }
 

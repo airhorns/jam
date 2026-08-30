@@ -175,3 +175,46 @@ round, and the examples now wrap or scroll horizontally at phone widths.
 - Dark shadows are pure black and `bordered` frames use `$borderColor`
   (≈1.2:1 against the surface in dark), as in tamagui v5; muted `$color10`
   text and light `theme="red"` button text sit just above 4:1.
+
+## After the reliability round
+
+Three independent oracles now check the library rather than its own tests:
+
+**Lifecycle.** `useCleanup` in `@jam/core` runs a component's teardown when
+its id leaves the expansion, so `useControllableState` forgets its fact on
+unmount and its setter goes inert, layers and timers are released, and the
+catalog's `leaks.spec.ts` mounts and unmounts every demo in every group and
+fails on leftover facts, layers, a stuck scroll lock or pending timers.
+
+**Conformance.** `src/conformance/__tests__/` holds one suite per interactive
+component ported from the Radix primitives and the WAI-ARIA APG, each `it`
+citing its source. What it changed: triggers only point `aria-controls` at
+content that exists; `Dialog` omits `aria-labelledby`/`aria-describedby`
+without a Title/Description and merges a caller's `aria-describedby`;
+`AlertDialog` is always modal, ignores outside presses and focuses Cancel;
+closing a nested popover no longer closes its parent; composite widgets take
+`dir` and `loop`, ignore keys from focusables nested inside an item, and
+carry `data-disabled=""` (the Radix spelling) on every disabled part;
+`Checkbox`, `Switch`, `RadioGroup` and `Slider` mirror into hidden inputs and
+restore their initial value on form reset through `useFormReset`; `Slider`
+gained Shift/Page stepping, `inverted`, `minStepsBetweenThumbs`,
+`aria-disabled` and per-part data attributes; `RadioGroup` and `Checkbox`
+swallow Enter; `Select` labels groups, takes `required` and drops the stale
+`aria-activedescendant`; `Tooltip` ignores the focus a click causes and touch
+hovers, keeps a caller's `aria-describedby`, closes other tooltips when it
+opens and skips its delay shortly after another closed; `Toast` closes on
+Escape, focuses its viewport on F8, pauses every toast in a viewport together
+and resumes with the remaining time.
+
+Deliberate divergences are `it.skip`s whose title carries the reason:
+`ToggleGroup` keeps tamagui's `role="group"` + `aria-pressed` instead of
+Radix's radiogroup/toolbar roles; the open trigger of a single,
+non-collapsible `Accordion` is not `aria-disabled` because the style system
+would dim it; `Toast` is its own live region and has no swipe-to-dismiss;
+`Tooltip` content is never hoverable.
+
+**Real browsers.** `examples/catalog/e2e/behaviour.spec.ts` covers what
+happy-dom cannot: placement flips and shifts, Tab trapping, wheel scroll
+locking, slider and sheet drags, select typeahead and real tooltip/toast
+timers. The smoke and leak sweeps run per demo group so a failure names the
+group instead of timing out the whole catalog.

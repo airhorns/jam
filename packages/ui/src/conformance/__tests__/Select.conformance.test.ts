@@ -161,17 +161,16 @@ describe("Select conformance", () => {
     });
   });
 
-  describe("aria wiring gaps against the APG combobox pattern", () => {
-    // APG combobox: aria-activedescendant identifies the option that currently has focus while the
-    // listbox is open, so assistive tech can announce it as the user moves the selection.
-    it("aria-activedescendant reflects the committed value, not the option currently under keyboard focus", async () => {
+  describe("aria wiring against the APG combobox pattern", () => {
+    // Radix's SelectTrigger never sets aria-activedescendant; ArrowDown moves real DOM focus onto the option instead.
+    it("does not set aria-activedescendant; ArrowDown moves real DOM focus onto the option", async () => {
       const { get } = render(h(Example, { defaultValue: "apple" }));
       const trigger = get("[data-testid=trigger]");
       click(trigger);
       await tick();
       keydown(document.activeElement!, "ArrowDown");
       expect(document.activeElement).toBe(get("[data-testid=item-banana]"));
-      expect(trigger.getAttribute("aria-activedescendant")).toBe(get("[data-testid=item-banana]").id);
+      expect(trigger.hasAttribute("aria-activedescendant")).toBe(false);
     });
 
     it("the `autofocus` attribute is present only on the selected item", () => {
@@ -182,17 +181,16 @@ describe("Select conformance", () => {
     });
 
     // Radix's SelectGroup generates an id and SelectLabel renders it, wiring aria-labelledby
-    // automatically; our styled SelectGroup/SelectLabel carry no such id/attribute exchange.
-    it("Select.Group is not labelled by Select.Label via aria-labelledby", () => {
+    // automatically.
+    it("Select.Group is labelled by Select.Label via aria-labelledby", () => {
       const { get } = render(h(Example, { defaultOpen: true }));
       const group = get("[data-testid=group]");
       const label = get("[data-testid=label]");
       expect(group.getAttribute("aria-labelledby")).toBe(label.id);
     });
 
-    // Radix's SelectTrigger sets aria-required from a `required` root prop; our SelectProps has
-    // no `required` at all, so it can never reach the trigger or the hidden input.
-    it("Select has no `required` prop wired to aria-required on the trigger", () => {
+    // Radix's SelectTrigger sets aria-required from a `required` root prop.
+    it("Select's `required` prop is wired to aria-required on the trigger", () => {
       const { get } = render(h(Example, { ...({ required: true } as Record<string, unknown>) }));
       expect(get("[data-testid=trigger]").getAttribute("aria-required")).toBe("true");
     });
@@ -213,7 +211,7 @@ describe("Select conformance", () => {
   describe("form integration", () => {
     // Radix's Select.Provider listens for the surrounding form's `reset` event and calls
     // setValue(initialValue) so its own displayed state resets along with the native control.
-    it("resetting the surrounding form does not revert Select's own displayed value", () => {
+    it("resetting the surrounding form reverts Select's own displayed value to defaultValue", () => {
       const { get, container } = render(
         h("form", null, h(Example, { name: "fruit", defaultValue: "apple" }), h("button", { type: "reset" }, "Reset")),
       );
@@ -222,7 +220,7 @@ describe("Select conformance", () => {
       expect(get("[data-testid=value]").textContent).toBe("Cherry");
       const form = container.querySelector("form")!;
       form.reset();
-      expect(get("[data-testid=value]").textContent).toBe("Cherry");
+      expect(get("[data-testid=value]").textContent).toBe("Apple");
     });
   });
 });

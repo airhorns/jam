@@ -65,15 +65,19 @@ describe("Switch conformance", () => {
 
   describe("aria / data attributes", () => {
     // radix switch.tsx SwitchProviderProps includes `required?: boolean`,
-    // reflected as aria-required={required} on SwitchTrigger; SwitchProps has
-    // no `required` field at all, so it can never be set (missing feature).
-    it("has no way to set aria-required, since required is not a prop", () => {
-      const r = render(h(Switch, { ...({ required: true } as Record<string, unknown>) }));
+    // reflected as aria-required={required} on SwitchTrigger.
+    it("sets aria-required when required is set, like radix switch.tsx", () => {
+      const r = render(h(Switch, { required: true }));
+      expect(r.root.getAttribute("aria-required")).toBe("true");
+    });
+
+    it("does not set aria-required when required is not set", () => {
+      const r = render(h(Switch, null));
       expect(r.root.hasAttribute("aria-required")).toBe(false);
     });
 
     // radix switch.tsx SwitchTrigger: data-disabled={disabled ? '' : undefined}
-    it("sets data-disabled on the root when disabled (missing: styled() has no automatic data-disabled injection)", () => {
+    it("sets data-disabled on the root when disabled", () => {
       const r = render(h(Switch, { disabled: true }));
       expect(r.root.hasAttribute("data-disabled")).toBe(true);
     });
@@ -84,8 +88,6 @@ describe("Switch conformance", () => {
     });
 
     // radix switch.tsx SwitchThumb: data-disabled={context.disabled ? '' : undefined}
-    // Our SwitchState context only carries `checked`, so Switch.Thumb has no
-    // way to know the parent is disabled at all.
     it("sets data-disabled on Switch.Thumb when the parent Switch is disabled", () => {
       const r = render(h(Switch, { disabled: true }, h(Switch.Thumb, null)));
       expect(thumb(r).hasAttribute("data-disabled")).toBe(true);
@@ -124,24 +126,24 @@ describe("Switch conformance", () => {
   describe("form integration", () => {
     // radix switch.tsx: SwitchProviderProps carries `name`, `form`, `value`
     // (default 'on'); SwitchTrigger renders a hidden SwitchBubbleInput mirror
-    // so the switch participates in FormData. SwitchProps has none of this.
-    it("has no name/value props and contributes nothing to FormData", () => {
+    // so the switch participates in FormData.
+    it("renders a hidden checkbox input and contributes to FormData when name is set, like Radix's SwitchBubbleInput", () => {
       const r = render(h("form", null, h(Switch, { ...({ name: "notifications" } as Record<string, unknown>), defaultChecked: true })));
-      expect(r.query("input")).toBeNull();
+      expect(r.query("input")).not.toBeNull();
       const data = new FormData(r.root as HTMLFormElement);
-      expect(data.has("notifications")).toBe(false);
+      expect(data.get("notifications")).toBe("on");
     });
 
     // radix switch.tsx SwitchTrigger effect: registers a `reset` listener on
     // control.form via initialCheckedStateRef that restores the initial
-    // checked state; Switch.ts has no such effect at all.
-    it("does not restore its initial state when the owning form is reset (missing: no reset listener)", () => {
+    // checked state, independently of whether the switch has a `name`.
+    it("restores its initial state when the owning form is reset, like Radix's SwitchTrigger reset effect", () => {
       const r = render(h("form", null, h(Switch, { defaultChecked: false })));
       const form = r.root as HTMLFormElement;
       click(r.get("button"));
       expect(r.get("button").getAttribute("aria-checked")).toBe("true");
       form.dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
-      expect(r.get("button").getAttribute("aria-checked")).toBe("true");
+      expect(r.get("button").getAttribute("aria-checked")).toBe("false");
     });
   });
 

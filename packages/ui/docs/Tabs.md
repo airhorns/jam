@@ -36,6 +36,7 @@ Vertical tabs put the list beside the panel with no extra layout:
 | `onValueChange` | `(value: string) => void` | — | Called with the newly selected value. |
 | `orientation` | `"horizontal" \| "vertical"` | `"horizontal"` | Also picks the root's direction and which arrows navigate. |
 | `activationMode` | `"automatic" \| "manual"` | `"automatic"` | Whether the arrow keys select as they move focus. |
+| `dir` | `"ltr" \| "rtl"` | `"ltr"` | Reading direction; reverses which arrow moves to the next tab. |
 | `size` | size token or number | `"$true"` | Tab height, padding and font size; panel padding. |
 
 `Tabs.List`: `loop` (default `true`), `size`, `unstyled`, plus style props.
@@ -95,9 +96,13 @@ list's baseline is `$borderColor`. There is no `Tabs` component theme, so
   moves in and out of the tab strip in one step; when nothing is selected all
   tabs are reachable.
 - Arrow keys along the orientation move between the enabled tabs and wrap
-  unless `loop={false}`; Home and End jump to the first and last. In
-  `automatic` mode focus also selects, which is right when panels are cheap;
-  use `manual` when selecting is expensive, and Space or Enter then activates.
+  unless `loop={false}`; Home and End jump to the first and last. `dir="rtl"`
+  swaps which arrow moves forward. In `automatic` mode focus also selects,
+  which is right when panels are cheap; use `manual` when selecting is
+  expensive, and Space or Enter then activates.
+- Clicking a tab focuses it (a left click with no modifier key) before
+  selecting it, so keyboard navigation continues from wherever the pointer
+  last landed.
 - Cross-axis arrows are left alone, so a vertical tab list does not swallow
   Left/Right.
 - Disabled tabs get the real `disabled` attribute and are skipped by both Tab

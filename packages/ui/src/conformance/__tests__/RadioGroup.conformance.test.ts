@@ -21,7 +21,7 @@ const radios = (r: ReturnType<typeof render>) => r.all("[role=radio]");
 
 describe("RadioGroup conformance", () => {
   describe("keyboard", () => {
-    it("radio-group.tsx's RadioGroupItemTrigger is a RovingFocusGroup.Item (per-item target guard); our rovingFocus(event, '[role=radio]', ...) is attached to the container with no such guard, so a key bubbling from a focusable descendant nested in a radio is treated as if the radio itself had focus", () => {
+    it("ignores a key bubbling from a focusable nested in an item, matching Radix's per-item target guard", () => {
       const r = render(
         h(
           RadioGroup,
@@ -34,11 +34,11 @@ describe("RadioGroup conformance", () => {
       const nestedButton = r.get("[role=radio] button") as HTMLElement;
       nestedButton.focus();
       const event = keydown(nestedButton, "ArrowDown");
-      expect(event.defaultPrevented).toBe(false); // FAILS
-      expect(document.activeElement).toBe(nestedButton); // FAILS
+      expect(event.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(nestedButton);
     });
 
-    it("radio-group.tsx threads `dir` through RovingFocusGroup.Root, reversing ArrowLeft/ArrowRight in horizontal orientation; RadioGroup has no `dir` prop", () => {
+    it("threads `dir` through rovingFocus, reversing ArrowLeft/ArrowRight in horizontal orientation, like radio-group.tsx's RovingFocusGroup.Root", () => {
       // Three items so RTL's "previous" (index 2, wrapping) and plain-LTR "next" (index 1)
       // actually disagree — with only two items wrapping makes them coincide.
       const r = group({ orientation: "horizontal", dir: "rtl", defaultValue: "a" } as never);
@@ -46,23 +46,23 @@ describe("RadioGroup conformance", () => {
       items[0].focus();
       // In RTL, ArrowRight maps to "previous": from the first item that wraps to the last.
       keydown(items[0], "ArrowRight");
-      expect(document.activeElement).toBe(items[2]); // FAILS — ours always treats ArrowRight as "next" regardless of dir
+      expect(document.activeElement).toBe(items[2]);
     });
 
-    it("radio.tsx's RadioGroupItemTrigger onKeyDown calls event.preventDefault() on Enter ('radio groups don't activate items on enter keypress' per WAI ARIA); RadioGroup has no Enter handling at all", () => {
+    it("preventDefaults Enter on an item, since radio groups don't activate items on Enter per WAI-ARIA, like radio.tsx's RadioGroupItemTrigger", () => {
       const r = group({ defaultValue: "a" });
       const items = radios(r);
       items[0].focus();
       const event = keydown(items[0], "Enter");
-      expect(event.defaultPrevented).toBe(true); // FAILS — a real <button role="radio"> would activate (and thus select) on Enter via native default action
+      expect(event.defaultPrevented).toBe(true);
     });
 
-    it("radio-group.tsx exposes a `loop` prop (default true, forwarded to RovingFocusGroup) to opt out of end-to-end wraparound; RadioGroup has no `loop` prop and always wraps", () => {
+    it("exposes a `loop` prop (default true) to opt out of end-to-end wraparound, forwarded to rovingFocus like radio-group.tsx forwards it to RovingFocusGroup", () => {
       const r = group({ loop: false } as never);
       const items = radios(r);
       items[2].focus();
       keydown(items[2], "ArrowDown");
-      expect(document.activeElement).toBe(items[2]); // FAILS — ours ignores the (unsupported) loop prop and wraps to items[0]
+      expect(document.activeElement).toBe(items[2]);
     });
 
     it("Home/End move to the first/last item regardless of orientation, in horizontal orientation too", () => {
@@ -111,20 +111,21 @@ describe("RadioGroup conformance", () => {
   });
 
   describe("aria", () => {
-    it("radio-group.tsx sets `aria-required={required}` unconditionally (renders 'false' when not required); RadioGroup omits the attribute entirely unless required is true", () => {
+    it("sets `aria-required={required}` unconditionally, rendering 'false' when not required, like radio-group.tsx", () => {
       const r = group();
-      expect(r.root.hasAttribute("aria-required")).toBe(true); // FAILS
+      expect(r.root.hasAttribute("aria-required")).toBe(true);
       expect(r.root.getAttribute("aria-required")).toBe("false");
     });
 
-    it("radio.tsx renders a visually-hidden <input type=radio> per item for native form integration (bubbling change events, required validation, form reset); RadioGroup renders none (docs: name is reserved for form integration)", () => {
+    it("renders a visually-hidden <input type=radio> per item for native form integration, like radio.tsx", () => {
       const r = group({ name: "plan", required: true });
-      expect(r.all("input[type=radio]").length).toBeGreaterThan(0); // FAILS — 0 hidden inputs rendered
+      expect(r.all("input[type=radio]").length).toBeGreaterThan(0);
     });
 
+    // data-disabled is the empty string when disabled, never "true" (matches Slider/Switch/Checkbox convention and Radix's data-disabled={disabled ? '' : undefined}).
     it("the group itself carries data-disabled when disabled, not just its items", () => {
       const r = group({ disabled: true });
-      expect(r.root.dataset.disabled).toBe("true");
+      expect(r.root.getAttribute("data-disabled")).toBe("");
     });
   });
 

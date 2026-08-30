@@ -149,6 +149,7 @@ function ToggleGroupItemComponent(props: ToggleGroupItemProps): VNode {
       "aria-pressed": String(active),
       "data-state": active ? "on" : "off",
       "data-value": value,
+      "data-disabled": disabled ? "" : undefined,
       onClick: (event: MouseEvent) => {
         onClick?.(event);
         if (disabled) return;
@@ -164,6 +165,10 @@ type ToggleGroupBaseProps = StyledProps & {
   /** Keep the active item active when it is pressed again. */
   disableDeactivation?: boolean;
   orientation?: ToggleGroupOrientation;
+  /** Reading direction; reverses which arrow moves to the next item. */
+  dir?: "ltr" | "rtl";
+  /** Wrap around at the ends. */
+  loop?: boolean;
   disabled?: boolean;
   size?: string | number;
   children?: VChild | VChild[];
@@ -189,6 +194,8 @@ function ToggleGroupComponent(props: ToggleGroupProps): VNode {
     onValueChange,
     disableDeactivation,
     orientation = "horizontal",
+    dir,
+    loop = true,
     children,
     onKeyDown,
     ...frameProps
@@ -228,6 +235,7 @@ function ToggleGroupComponent(props: ToggleGroupProps): VNode {
     {
       ...(frameProps as Record<string, unknown>),
       orientation,
+      dir,
       class: [groupedChildrenClass(orientation), props.class].filter(Boolean).join(" ") || undefined,
       "aria-orientation": orientation,
       "data-orientation": orientation,
@@ -235,7 +243,7 @@ function ToggleGroupComponent(props: ToggleGroupProps): VNode {
       onKeyDown: (event: KeyboardEvent) => {
         onKeyDown?.(event);
         if (props.disabled) return;
-        rovingFocus(event, "button[aria-pressed]", { orientation });
+        rovingFocus(event, "button[aria-pressed]", { orientation, dir, loop });
       },
     },
     h(ToggleState.Provider, { value: state }, ...(([] as VChild[]).concat(children ?? []))),

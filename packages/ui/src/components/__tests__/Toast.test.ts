@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { h } from "@jam/core/jsx";
-import { render, css, setupDefaultUI, click, tick, pointerEnter, pointerLeave } from "../../testing";
+import { render, css, setupDefaultUI, click, tick, pointerEnter, pointerLeave, keydown, focus, blur } from "../../testing";
 import { Toast, toastController } from "../Toast";
 import { Button } from "../Button";
 
@@ -158,5 +158,48 @@ describe("Toast", () => {
     click(get("[data-testid=close]"));
     expect(onClick).toHaveBeenCalled();
     expect(query("[data-testid=action]")).toBeNull();
+  });
+
+  it("closes when Escape is pressed while the toast is focused", () => {
+    const onOpenChange = vi.fn();
+    const { get } = render(h(Example, { defaultOpen: true, duration: Infinity, onOpenChange }));
+    const toast = get("[data-testid=toast]");
+    focus(toast);
+    keydown(toast, "Escape");
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("moves focus to the viewport when F8 is pressed anywhere in the document", () => {
+    const { get } = render(h(Toast.Viewport, { "data-testid": "viewport" }));
+    keydown(document, "F8");
+    expect(document.activeElement).toBe(get("[data-testid=viewport]"));
+  });
+
+  it("pauses every toast sharing a viewport when only one of them is hovered, and resumes both on leave", async () => {
+    const onOpenChangeA = vi.fn();
+    const onOpenChangeB = vi.fn();
+    const { get } = render(
+      h(
+        Toast.Viewport,
+        { "data-testid": "viewport" },
+        h(Toast, { defaultOpen: true, duration: 40, onOpenChange: onOpenChangeA, "data-testid": "a" }, h(Toast.Title, null, "A")),
+        h(Toast, { defaultOpen: true, duration: 40, onOpenChange: onOpenChangeB, "data-testid": "b" }, h(Toast.Title, null, "B")),
+      ),
+    );
+    pointerEnter(get("[data-testid=a]"));
+    await tick(60);
+    expect(onOpenChangeA).not.toHaveBeenCalled();
+    expect(onOpenChangeB).not.toHaveBeenCalled();
+    pointerLeave(get("[data-testid=a]"));
+    await tick(60);
+    expect(onOpenChangeA).toHaveBeenCalledWith(false);
+    expect(onOpenChangeB).toHaveBeenCalledWith(false);
+  });
+
+  it("logs a console.error when Toast.Action is given a blank altText", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(h(Toast, { defaultOpen: true, duration: Infinity }, h(Toast.Action, { altText: "  ", "data-testid": "action" }, "Undo")));
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });

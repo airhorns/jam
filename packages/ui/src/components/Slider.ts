@@ -5,8 +5,10 @@ import type { StyledProps, VariantExtras } from "../styled";
 import { tokenValue } from "../variants";
 import { getTokens } from "../tokens";
 import { useControllableState } from "../state";
+import { useFormReset } from "../form";
 
 export type SliderOrientation = "horizontal" | "vertical";
+export type SliderDirection = "ltr" | "rtl";
 
 /** Size and orientation flow from the Slider to its track, fill and thumbs. */
 export const SliderContext = createStyledContext<{
@@ -22,6 +24,8 @@ type SliderStateValue = {
   min: number;
   max: number;
   orientation: SliderOrientation;
+  /** The track edge values grow away from, after `dir` and `inverted`. */
+  from: SlideDirection;
   disabled: boolean;
   /** Position of a value along the track, 0–100. */
   percent: (value: number) => number;
@@ -35,6 +39,7 @@ const SliderState = createContext<SliderStateValue>({
   min: 0,
   max: 100,
   orientation: "horizontal",
+  from: "from-left",
   disabled: false,
   percent: () => 0,
   setAt: () => {},
@@ -216,8 +221,13 @@ export type SliderTrackProps = StyledProps & {
 
 /** The rail the thumbs run along; put `Slider.TrackActive` inside it. */
 function SliderTrackComponent(props: SliderTrackProps): VNode {
-  const { orientation } = useContext(SliderState);
-  return h(SliderTrackFrame, { orientation, ...(props as Record<string, unknown>) });
+  const { orientation, disabled } = useContext(SliderState);
+  return h(SliderTrackFrame, {
+    orientation,
+    "data-orientation": orientation,
+    "data-disabled": disabled ? "" : undefined,
+    ...(props as Record<string, unknown>),
+  });
 }
 SliderTrackComponent.displayName = "Slider.Track";
 
@@ -230,13 +240,21 @@ export type SliderTrackActiveProps = StyledProps & {
  * or between the first and last thumbs of a range.
  */
 function SliderTrackActiveComponent(props: SliderTrackActiveProps): VNode {
-  const { values, percent, orientation } = useContext(SliderState);
+  const { values, percent, orientation, from, disabled } = useContext(SliderState);
   const start = values.length > 1 ? percent(values[0]) : 0;
   const end = percent(values[values.length - 1]);
   const span = Math.max(0, end - start);
   const style =
-    orientation === "vertical" ? { bottom: `${start}%`, height: `${span}%` } : { left: `${start}%`, width: `${span}%` };
-  return h(SliderActiveFrame, { orientation, ...(props as Record<string, unknown>), style });
+    orientation === "vertical"
+      ? { [startEdge[from]]: `${start}%`, height: `${span}%` }
+      : { [startEdge[from]]: `${start}%`, width: `${span}%` };
+  return h(SliderActiveFrame, {
+    orientation,
+    "data-orientation": orientation,
+    "data-disabled": disabled ? "" : undefined,
+    ...(props as Record<string, unknown>),
+    style,
+  });
 }
 SliderTrackActiveComponent.displayName = "Slider.TrackActive";
 
@@ -270,42 +288,67 @@ function SliderThumbComponent(props: SliderThumbProps): VNode {
     "aria-valuenow": value,
     "aria-orientation": state.orientation,
     "data-index": index,
+    "data-orientation": state.orientation,
+    "data-disabled": state.disabled ? "" : undefined,
     style: vertical
-      ? { bottom: `calc(${at}% - ${inset}px)`, left: "50%" }
-      : { left: `calc(${at}% - ${inset}px)`, top: "50%" },
+      ? { [startEdge[state.from]]: `calc(${at}% - ${inset}px)`, left: "50%" }
+      : { [startEdge[state.from]]: `calc(${at}% - ${inset}px)`, top: "50%" },
     x: vertical ? "-50%" : undefined,
     y: vertical ? undefined : "-50%",
     onKeyDown: (event: KeyboardEvent) => {
       onKeyDown?.(event);
       if (state.disabled) return;
-      const steps = keySteps(event.key);
-      if (steps === undefined) return;
+      if (event.key === "Home") {
+        event.preventDefault();
+        state.slideEnd(state.nudge(index, "min"));
+        return;
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        state.slideEnd(state.nudge(index, "max"));
+        return;
+      }
+      const step = arrowStep(event, state.from);
+      if (step === undefined) return;
       event.preventDefault();
-      state.slideEnd(state.nudge(index, steps));
+      state.slideEnd(state.nudge(index, step));
     },
   });
 }
 SliderThumbComponent.displayName = "Slider.Thumb";
 
-function keySteps(key: string): number | "min" | "max" | undefined {
-  switch (key) {
-    case "ArrowLeft":
-    case "ArrowDown":
-      return -1;
-    case "ArrowRight":
-    case "ArrowUp":
-      return 1;
-    case "PageDown":
-      return -10;
-    case "PageUp":
-      return 10;
-    case "Home":
-      return "min";
-    case "End":
-      return "max";
-    default:
-      return undefined;
-  }
+const PAGE_KEYS = new Set(["PageUp", "PageDown"]);
+const ARROW_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
+
+type SlideDirection = "from-left" | "from-right" | "from-bottom" | "from-top";
+
+const startEdge: Record<SlideDirection, "left" | "right" | "bottom" | "top"> = {
+  "from-left": "left",
+  "from-right": "right",
+  "from-bottom": "bottom",
+  "from-top": "top",
+};
+
+/** Radix's BACK_KEYS table: which keys decrease the value for each edge the track starts from. */
+const BACK_KEYS: Record<SlideDirection, Set<string>> = {
+  "from-left": new Set(["Home", "PageDown", "ArrowDown", "ArrowLeft"]),
+  "from-right": new Set(["Home", "PageDown", "ArrowDown", "ArrowRight"]),
+  "from-bottom": new Set(["Home", "PageDown", "ArrowDown", "ArrowLeft"]),
+  "from-top": new Set(["Home", "PageDown", "ArrowUp", "ArrowLeft"]),
+};
+
+function slideDirection(orientation: SliderOrientation, dir: SliderDirection, inverted: boolean): SlideDirection {
+  if (orientation === "vertical") return inverted ? "from-top" : "from-bottom";
+  const ltr = dir !== "rtl";
+  return ltr !== inverted ? "from-left" : "from-right";
+}
+
+/** Signed step for an Arrow/Page keydown, ±10 for Page keys and Shift+Arrow; `undefined` for any other key. */
+function arrowStep(event: KeyboardEvent, from: SlideDirection): number | undefined {
+  if (!PAGE_KEYS.has(event.key) && !ARROW_KEYS.has(event.key)) return undefined;
+  const isSkip = PAGE_KEYS.has(event.key) || (event.shiftKey && ARROW_KEYS.has(event.key));
+  const sign = BACK_KEYS[from].has(event.key) ? -1 : 1;
+  return sign * (isSkip ? 10 : 1);
 }
 
 export type SliderProps = StyledProps & {
@@ -314,13 +357,21 @@ export type SliderProps = StyledProps & {
   min?: number;
   max?: number;
   step?: number;
+  /** Minimum number of steps that must separate two thumbs; blocks a move that would close the gap. */
+  minStepsBetweenThumbs?: number;
   onValueChange?: (value: number[]) => void;
   /** Called once when a drag or a keypress finishes. */
   onSlideEnd?: (value: number[]) => void;
   orientation?: SliderOrientation;
+  /** Reading direction; `rtl` flips which arrow key increases the value. */
+  dir?: SliderDirection;
+  /** Flips which arrow key increases the value, independently of `dir`. */
+  inverted?: boolean;
   disabled?: boolean;
   size?: string | number;
   unstyled?: boolean;
+  /** Submitted with a form through a hidden input per value. */
+  name?: string;
   children?: VChild | VChild[];
 };
 
@@ -339,9 +390,13 @@ function SliderComponent(props: SliderProps): VNode {
     min = 0,
     max = 100,
     step = 1,
+    minStepsBetweenThumbs = 0,
     onValueChange,
     onSlideEnd,
     orientation = "horizontal",
+    dir = "ltr",
+    inverted = false,
+    name,
     children,
     ...frameProps
   } = props;
@@ -353,6 +408,8 @@ function SliderComponent(props: SliderProps): VNode {
   });
   const values = JSON.parse(json ?? "[]") as number[];
   const disabled = props.disabled === true;
+  const from = slideDirection(orientation, dir, inverted);
+  const resetProps = useFormReset(() => setJson(JSON.stringify(toArray(defaultValue, min))));
 
   const snap = (value: number): number => {
     const steps = Math.round((clamp(value, min, max) - min) / step);
@@ -361,10 +418,11 @@ function SliderComponent(props: SliderProps): VNode {
     return clamp(decimals > 0 ? Number(snapped.toFixed(decimals)) : snapped, min, max);
   };
 
+  const gap = minStepsBetweenThumbs * step;
   const commit = (index: number, value: number): number[] => {
     const next = [...values];
-    const lower = index > 0 ? next[index - 1] : min;
-    const upper = index < next.length - 1 ? next[index + 1] : max;
+    const lower = index > 0 ? next[index - 1] + gap : min;
+    const upper = index < next.length - 1 ? next[index + 1] - gap : max;
     next[index] = clamp(snap(value), lower, upper);
     setJson(JSON.stringify(next));
     return next;
@@ -375,6 +433,7 @@ function SliderComponent(props: SliderProps): VNode {
     min,
     max,
     orientation,
+    from,
     disabled,
     percent: (value) => ((clamp(value, min, max) - min) / (max - min || 1)) * 100,
     setAt: (index, value) => {
@@ -392,8 +451,8 @@ function SliderComponent(props: SliderProps): VNode {
   const valueFromPoint = (rect: DOMRect, clientX: number, clientY: number): number => {
     const span = orientation === "vertical" ? rect.height : rect.width;
     if (span <= 0) return min;
-    const ratio =
-      orientation === "vertical" ? 1 - (clientY - rect.top) / rect.height : (clientX - rect.left) / rect.width;
+    const along = orientation === "vertical" ? (clientY - rect.top) / rect.height : (clientX - rect.left) / rect.width;
+    const ratio = from === "from-left" || from === "from-top" ? along : 1 - along;
     return min + clamp(ratio, 0, 1) * (max - min);
   };
 
@@ -427,13 +486,26 @@ function SliderComponent(props: SliderProps): VNode {
     SliderFrame,
     {
       ...(frameProps as Record<string, unknown>),
+      ...resetProps,
+      dir,
       orientation,
       "aria-orientation": orientation,
+      "aria-disabled": String(disabled),
       "data-orientation": orientation,
       "data-disabled": disabled ? "" : undefined,
       onPointerDown,
     },
     h(SliderState.Provider, { value: state }, ...(([] as VChild[]).concat(children ?? []))),
+    ...(name == null
+      ? []
+      : values.map((value, i) =>
+          h("input", {
+            key: `bubble-${i}`,
+            type: "hidden",
+            name: values.length > 1 ? `${name}[]` : name,
+            value: String(value),
+          }),
+        )),
   );
 }
 SliderComponent.displayName = "Slider";

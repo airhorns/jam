@@ -24,8 +24,8 @@ export type ToastConfig = {
 const defaultConfig: ToastConfig = { duration: 5000, placement: "bottom-right", label: "Notifications" };
 
 export const ToastConfigContext = createContext<ToastConfig>(defaultConfig);
-/** True while rendering inside a `Toast.Viewport`, where toasts lay out inline. */
-const InsideViewportContext = createContext<boolean>(false);
+/** The enclosing `Toast.Viewport`'s DOM id while rendering inside one, where toasts lay out inline and share pause/resume broadcasts. */
+const InsideViewportContext = createContext<string | null>(null);
 
 function ToastProvider(props: Partial<ToastConfig> & { children?: VChild | VChild[] }): VNode {
   const { children, ...config } = props;
@@ -40,25 +40,82 @@ ToastProvider.displayName = "ToastProvider";
 
 // ---- Auto-dismiss timers ----
 
-const timers = new Map<string, ReturnType<typeof setTimeout>>();
+type ToastTimer = { remaining: number; startedAt: number | undefined; handle: ReturnType<typeof setTimeout> | undefined };
 
-function scheduleDismiss(id: string, duration: number, dismiss: () => void): void {
+const timers = new Map<string, ToastTimer>();
+
+/** Arms a fresh dismiss timer for `duration`; a no-op if one is already running or `duration` is Infinite. */
+function armDismiss(id: string, duration: number, dismiss: () => void): void {
   if (timers.has(id) || !Number.isFinite(duration)) return;
-  timers.set(
-    id,
-    setTimeout(() => {
-      timers.delete(id);
-      dismiss();
-    }, duration),
-  );
+  timers.set(id, { remaining: duration, startedAt: Date.now(), handle: setTimeout(() => { timers.delete(id); dismiss(); }, duration) });
+}
+
+/** Cancels the running timer and remembers the time left, so `resumeDismiss` restarts from there rather than the full duration. */
+function pauseDismiss(id: string): void {
+  const timer = timers.get(id);
+  if (!timer || timer.handle === undefined) return;
+  clearTimeout(timer.handle);
+  const elapsed = timer.startedAt !== undefined ? Date.now() - timer.startedAt : 0;
+  timer.remaining = Math.max(0, timer.remaining - elapsed);
+  timer.handle = undefined;
+  timer.startedAt = undefined;
+}
+
+function resumeDismiss(id: string, dismiss: () => void): void {
+  const timer = timers.get(id);
+  if (!timer || timer.handle !== undefined) return;
+  timer.startedAt = Date.now();
+  timer.handle = setTimeout(() => { timers.delete(id); dismiss(); }, timer.remaining);
 }
 
 function cancelDismiss(id: string): void {
   const timer = timers.get(id);
-  if (timer !== undefined) {
-    clearTimeout(timer);
-    timers.delete(id);
+  if (timer?.handle !== undefined) clearTimeout(timer.handle);
+  timers.delete(id);
+}
+
+// ---- Viewport hotkey ----
+
+const hotkeyViewports = new Map<string, string[]>();
+let hotkeyListening = false;
+
+function onHotkeyKeydown(event: KeyboardEvent): void {
+  for (const [domId, hotkey] of hotkeyViewports) {
+    if (hotkey.includes(event.key)) document.getElementById(domId)?.focus();
   }
+}
+
+function ensureHotkeyListener(): void {
+  if (hotkeyListening || typeof document === "undefined") return;
+  document.addEventListener("keydown", onHotkeyKeydown);
+  hotkeyListening = true;
+}
+
+// ---- Viewport-wide pause/resume broadcast ----
+
+type ViewportToastHandlers = { pause: () => void; resume: () => void };
+
+const viewportToasts = new Map<string, Map<string, ViewportToastHandlers>>();
+
+function registerViewportToast(viewportId: string, toastId: string, handlers: ViewportToastHandlers): void {
+  let toasts = viewportToasts.get(viewportId);
+  if (!toasts) {
+    toasts = new Map();
+    viewportToasts.set(viewportId, toasts);
+  }
+  toasts.set(toastId, handlers);
+}
+
+function unregisterViewportToast(viewportId: string, toastId: string): void {
+  viewportToasts.get(viewportId)?.delete(toastId);
+}
+
+function pauseViewportToasts(viewportId: string): void {
+  for (const handlers of viewportToasts.get(viewportId)?.values() ?? []) handlers.pause();
+}
+
+function resumeViewportToasts(viewportId: string): void {
+  for (const handlers of viewportToasts.get(viewportId)?.values() ?? []) handlers.resume();
 }
 
 // ---- Imperative toasts ----
@@ -165,11 +222,21 @@ export type ToastViewportProps = StyledProps & {
   placement?: ToastPlacement;
   label?: string;
   unstyled?: boolean;
+  /** Keys that move focus to the viewport from anywhere in the page (default `["F8"]`). */
+  hotkey?: string[];
 };
 
 function ToastViewport(props: ToastViewportProps): VNode {
   const config = useContext(ToastConfigContext);
-  const { placement = config.placement, label = config.label, children, ...rest } = props;
+  const viewportId = useStableId("toast-viewport");
+  const { placement = config.placement, label = config.label, hotkey = ["F8"], id: idProp, children, ...rest } = props;
+  const domId = (idProp as string | undefined) ?? viewportId;
+  useCleanup(() => {
+    hotkeyViewports.delete(domId);
+    viewportToasts.delete(domId);
+  });
+  hotkeyViewports.set(domId, hotkey);
+  ensureHotkeyListener();
   const ids = readToastIds();
   const imperative = ids
     .map((id) => records.get(id))
@@ -217,8 +284,37 @@ function ToastViewport(props: ToastViewportProps): VNode {
       { value: { ...config, placement, label } },
       h(
         InsideViewportContext.Provider,
-        { value: true },
-        h(ToastViewportFrame, { role: "region", "aria-label": label, tabIndex: -1, placement, "data-toast-viewport": placement, ...rest }, ...imperative, children),
+        { value: domId },
+        h(
+          ToastViewportFrame,
+          {
+            id: domId,
+            role: "region",
+            "aria-label": label,
+            tabIndex: -1,
+            placement,
+            "data-toast-viewport": placement,
+            ...rest,
+            onPointerOver: (event: PointerEvent) => {
+              (rest.onPointerOver as ((e: PointerEvent) => void) | undefined)?.(event);
+              pauseViewportToasts(domId);
+            },
+            onPointerOut: (event: PointerEvent) => {
+              (rest.onPointerOut as ((e: PointerEvent) => void) | undefined)?.(event);
+              resumeViewportToasts(domId);
+            },
+            onFocusIn: (event: FocusEvent) => {
+              (rest.onFocusIn as ((e: FocusEvent) => void) | undefined)?.(event);
+              pauseViewportToasts(domId);
+            },
+            onFocusOut: (event: FocusEvent) => {
+              (rest.onFocusOut as ((e: FocusEvent) => void) | undefined)?.(event);
+              resumeViewportToasts(domId);
+            },
+          },
+          ...imperative,
+          children,
+        ),
       ),
     ),
   );
@@ -291,9 +387,12 @@ export type ToastProps = StyledProps & {
 
 function ToastRoot(props: ToastProps): VNode | null {
   const config = useContext(ToastConfigContext);
-  const insideViewport = useContext(InsideViewportContext);
+  const viewportId = useContext(InsideViewportContext);
   const id = useStableId("toast");
-  useCleanup(() => cancelDismiss(id));
+  useCleanup(() => {
+    cancelDismiss(id);
+    if (viewportId) unregisterViewportToast(viewportId, id);
+  });
   const { open: openProp, defaultOpen, onOpenChange, duration = config.duration, type = "background", children, ...rest } = props;
   const [openState, setOpen] = useControllableState<boolean>("open", {
     value: openProp,
@@ -303,9 +402,16 @@ function ToastRoot(props: ToastProps): VNode | null {
   const open = openState === true;
   if (!open) {
     cancelDismiss(id);
+    if (viewportId) unregisterViewportToast(viewportId, id);
     return null;
   }
-  scheduleDismiss(id, duration, () => setOpen(false));
+  armDismiss(id, duration, () => setOpen(false));
+  if (viewportId) {
+    registerViewportToast(viewportId, id, {
+      pause: () => pauseDismiss(id),
+      resume: () => resumeDismiss(id, () => setOpen(false)),
+    });
+  }
   const value: ToastContextValue = { id, open, setOpen, titleId: `${id}-title`, descriptionId: `${id}-description` };
   const side = config.placement.startsWith("top") ? "top" : "bottom";
   const toast = h(
@@ -324,25 +430,29 @@ function ToastRoot(props: ToastProps): VNode | null {
         ...rest,
         onPointerEnter: (event: PointerEvent) => {
           (rest.onPointerEnter as ((e: PointerEvent) => void) | undefined)?.(event);
-          cancelDismiss(id);
+          pauseDismiss(id);
         },
         onPointerLeave: (event: PointerEvent) => {
           (rest.onPointerLeave as ((e: PointerEvent) => void) | undefined)?.(event);
-          scheduleDismiss(id, duration, () => setOpen(false));
+          resumeDismiss(id, () => setOpen(false));
         },
         onFocus: (event: FocusEvent) => {
           (rest.onFocus as ((e: FocusEvent) => void) | undefined)?.(event);
-          cancelDismiss(id);
+          pauseDismiss(id);
         },
         onBlur: (event: FocusEvent) => {
           (rest.onBlur as ((e: FocusEvent) => void) | undefined)?.(event);
-          scheduleDismiss(id, duration, () => setOpen(false));
+          resumeDismiss(id, () => setOpen(false));
+        },
+        onKeyDown: (event: KeyboardEvent) => {
+          (rest.onKeyDown as ((e: KeyboardEvent) => void) | undefined)?.(event);
+          if (event.key === "Escape") setOpen(false);
         },
       },
       children,
     ),
   );
-  if (insideViewport) return toast;
+  if (viewportId) return toast;
   return h(Portal, null, h(ToastViewportFrame, { placement: config.placement, "data-toast-viewport": config.placement }, toast));
 }
 ToastRoot.displayName = "Toast";
@@ -402,7 +512,8 @@ export type ToastActionProps = StyledProps & {
 function ToastAction(props: ToastActionProps): VNode {
   useToastContext("Action");
   const { altText, asChild, ...rest } = props;
-  return h(asChild ? Slot : Button, { size: "$2", ...rest, "aria-label": altText, "data-toast-action": "" });
+  if (!altText.trim()) console.error("Toast.Action requires a non-blank `altText` naming the action for screen readers.");
+  return h(asChild ? Slot : Button, { size: "$2", ...rest, "aria-label": altText || undefined, "data-toast-action": "" });
 }
 ToastAction.displayName = "ToastAction";
 

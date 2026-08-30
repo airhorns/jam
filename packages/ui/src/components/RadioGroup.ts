@@ -1,12 +1,14 @@
-import { createContext, h, useContext } from "@jam/core/jsx";
+import { createContext, Fragment, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { createStyledContext, styled } from "../styled";
 import type { StyledProps } from "../styled";
 import { tokenValue } from "../variants";
 import { useControllableState } from "../state";
+import { useFormReset } from "../form";
 import { rovingFocus } from "./roving-focus";
 
 export type RadioGroupOrientation = "horizontal" | "vertical";
+export type RadioGroupDirection = "ltr" | "rtl";
 
 /** Size and orientation flow from the group to its items. */
 export const RadioGroupContext = createStyledContext<{
@@ -23,6 +25,8 @@ type RadioGroupState = {
   disabled: boolean;
   /** Native radio behaviour: with nothing selected every item is tabbable. */
   anySelected: boolean;
+  name?: string;
+  required: boolean;
 };
 
 const RadioState = createContext<RadioGroupState>({
@@ -30,6 +34,8 @@ const RadioState = createContext<RadioGroupState>({
   select: () => {},
   disabled: false,
   anySelected: false,
+  name: undefined,
+  required: false,
 });
 
 const RadioItemState = createContext<{ checked: boolean }>({ checked: false });
@@ -186,7 +192,7 @@ function RadioGroupItemComponent(props: RadioGroupItemProps): VNode {
   const checked = group.value === value;
   const disabled = props.disabled === true || group.disabled;
 
-  return h(
+  const item = h(
     RadioGroupItemFrame,
     {
       ...(frameProps as Record<string, unknown>),
@@ -201,8 +207,30 @@ function RadioGroupItemComponent(props: RadioGroupItemProps): VNode {
         if (disabled) return;
         group.select(value);
       },
+      onKeyDown: (event: KeyboardEvent) => {
+        // WAI-ARIA radio groups don't activate an item on Enter, unlike a plain button.
+        if (event.key === "Enter") event.preventDefault();
+      },
     },
     h(RadioItemState.Provider, { value: { checked } }, ...(([] as VChild[]).concat(children ?? []))),
+  );
+  if (group.name == null) return item;
+
+  return h(
+    Fragment,
+    null,
+    item,
+    h("input", {
+      type: "radio",
+      name: group.name,
+      value,
+      checked,
+      required: group.required || undefined,
+      disabled: disabled || undefined,
+      tabIndex: -1,
+      "aria-hidden": "true",
+      style: { position: "absolute", width: "1px", height: "1px", opacity: 0, pointerEvents: "none", margin: 0 },
+    }),
   );
 }
 RadioGroupItemComponent.displayName = "RadioGroup.Item";
@@ -212,9 +240,13 @@ export type RadioGroupProps = StyledProps & {
   defaultValue?: string;
   onValueChange?: (value: string) => void;
   orientation?: RadioGroupOrientation;
+  /** Reading direction; `"rtl"` swaps which arrow key moves to the previous item. */
+  dir?: RadioGroupDirection;
+  /** Wrap selection from the last item back to the first. */
+  loop?: boolean;
   disabled?: boolean;
   size?: string | number;
-  /** Reserved for form integration; rendered as `data-name` on the group. */
+  /** Submits with a form through a mirrored hidden `<input type="radio">` per item. */
   name?: string;
   required?: boolean;
   children?: VChild | VChild[];
@@ -227,34 +259,54 @@ export type RadioGroupProps = StyledProps & {
  * enabled items and follow it with focus, as native radios do.
  */
 function RadioGroupComponent(props: RadioGroupProps): VNode {
-  const { defaultValue, onValueChange, orientation = "vertical", children, name, required, onKeyDown, ...frameProps } = props;
+  const {
+    defaultValue,
+    onValueChange,
+    orientation = "vertical",
+    dir = "ltr",
+    loop = true,
+    children,
+    name,
+    required,
+    onKeyDown,
+    ...frameProps
+  } = props;
   const [value, setValue] = useControllableState<string>("value", {
     value: props.value,
     defaultValue,
     onChange: onValueChange,
   });
+  const disabled = props.disabled === true;
+  const resetProps = useFormReset(() => {
+    if (defaultValue != null) setValue(defaultValue);
+  });
 
   const state: RadioGroupState = {
     value: value ?? undefined,
     select: (next) => setValue(next),
-    disabled: props.disabled === true,
+    disabled,
     anySelected: value != null,
+    name,
+    required: required === true,
   };
 
   return h(
     RadioGroupFrame,
     {
       ...(frameProps as Record<string, unknown>),
+      ...resetProps,
+      dir,
       orientation,
       "aria-orientation": orientation,
-      "aria-required": required || undefined,
-      "data-name": name,
-      "data-disabled": props.disabled ? "" : undefined,
+      "aria-required": String(required === true),
+      "data-disabled": disabled ? "" : undefined,
       onKeyDown: (event: KeyboardEvent) => {
         onKeyDown?.(event);
-        if (props.disabled) return;
+        if (disabled) return;
         rovingFocus(event, "[role=radio]", {
           orientation: orientation === "horizontal" ? "horizontal" : "vertical",
+          dir,
+          loop,
           onMove: (item) => {
             const next = item.dataset.value;
             if (next != null) setValue(next);

@@ -41,7 +41,8 @@ describe("Tabs conformance", () => {
       expect(tabsEls[1].getAttribute("aria-selected")).toBe("true");
     });
 
-    it("Radix tabs.tsx TabsTrigger guards arrow-key handling with event.target === event.currentTarget; our roving-focus container has no such guard, so a key bubbling from a focusable descendant nested inside a tab is treated as if no tab had focus at all", () => {
+    // Radix tabs.tsx TabsTrigger only handles arrow keys when event.target === event.currentTarget.
+    it("ignores a key bubbling from a focusable descendant nested in a tab, matching Radix's per-item target guard", () => {
       const r = render(
         h(
           Tabs,
@@ -62,11 +63,8 @@ describe("Tabs conformance", () => {
       nestedButton.focus();
       expect(document.activeElement).toBe(nestedButton);
       const event = keydown(nestedButton, "ArrowRight");
-      // Radix's per-item guard means this keydown is ignored entirely: no preventDefault,
-      // focus stays on the nested descendant. Our roving-focus handler is registered on the
-      // list container with no target-restriction guard, so it fires regardless.
-      expect(event.defaultPrevented).toBe(false); // FAILS — ours preventDefaults unconditionally
-      expect(document.activeElement).toBe(nestedButton); // FAILS — ours moves focus to tab "a"
+      expect(event.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(nestedButton);
     });
 
     it("APG: Home/End move to the first/last tab regardless of orientation (vertical)", () => {
@@ -214,7 +212,7 @@ describe("Tabs conformance", () => {
   });
 
   describe("RTL", () => {
-    it("Radix tabs.tsx accepts a `dir` prop (useDirection) that reverses ArrowLeft/ArrowRight in horizontal orientation; Tabs has no `dir` prop and roving-focus.ts is not direction-aware", () => {
+    it("Radix tabs.tsx accepts a `dir` prop (useDirection) that reverses ArrowLeft/ArrowRight in horizontal orientation", () => {
       // Three tabs so RTL's "next" (index 1) and plain-LTR "prev"-with-wrap (index 2, since
       // ours ignores `dir`) actually disagree — with only two tabs wrapping makes them coincide
       // and the test can't tell RTL-awareness apart from its absence.
@@ -233,7 +231,7 @@ describe("Tabs conformance", () => {
       // In RTL, Radix's roving-focus-group.tsx getDirectionAwareKey swaps ArrowLeft/ArrowRight
       // before mapping to prev/next, so ArrowLeft becomes "next" here.
       keydown(items[0], "ArrowLeft");
-      expect(document.activeElement).toBe(items[1]); // FAILS — ours treats ArrowLeft as "prev" regardless of dir and wraps to items[2]
+      expect(document.activeElement).toBe(items[1]);
     });
   });
 });

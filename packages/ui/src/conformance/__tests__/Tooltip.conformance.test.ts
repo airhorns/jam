@@ -28,7 +28,8 @@ function twoTooltips(delay: number) {
 
 describe("Tooltip conformance", () => {
   describe("hover delay", () => {
-    it("re-arms the full hover delay after closing, since there is no Provider to pool skipDelayDuration across opens", async () => {
+    // Radix's Provider skipDelayDuration (default 300ms); here it pools across every Tooltip without a Provider.
+    it("reopens instantly within skipDelayDuration of closing, then re-arms the full delay once it elapses", async () => {
       vi.useFakeTimers();
       try {
         const { get, query } = render(h(Example, { delay: 100 }));
@@ -39,9 +40,12 @@ describe("Tooltip conformance", () => {
         pointerLeave(trigger);
         expect(query("[data-testid=content]")).toBeNull();
         pointerEnter(trigger);
-        await vi.advanceTimersByTimeAsync(50);
+        expect(query("[data-testid=content]")).not.toBeNull();
+        pointerLeave(trigger);
+        await vi.advanceTimersByTimeAsync(300);
+        pointerEnter(trigger);
         expect(query("[data-testid=content]")).toBeNull();
-        await vi.advanceTimersByTimeAsync(50);
+        await vi.advanceTimersByTimeAsync(100);
         expect(query("[data-testid=content]")).not.toBeNull();
       } finally {
         vi.useRealTimers();
@@ -119,15 +123,15 @@ describe("Tooltip conformance", () => {
       expect(query("[data-testid=content]")).toBeNull();
     });
 
-    it("Escape closes only the topmost of two independently open tooltips", () => {
+    // Radix's TOOLTIP_OPEN event closes every other tooltip on open, so two are never open at once.
+    it("Escape closes the remaining tooltip after opening a second one closed the first", () => {
       const { get, query } = render(twoTooltips(0));
       pointerEnter(get("[data-testid=triggerA]"));
       pointerEnter(get("[data-testid=triggerB]"));
-      expect(query("[data-testid=contentA]")).not.toBeNull();
+      expect(query("[data-testid=contentA]")).toBeNull();
       expect(query("[data-testid=contentB]")).not.toBeNull();
       keydown(document.body, "Escape");
       expect(query("[data-testid=contentB]")).toBeNull();
-      expect(query("[data-testid=contentA]")).not.toBeNull();
     });
   });
 
@@ -143,8 +147,8 @@ describe("Tooltip conformance", () => {
 
     // Radix tooltip.test.tsx "appends the tooltip id to an existing aria-describedby": Radix preserves a
     // caller-supplied aria-describedby while closed, and concatenates ("existing-description <contentId>")
-    // while open. Ours drops the caller's value unconditionally, even before the tooltip ever opens.
-    it("drops a caller-supplied aria-describedby instead of preserving/appending to it", () => {
+    // while open.
+    it("preserves a caller-supplied aria-describedby while closed and appends the content id while open", () => {
       const { get } = render(
         h(
           Tooltip,

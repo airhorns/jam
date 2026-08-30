@@ -7,6 +7,8 @@ import { useControllableList, useControllableState, useStableId } from "../state
 import { rovingFocus } from "./roving-focus";
 import { lastChildBorderlessClass } from "./group-css";
 
+const ACCORDION_KEYS = new Set(["Home", "End", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"]);
+
 export type AccordionType = "single" | "multiple";
 export type AccordionOrientation = "vertical" | "horizontal";
 
@@ -284,11 +286,35 @@ function AccordionItemComponent(props: AccordionItemProps): VNode {
       "data-state": open ? "open" : "closed",
       "data-value": value,
       "data-disabled": isDisabled ? "" : undefined,
+      "data-orientation": group.orientation,
     },
     h(ItemState.Provider, { value: state }, ...(([] as VChild[]).concat(children ?? []))),
   );
 }
 AccordionItemComponent.displayName = "Accordion.Item";
+
+export type AccordionHeaderProps = StyledProps & {
+  children?: VChild | VChild[];
+};
+
+/** The heading wrapper around a trigger; carries the item's state as data attributes. */
+function AccordionHeaderComponent(props: AccordionHeaderProps): VNode {
+  const { children, ...frameProps } = props;
+  const item = useContext(ItemState);
+  const group = useContext(AccordionState);
+
+  return h(
+    AccordionHeaderFrame,
+    {
+      ...(frameProps as Record<string, unknown>),
+      "data-state": item.open ? "open" : "closed",
+      "data-orientation": group.orientation,
+      "data-disabled": item.disabled ? "" : undefined,
+    },
+    ...(([] as VChild[]).concat(children ?? [])),
+  );
+}
+AccordionHeaderComponent.displayName = "Accordion.Header";
 
 export type AccordionTriggerProps = StyledProps & {
   size?: string | number;
@@ -310,8 +336,9 @@ function AccordionTriggerComponent(props: AccordionTriggerProps): VNode {
       disabled: item.disabled || undefined,
       openState: item.open || undefined,
       "aria-expanded": String(item.open),
-      "aria-controls": item.contentId,
+      "aria-controls": item.open ? item.contentId : undefined,
       "data-state": item.open ? "open" : "closed",
+      "data-disabled": item.disabled ? "" : undefined,
       "data-accordion-trigger": "",
       onClick: (event: MouseEvent) => {
         onClick?.(event);
@@ -384,6 +411,8 @@ AccordionContentComponent.displayName = "Accordion.Content";
 
 type AccordionBaseProps = StyledProps & {
   orientation?: AccordionOrientation;
+  /** Reading direction; reverses which arrow moves to the next trigger. */
+  dir?: "ltr" | "rtl";
   disabled?: boolean;
   size?: string | number;
   children?: VChild | VChild[];
@@ -415,6 +444,7 @@ function AccordionComponent(props: AccordionProps): VNode {
     defaultValue,
     onValueChange,
     orientation = "vertical",
+    dir,
     disabled,
     children,
     onKeyDown,
@@ -457,13 +487,16 @@ function AccordionComponent(props: AccordionProps): VNode {
     {
       ...(frameProps as Record<string, unknown>),
       orientation,
+      dir,
       class: [lastChildBorderlessClass(), props.class].filter(Boolean).join(" ") || undefined,
       "data-orientation": orientation,
       "data-disabled": disabled ? "" : undefined,
       onKeyDown: (event: KeyboardEvent) => {
         onKeyDown?.(event);
         if (disabled) return;
-        rovingFocus(event, "[data-accordion-trigger]", { orientation });
+        const target = event.target as HTMLElement | null;
+        if (ACCORDION_KEYS.has(event.key) && target?.matches("[data-accordion-trigger]:not([disabled])")) event.preventDefault();
+        rovingFocus(event, "[data-accordion-trigger]", { orientation, dir });
       },
     },
     h(AccordionState.Provider, { value: state }, ...(([] as VChild[]).concat(children ?? []))),
@@ -474,7 +507,7 @@ AccordionComponent.displayName = "Accordion";
 export const Accordion = Object.assign(AccordionComponent, {
   Frame: AccordionFrame,
   Item: AccordionItemComponent,
-  Header: AccordionHeaderFrame,
+  Header: AccordionHeaderComponent,
   Trigger: AccordionTriggerComponent,
   Indicator: AccordionIndicatorComponent,
   Content: AccordionContentComponent,

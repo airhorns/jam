@@ -39,10 +39,12 @@ const [value, setValue] = useControllableState<string>("plan", { defaultValue: "
 | `defaultValue` | `string` | — | Initial selection when uncontrolled; omit for none. |
 | `onValueChange` | `(value: string) => void` | — | Called with the newly selected item's value. |
 | `orientation` | `"horizontal" \| "vertical"` | `"vertical"` | Layout direction, `aria-orientation`, and which arrow keys navigate. |
+| `dir` | `"ltr" \| "rtl"` | `"ltr"` | Rendered as the `dir` attribute; `"rtl"` swaps which arrow key moves to the previous item. |
+| `loop` | `boolean` | `true` | Whether arrow-key navigation wraps from the last item back to the first. |
 | `disabled` | `boolean` | `false` | Disables every item in the group. |
 | `size` | size token or number | `"$2"` gap, `"$true"` items | Item diameter and the gap between rows. |
 | `required` | `boolean` | `false` | Sets `aria-required` on the group. |
-| `name` | `string` | — | Rendered as `data-name`, reserved for form integration. |
+| `name` | `string` | — | Submits with a form: renders a visually-hidden `<input type="radio">` inside each item, restored to `defaultValue` on form reset. |
 
 `RadioGroup.Item`: `value` (required), `disabled`, `size`, `unstyled`, `id`,
 plus every style prop. `RadioGroup.Indicator`: `forceMount`, `unstyled`, plus
@@ -82,15 +84,23 @@ component theme, so `theme="…"` anywhere above recolours the whole group —
 
 ## Accessibility
 
-- `role="radiogroup"` with `aria-orientation` and, when set, `aria-required`;
-  items are `role="radio"` with `aria-checked`.
+- `role="radiogroup"` with `aria-orientation` and an unconditional
+  `aria-required` (`"false"` when not required); items are `role="radio"`
+  with `aria-checked`. `data-disabled` is set on the group itself when
+  disabled.
 - Arrow keys along the group's orientation move the selection **and** the
-  focus to the next enabled item, wrapping at the ends; Home and End jump to
-  the first and last. Cross-axis arrows are left alone so the page can still
-  scroll.
+  focus to the next enabled item, wrapping at the ends unless `loop={false}`;
+  Home and End jump to the first and last. Cross-axis arrows are left alone
+  so the page can still scroll. `dir="rtl"` swaps which arrow key moves to
+  the previous item.
+- Enter is `preventDefault`ed on an item, since WAI-ARIA radio groups don't
+  activate an item on Enter the way a plain button would.
 - Tab order matches native radios: with nothing selected every item is
   tabbable, and once something is selected only the selected item is, so Tab
   enters and leaves the group as a single stop.
 - Disabled items get the real `disabled` attribute, so they are skipped by
   both Tab and the arrow keys.
+- A `name` renders a visually-hidden `<input type="radio">` inside each item
+  so the group contributes to `FormData`. Resetting the owning form restores
+  `defaultValue`, with or without `name` set.
 - Pair each item with a `Label htmlFor` pointing at the item's `id`.

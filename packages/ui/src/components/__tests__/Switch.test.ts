@@ -105,9 +105,26 @@ describe("Switch", () => {
     const r = render(h(Switch, { disabled: true, onCheckedChange }, h(Switch.Thumb, null)));
     expect(r.root.hasAttribute("disabled")).toBe(true);
     expect(css(r.root)).toMatchObject({ opacity: "0.5", cursor: "not-allowed" });
+    expect(r.root.getAttribute("data-disabled")).toBe("");
+    expect(thumb(r).getAttribute("data-disabled")).toBe("");
     click(r.root);
     keydown(r.root, "ArrowRight");
     expect(onCheckedChange).not.toHaveBeenCalled();
+  });
+
+  it("sets aria-required and mirrors it onto the hidden input", () => {
+    const r = render(h(Switch, { required: true, name: "notifications" }));
+    expect(r.root.getAttribute("aria-required")).toBe("true");
+    expect(r.get("input").hasAttribute("required")).toBe(true);
+  });
+
+  it("contributes a hidden checkbox input to the owning form and restores the default on reset", () => {
+    const r = render(h("form", null, h(Switch, { name: "notifications", defaultChecked: false })));
+    const form = r.get<HTMLFormElement>("form");
+    click(r.get("button"));
+    expect(new FormData(form).get("notifications")).toBe("on");
+    form.dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
+    expect(r.get("button").getAttribute("aria-checked")).toBe("false");
   });
 
   it("strips the default look when unstyled", () => {

@@ -23,7 +23,15 @@ Read `STYLE-SYSTEM.md` first.
   from `@jam/core`. The catalog's `leaks.spec.ts` mounts and unmounts every
   demo and fails on leftover facts, layers, a stuck scroll lock or pending timers.
 - Interactive elements render real `<button>`/`<input>` elements so keyboard
-  and focus work for free; use `role`/`aria-*` for anything else.
+  and focus work for free; use `role`/`aria-*` for anything else. Disabled
+  parts carry `data-disabled=""` (the empty string, as Radix does) next to the
+  real attribute; `rovingFocus` skips items that have it.
+- Form controls with a `name` mirror their value into a visually hidden
+  `<input>` and spread `useFormReset(() => set(initial))` from `../form` onto
+  it so a `<form>` reset restores the initial value.
+- Composite widgets take `dir?: "ltr" | "rtl"`, render it as the `dir`
+  attribute and pass it to `rovingFocus` so ArrowLeft/ArrowRight follow the
+  reading direction.
 - Overlays register with `useDismissableLayer` (`../layers`) and position with
   `../floating`; content goes through `Portal` from `@jam/core`.
 
@@ -58,7 +66,11 @@ Read `STYLE-SYSTEM.md` first.
    variant group plus one interactive demo with `data-testid`s. Run
    `CATALOG_PORT=5176 pnpm shots <Name>` from `examples/catalog` and look at
    both PNGs in `shots/` — fix anything that looks off before moving on.
-5. `pnpm exec vitest run` and `pnpm typecheck` pass in `packages/ui`,
+5. **Conformance** in `src/conformance/__tests__/<Name>.conformance.test.ts`:
+   behaviour ported from the matching Radix primitive and the WAI-ARIA APG
+   pattern, one `it` per rule with the source cited. A deliberate divergence
+   is an `it.skip` whose title ends with the reason, so the gap stays visible.
+6. `pnpm exec vitest run` and `pnpm typecheck` pass in `packages/ui`,
    `pnpm typecheck` passes in `examples/catalog`.
 
 ## Doc template (`docs/<Name>.md`)

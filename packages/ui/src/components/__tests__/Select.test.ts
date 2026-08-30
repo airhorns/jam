@@ -36,6 +36,7 @@ type ExampleProps = {
   size?: string;
   name?: string;
   placeholder?: string;
+  required?: boolean;
 };
 
 function Example(props: ExampleProps) {
@@ -89,7 +90,7 @@ describe("Select", () => {
     expect(content.getAttribute("aria-labelledby")).toBe(trigger.id);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.getAttribute("aria-controls")).toBe(content.id);
-    expect(trigger.getAttribute("aria-activedescendant")).toBe(get("[data-testid=item-banana]").id);
+    expect(trigger.hasAttribute("aria-activedescendant")).toBe(false);
     expect(content.dataset.layer).toBe(trigger.dataset.layerTrigger);
     rect(content, 0, 0, 240, 160);
     await tick();
@@ -297,5 +298,30 @@ describe("Select", () => {
     expect(trigger.querySelector("svg")).toBeNull();
     click(trigger);
     expect(get("[data-testid=content]").getAttribute("aria-labelledby")).toBe(trigger.id);
+  });
+
+  it("labels Select.Group with Select.Label via aria-labelledby", () => {
+    const { get } = render(h(Example, { defaultOpen: true }));
+    const group = get("[data-testid=viewport]").querySelector('[role="group"]')!;
+    const label = get("[data-testid=label]");
+    expect(group.getAttribute("aria-labelledby")).toBe(label.id);
+  });
+
+  it("marks the trigger aria-required and the hidden input required", () => {
+    const { get, container } = render(h(Example, { name: "fruit", required: true }));
+    expect(get("[data-testid=trigger]").getAttribute("aria-required")).toBe("true");
+    const input = container.querySelector<HTMLInputElement>("input[name=fruit]")!;
+    expect(input.required).toBe(true);
+  });
+
+  it("reverts its displayed value to defaultValue when the surrounding form resets", () => {
+    const { get, container } = render(
+      h("form", null, h(Example, { name: "fruit", defaultValue: "apple" }), h("button", { type: "reset" }, "Reset")),
+    );
+    click(get("[data-testid=trigger]"));
+    click(get("[data-testid=item-cherry]"));
+    expect(get("[data-testid=value]").textContent).toBe("Cherry");
+    container.querySelector("form")!.reset();
+    expect(get("[data-testid=value]").textContent).toBe("Apple");
   });
 });

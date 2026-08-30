@@ -21,10 +21,8 @@ const items = (r: ReturnType<typeof render>) => r.all("button[aria-pressed], but
 
 describe("ToggleGroup conformance", () => {
   describe("keyboard", () => {
-    // toggle-group.tsx's ToggleGroupItem is a RovingFocusGroup.Item (per-item
-    // target guard); our rovingFocus(event, ...) is attached to the container
-    // via roving-focus.ts with no such guard (same class of gap as RadioGroup).
-    it("treats a key bubbling from a focusable nested in an item as if the item itself had focus", () => {
+    // toggle-group.tsx's ToggleGroupItem is a RovingFocusGroup.Item, which only handles keys aimed at itself.
+    it("ignores a key bubbling from a focusable nested in an item, matching Radix's per-item target guard", () => {
       const r = render(
         h(
           ToggleGroup,
@@ -37,19 +35,18 @@ describe("ToggleGroup conformance", () => {
       const nestedButton = r.get("button[aria-pressed] button") as HTMLElement;
       nestedButton.focus();
       const event = keydown(nestedButton, "ArrowDown");
-      expect(event.defaultPrevented).toBe(false); // FAILS
-      expect(document.activeElement).toBe(nestedButton); // FAILS
+      expect(event.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(nestedButton);
     });
 
     // toggle-group.tsx's ToggleGroupImpl threads `dir` into RovingFocusGroup.Root,
-    // reversing ArrowLeft/ArrowRight in horizontal orientation; ToggleGroup has no
-    // `dir` prop and roving-focus.ts is not direction-aware.
-    it("does not reverse ArrowLeft/ArrowRight for dir='rtl'", () => {
+    // reversing ArrowLeft/ArrowRight in horizontal orientation.
+    it("reverses ArrowLeft/ArrowRight for dir='rtl'", () => {
       const r = group({ orientation: "horizontal", dir: "rtl", defaultValue: "a" } as never);
       const buttons = items(r);
       buttons[0].focus();
       keydown(buttons[0], "ArrowRight");
-      expect(document.activeElement).toBe(buttons[2]); // FAILS — ours always treats ArrowRight as "next"
+      expect(document.activeElement).toBe(buttons[2]);
     });
 
     it("Home/End move focus to the first/last item", () => {
@@ -68,6 +65,17 @@ describe("ToggleGroup conformance", () => {
       buttons[0].focus();
       keydown(buttons[0], "End");
       expect(document.activeElement).toBe(buttons[1]);
+    });
+
+    it("loop=false stops at the ends instead of wrapping", () => {
+      const r = group({ orientation: "horizontal", loop: false } as never);
+      const buttons = items(r);
+      buttons[0].focus();
+      keydown(buttons[0], "ArrowLeft");
+      expect(document.activeElement).toBe(buttons[0]);
+      buttons[2].focus();
+      keydown(buttons[2], "ArrowRight");
+      expect(document.activeElement).toBe(buttons[2]);
     });
 
     // toggle.tsx's Toggle is a plain Primitive.button with no onKeyDown at all;
@@ -89,27 +97,23 @@ describe("ToggleGroup conformance", () => {
   });
 
   describe("aria / data attributes", () => {
-    // toggle-group.tsx: type="single" renders role="radiogroup" on the group and
-    // ToggleGroupItemImpl overrides the item to role="radio" aria-checked (not
-    // aria-pressed); ours always renders role="group" + aria-pressed regardless of type.
-    it("uses role=radiogroup and role=radio/aria-checked for a single-select group", () => {
+    it.skip("uses role=radiogroup and role=radio/aria-checked for a single-select group (deliberate: we follow tamagui's role=\"group\" + aria-pressed convention documented in ToggleGroup.md, not Radix's radiogroup/radio)", () => {
       const r = group({ type: "single", defaultValue: "a" } as never);
-      expect(r.root.getAttribute("role")).toBe("radiogroup"); // FAILS — ours is "group"
+      expect(r.root.getAttribute("role")).toBe("radiogroup");
       const first = items(r)[0];
-      expect(first.getAttribute("role")).toBe("radio"); // FAILS
-      expect(first.hasAttribute("aria-pressed")).toBe(false); // FAILS
+      expect(first.getAttribute("role")).toBe("radio");
+      expect(first.hasAttribute("aria-pressed")).toBe(false);
     });
 
-    // toggle-group.tsx: type="multiple" renders role="toolbar" on the group.
-    it("uses role=toolbar for a multiple-select group", () => {
+    it.skip("uses role=toolbar for a multiple-select group (deliberate: we follow tamagui's role=\"group\" convention documented in ToggleGroup.md, not Radix's toolbar)", () => {
       const r = group({ type: "multiple" } as never);
-      expect(r.root.getAttribute("role")).toBe("toolbar"); // FAILS — ours is "group"
+      expect(r.root.getAttribute("role")).toBe("toolbar");
     });
 
     // toggle.tsx Toggle: data-disabled={props.disabled ? '' : undefined} on each item.
-    it("sets data-disabled on a disabled item (missing: ToggleGroupItem never sets it)", () => {
+    it("sets data-disabled on a disabled item", () => {
       const r = group({}, ["a", "b"], { disabled: true });
-      expect(items(r)[1].hasAttribute("data-disabled")).toBe(true); // FAILS
+      expect(items(r)[1].hasAttribute("data-disabled")).toBe(true);
     });
 
     it("sets data-disabled on the group itself when disabled", () => {

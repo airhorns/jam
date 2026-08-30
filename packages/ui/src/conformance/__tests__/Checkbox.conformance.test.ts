@@ -89,7 +89,7 @@ describe("Checkbox conformance", () => {
   describe("form integration", () => {
     // radix checkbox.tsx CheckboxTrigger effect: registers a `reset` listener
     // on control.form that restores the initial checked state.
-    it("restores its initial state when the owning form is reset (missing: no reset listener)", () => {
+    it("restores its initial state when the owning form is reset", () => {
       const r = render(h("form", null, h(Checkbox, { name: "terms", defaultChecked: false })));
       const form = r.root as HTMLFormElement;
       click(r.get("button"));
