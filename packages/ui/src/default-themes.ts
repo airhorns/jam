@@ -141,9 +141,11 @@ export const defaultGrandChildrenThemes = {
 
 export const defaultComponentThemes = {
   Button: { template: "surface2" },
+  Checkbox: { template: "surface2" },
   Input: { template: "surface1" },
   Progress: { template: "surface1" },
-  ProgressIndicator: { template: "surface3" },
+  ProgressIndicator: { template: "accent" },
+  RadioGroupItem: { template: "surface2" },
   Slider: { template: "surface1" },
   SliderActive: { template: "surface3" },
   SliderThumb: { template: "surface2" },
@@ -201,9 +203,11 @@ const highlights = {
 // The base theme's background sits at palette index 7 (one above color1).
 const BG_OFFSET = PALETTE_BACKGROUND_OFFSET + 1;
 
-function computedValues({ palette }: GetThemeProps): ThemeDefinition {
+function computedValues({ palette, scheme }: GetThemeProps): ThemeDefinition {
   const bg = palette[BG_OFFSET];
   const fg = palette[palette.length - 2];
+  // Dark palettes step up more slowly, so the focus ring sits one step further out to match light's contrast.
+  const outlineStep = scheme === "dark" ? 5 : 4;
   return {
     color01: opacify(fg, 0.1),
     color0075: opacify(fg, 0.075),
@@ -221,7 +225,7 @@ function computedValues({ palette }: GetThemeProps): ThemeDefinition {
     background04: opacify(bg, 0.4),
     background06: opacify(bg, 0.6),
     background08: opacify(bg, 0.8),
-    outlineColor: opacify(palette[BG_OFFSET + 4], 0.6),
+    outlineColor: opacify(palette[BG_OFFSET + outlineStep], 0.6),
   };
 }
 

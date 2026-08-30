@@ -74,7 +74,7 @@ export type StyledConfig = {
   name?: string;
   /** Override the element rendered when extending another styled component. */
   tag?: string;
-  /** Default style and non-style props. Style defaults are skipped when `unstyled` is set. */
+  /** Default style and non-style props. Style defaults are skipped when `unstyled` is set, except those declared alongside `unstyled: true` (or by a component extending one that did). */
   defaultProps?: Record<string, unknown>;
   variants?: Record<string, VariantSpec>;
   defaultVariants?: Record<string, unknown>;
@@ -104,6 +104,8 @@ export type ResolvedStyledConfig = StyledConfig & {
   tag: string;
   /** A plain function component to render instead of an intrinsic tag. */
   render?: (props: Record<string, unknown>) => VChild;
+  /** Defaults declared by the config that set `unstyled: true` and any config extending it; these still apply. */
+  unstyledDefaults?: Record<string, unknown>;
 };
 
 // ---- Styled context ----
@@ -327,7 +329,7 @@ function mergeVariants(
 
 function resolveConfig(base: string | Function, config: StyledConfig): ResolvedStyledConfig {
   if (typeof base === "string") {
-    return { ...config, tag: config.tag ?? base };
+    return { ...config, tag: config.tag ?? base, unstyledDefaults: unstyledDefaultsFor(undefined, config) };
   }
   if (isStyledComponent(base)) {
     const parent = base.staticConfig;
@@ -337,6 +339,7 @@ function resolveConfig(base: string | Function, config: StyledConfig): ResolvedS
       tag: config.tag ?? parent.tag,
       name: config.name ?? parent.name,
       defaultProps: mergeDefaults(parent.defaultProps, config.defaultProps),
+      unstyledDefaults: unstyledDefaultsFor(parent, config),
       variants: mergeVariants(parent.variants, config.variants),
       defaultVariants: { ...parent.defaultVariants, ...config.defaultVariants },
       context: config.context ?? parent.context,
@@ -345,6 +348,12 @@ function resolveConfig(base: string | Function, config: StyledConfig): ResolvedS
     };
   }
   return { ...config, tag: "div", render: base as (props: Record<string, unknown>) => VChild };
+}
+
+function unstyledDefaultsFor(parent: ResolvedStyledConfig | undefined, config: StyledConfig): Record<string, unknown> | undefined {
+  if (config.defaultProps?.unstyled === true) return config.defaultProps;
+  if (parent?.unstyledDefaults) return mergeDefaults(parent.unstyledDefaults, config.defaultProps);
+  return undefined;
 }
 
 function toChildren(children: unknown): VChild[] {
@@ -356,6 +365,10 @@ function mergeClass(...parts: unknown[]): string | undefined {
   const cls = parts.filter((p) => typeof p === "string" && p.trim()).join(" ");
   return cls || undefined;
 }
+
+// Text nested in text inherits the parent's wrapping so an `ellipsis` parent still truncates.
+const TextAncestor = createContext<boolean>(false);
+const nestedTextStyle: StyleObject = { whiteSpace: "inherit" };
 
 /**
  * Create a styled component.
@@ -373,6 +386,7 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
     const native = isNativeMode();
     const defaults = staticConfig.defaultProps ?? {};
     const unstyled = props.unstyled === true || (props.unstyled === undefined && defaults.unstyled === true);
+    const inText = staticConfig.isText === true && useContext(TextAncestor) === true;
 
     // Context values sit between defaults and explicit props.
     const contextValues = staticConfig.context ? (useContext(staticConfig.context) as Record<string, unknown>) : undefined;
@@ -393,6 +407,8 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
     const passthrough: Record<string, unknown> = {};
 
     if (!unstyled) addLayer(acc, defaults);
+    else if (props.unstyled === undefined && staticConfig.unstyledDefaults) addLayer(acc, staticConfig.unstyledDefaults);
+    if (inText) addLayer(acc, nestedTextStyle);
     for (const [key, value] of Object.entries(defaults)) {
       if (isStyleProp(key) || isPseudoProp(key) || isMediaProp(key) || controlProps.has(key) || variantNames.includes(key)) continue;
       passthrough[key] = value;
@@ -526,6 +542,9 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
     const rawChildren = toChildren(props.children);
     const provideTo = (kids: VChild[]): VChild[] => {
       let out = kids;
+      if (staticConfig.isText && !inText && kids.some((kid) => kid != null && typeof kid === "object")) {
+        out = [h(TextAncestor.Provider, { value: true }, ...out)];
+      }
       if (themeChanged && themeName) {
         out = [h(ThemeContext.Provider, { value: themeName }, ...out)];
       }

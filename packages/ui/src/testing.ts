@@ -152,7 +152,7 @@ export function css(el: Element, pseudo = ""): Record<string, string> {
   const classes = Array.from(el.classList);
   for (const rule of injectedRules()) {
     for (const cls of classes) {
-      const re = new RegExp(`^\\.${escapeRegExp(cls)}${escapeRegExp(pseudo)}\\s*\\{([^}]*)\\}`);
+      const re = new RegExp(`^(?::root)*\\s*\\.${escapeRegExp(cls)}${escapeRegExp(pseudo)}(?:,[^{]*)?\\s*\\{([^}]*)\\}`);
       const match = rule.match(re);
       if (match) Object.assign(result, parseDeclarations(match[1]));
     }
@@ -171,7 +171,7 @@ export function mediaCss(el: Element, mediaQuery: string): Record<string, string
     if (header !== mediaQuery.trim()) continue;
     const body = rule.slice(headerEnd + 1, rule.lastIndexOf("}"));
     for (const cls of classes) {
-      const re = new RegExp(`\\.${escapeRegExp(cls)}\\s*\\{([^}]*)\\}`);
+      const re = new RegExp(`\\.${escapeRegExp(cls)}(?:,[^{]*)?\\s*\\{([^}]*)\\}`);
       const match = body.match(re);
       if (match) Object.assign(result, parseDeclarations(match[1]));
     }

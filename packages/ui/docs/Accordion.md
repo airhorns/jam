@@ -62,8 +62,8 @@ the ARIA pattern expects. Optional: the trigger works on its own.
 `Accordion.Trigger` — `<button aria-expanded aria-controls id>` with
 `data-state`. Toggles its item on click.
 
-`Accordion.Indicator` — a `▾` (override by passing children) that rotates 180°
-when the item opens, animated by the shared `quick` transition.
+`Accordion.Indicator` — a `1em` chevron (override by passing children) that
+rotates 180° when the item opens, animated by the shared `quick` transition.
 
 `Accordion.Content` — `role="region"` with `aria-labelledby`. Renders nothing
 while its item is closed; `forceMount` keeps it in the DOM with the `hidden`

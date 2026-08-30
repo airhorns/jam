@@ -30,6 +30,16 @@ describe("Text", () => {
     expect(css(ellipsis.root)["text-overflow"]).toBe("ellipsis");
   });
 
+  it("text nested in text inherits the parent's wrapping so ellipsis still truncates", () => {
+    const r = render(h(SizableText, { ellipsis: true }, h(Text, { fontWeight: "600" }, "Ada"), " wrote a very long message"));
+    const inner = r.root.querySelector("span") as HTMLElement;
+    expect(css(r.root)["white-space"]).toBe("nowrap");
+    expect(css(inner)["white-space"]).toBe("inherit");
+    expect(css(inner)["font-weight"]).toBe("600");
+    const explicit = render(h(Text, null, h(Text, { whiteSpace: "nowrap" }, "x")));
+    expect(css(explicit.root.querySelector("span") as HTMLElement)["white-space"]).toBe("nowrap");
+  });
+
   it("resolves font tokens against the font in effect", () => {
     const r = render(h(Text, { fontFamily: "$heading", fontSize: "$9", fontWeight: "$9" }, "x"));
     expect(css(r.root)).toMatchObject({ "font-size": "30px", "font-weight": "800" });

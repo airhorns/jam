@@ -120,7 +120,7 @@ describe("Accordion", () => {
   it("flips the indicator when its item opens", () => {
     const r = accordion({ defaultValue: "a" });
     const indicators = r.all("span[aria-hidden]");
-    expect(indicators[0].textContent).toBe("▾");
+    expect(indicators[0].querySelector("svg path")).not.toBeNull();
     expect(css(indicators[0]).transform).toBe("rotate(180deg)");
     expect(css(indicators[1]).transform).toBeUndefined();
     expect(css(indicators[1]).color).toBe("var(--color10)");

@@ -20,6 +20,8 @@ export type PopoverContextValue = {
   setOpen: (open: boolean) => void;
   placement: Placement;
   contentId: string;
+  /** Pointer handlers shared by the trigger, anchor and content of a `hoverable` popover. */
+  hover?: { onPointerEnter: () => void; onPointerLeave: () => void };
 };
 
 export const PopoverContext = createContext<PopoverContextValue | null>(null);
@@ -42,13 +44,24 @@ export type PopoverProps = {
   modal?: boolean;
   dismissOnEscape?: boolean;
   dismissOnOutsidePress?: boolean;
+  /**
+   * Open while the pointer is over the trigger or content. `delay` (default 150ms) is the
+   * grace period for moving between them; clicking the trigger keeps it open rather than toggling.
+   */
+  hoverable?: boolean | { delay?: number };
+  /** Leave focus where it is when the popover opens (default: true when `hoverable`). */
+  disableFocus?: boolean;
   children?: VChild | VChild[];
 };
+
+// Per-popover hover bookkeeping; the timer calls the latest `setOpen` so a stale close is a no-op once the state moved on.
+const hoverState = new Map<string, { timer?: ReturnType<typeof setTimeout>; setOpen: (open: boolean) => void }>();
 
 function PopoverRoot(props: PopoverProps): VNode {
   const id = useStableId("popover");
   const placement = props.placement ?? "bottom";
   const offset = props.offset ?? 8;
+  const hoverable = props.hoverable !== undefined && props.hoverable !== false;
   const [openState, setOpen] = useControllableState<boolean>("open", {
     value: props.open,
     defaultValue: props.defaultOpen ?? false,
@@ -58,13 +71,37 @@ function PopoverRoot(props: PopoverProps): VNode {
   useDismissableLayer(id, open, {
     onDismiss: () => setOpen(false),
     modal: props.modal ?? false,
-    autoFocus: true,
+    autoFocus: !(props.disableFocus ?? hoverable),
     restoreFocus: true,
     dismissOnEscape: props.dismissOnEscape,
     dismissOnOutsidePress: props.dismissOnOutsidePress,
     onReposition: () => repositionLayer(id, { placement, offset }),
   });
-  const value: PopoverContextValue = { id, open, setOpen, placement, contentId: `${id}-content` };
+  let hover: PopoverContextValue["hover"];
+  if (hoverable) {
+    const delay = typeof props.hoverable === "object" ? props.hoverable.delay ?? 150 : 150;
+    const state = hoverState.get(id) ?? { setOpen };
+    state.setOpen = setOpen;
+    hoverState.set(id, state);
+    const cancelClose = () => {
+      if (state.timer !== undefined) clearTimeout(state.timer);
+      state.timer = undefined;
+    };
+    hover = {
+      onPointerEnter: () => {
+        cancelClose();
+        state.setOpen(true);
+      },
+      onPointerLeave: () => {
+        cancelClose();
+        state.timer = setTimeout(() => {
+          state.timer = undefined;
+          state.setOpen(false);
+        }, delay);
+      },
+    };
+  }
+  const value: PopoverContextValue = { id, open, setOpen, placement, contentId: `${id}-content`, hover };
   return h(PopoverContext.Provider, { value }, props.children);
 }
 PopoverRoot.displayName = "Popover";
@@ -80,6 +117,7 @@ function PopoverTrigger(props: PopoverTriggerProps): VNode {
   const ctx = usePopoverContext("Trigger");
   const { asChild, onClick, ...rest } = props;
   return h(asChild ? Slot : Button, {
+    ...ctx.hover,
     ...rest,
     "aria-haspopup": "dialog",
     "aria-expanded": ctx.open,
@@ -88,7 +126,7 @@ function PopoverTrigger(props: PopoverTriggerProps): VNode {
     "data-layer-trigger": ctx.id,
     onClick: (event: MouseEvent) => {
       onClick?.(event);
-      ctx.setOpen(!ctx.open);
+      ctx.setOpen(ctx.hover ? true : !ctx.open);
     },
   });
 }
@@ -98,7 +136,7 @@ PopoverTrigger.displayName = "PopoverTrigger";
 function PopoverAnchor(props: StyledProps & { asChild?: boolean }): VNode {
   const ctx = usePopoverContext("Anchor");
   const { asChild, ...rest } = props;
-  return h(asChild ? Slot : YStack, { ...rest, "data-layer-anchor": ctx.id });
+  return h(asChild ? Slot : YStack, { ...ctx.hover, ...rest, "data-layer-anchor": ctx.id });
 }
 PopoverAnchor.displayName = "PopoverAnchor";
 
@@ -204,6 +242,7 @@ function PopoverContent(props: PopoverContentProps): VNode | null {
       role: "dialog",
       "data-state": "open",
       tabIndex: -1,
+      ...ctx.hover,
       ...attrs,
     }),
   );

@@ -79,11 +79,12 @@ so it stays inside the rail at both ends. Give each one an `aria-label`.
 
 ## Theming
 
-The rail is `$background`, the fill `$color10`, and the knob `$background`
-with a `$color8` border that goes `$color10` on hover — so the filled part
-reads as the strongest thing on the track in both light and dark themes.
-There is no `Slider` component theme, so `theme="blue"` on the slider
-recolours the fill and the knob's hover border.
+The `Slider` component theme is `surface1` (one step off the page background)
+and the track inherits it, so the unfilled rail stays visible on a plain
+surface. The fill is `$color10` and the knob `$background` with a `$color8`
+border that goes `$color10` on hover — so the filled part reads as the
+strongest thing on the track in both light and dark themes. `theme="blue"` on
+the slider tints the rail and recolours the fill and the knob's hover border.
 
 ## Accessibility
 

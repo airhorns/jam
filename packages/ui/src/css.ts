@@ -56,12 +56,28 @@ export function atomicClassName(cssProp: string, value: string, options: AtomicO
   return `_${abbreviate(cssProp)}${suffix}-${hashString(`${cssProp}:${value}|${context}`)}`;
 }
 
+/** How many `:root`s prefix a pseudo rule: press beats hover, focus beats press, disabled beats all. */
+const pseudoPriority: Record<string, number> = {
+  "::placeholder": 1,
+  ":hover": 2,
+  ":active": 3,
+  ":focus": 4,
+  ":focus-visible": 4,
+  ":focus-within": 4,
+  ":disabled": 5,
+};
+
+// Media rules start above every pseudo rule, and each media precedence step is
+// wider than the whole pseudo range so a later media key always wins.
+const MEDIA_ROOTS = 7;
+const MEDIA_STEP = 7;
+
 /**
  * Ensure a rule exists for one declaration and return its class name.
  *
- * Media rules gain specificity by prefixing `:root` (2 + precedence times) so
- * they beat base and pseudo rules regardless of insertion order, and later
- * media keys beat earlier ones.
+ * Specificity comes from repeated `:root` prefixes rather than insertion order:
+ * pseudo rules are ranked by `pseudoPriority`, and media rules sit above them,
+ * with later media keys beating earlier ones.
  */
 export function injectAtomic(cssProp: string, value: string, options: AtomicOptions = {}): string {
   const className = atomicClassName(cssProp, value, options);
@@ -73,14 +89,17 @@ export function injectAtomic(cssProp: string, value: string, options: AtomicOpti
 
   const declaration = `${cssProp}: ${value}`;
   const pseudo = options.pseudo ?? "";
+  const priority = pseudoPriority[pseudo] ?? 0;
+  const selectors = pseudo === ":disabled"
+    ? [`.${className}:disabled`, `.${className}[aria-disabled="true"]`]
+    : [`.${className}${pseudo}`];
   let rule: string;
   if (options.media) {
-    const prefix = ":root".repeat(2 + Math.max(0, options.mediaPrecedence ?? 0));
-    rule = `@media ${options.media} { ${prefix} .${className}${pseudo} { ${declaration} } }`;
-  } else if (pseudo === ":disabled") {
-    rule = `.${className}:disabled, .${className}[aria-disabled="true"] { ${declaration} }`;
+    const prefix = ":root".repeat(MEDIA_ROOTS + MEDIA_STEP * Math.max(0, options.mediaPrecedence ?? 0) + priority);
+    rule = `@media ${options.media} { ${selectors.map((sel) => `${prefix} ${sel}`).join(", ")} { ${declaration} } }`;
   } else {
-    rule = `.${className}${pseudo} { ${declaration} }`;
+    const prefix = priority ? `${":root".repeat(priority)} ` : "";
+    rule = `${selectors.map((sel) => `${prefix}${sel}`).join(", ")} { ${declaration} }`;
   }
   try {
     el.sheet.insertRule(rule, el.sheet.cssRules.length);

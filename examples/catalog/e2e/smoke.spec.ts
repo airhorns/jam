@@ -3,6 +3,7 @@ import { loadRegistry, performRecipe, showComponent, trackErrors } from "./helpe
 
 test.describe("catalog smoke", () => {
   test("every component page renders all its demos without errors", async ({ page }) => {
+    test.setTimeout(180_000);
     const errors = trackErrors(page);
     const registry = await loadRegistry(page);
     expect(registry.length).toBeGreaterThan(20);
@@ -24,6 +25,7 @@ test.describe("catalog smoke", () => {
   });
 
   test("every shot recipe can be performed without errors", async ({ page }) => {
+    test.setTimeout(180_000);
     const errors = trackErrors(page);
     const registry = await loadRegistry(page);
     for (const entry of registry) {

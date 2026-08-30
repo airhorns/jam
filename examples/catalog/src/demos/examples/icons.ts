@@ -5,6 +5,8 @@ export type IconProps = {
   /** Rendered width and height in px (default 16). */
   size?: number;
   color?: string;
+  /** SVG fill; pass "currentColor" for a solid glyph. */
+  fill?: string;
   strokeWidth?: number;
   class?: string;
   className?: string;
@@ -40,8 +42,10 @@ function icon(name: string, shapes: Shape[]) {
 
 export const AlertCircleIcon = icon("AlertCircleIcon", [["circle", { cx: "12", cy: "12", r: "10" }], ["line", { x1: "12", x2: "12", y1: "8", y2: "12" }], ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16" }]]);
 export const AppleIcon = icon("AppleIcon", [["path", { d: "M12 6.528V3a1 1 0 0 1 1-1h0" }], ["path", { d: "M18.237 21A15 15 0 0 0 22 11a6 6 0 0 0-10-4.472A6 6 0 0 0 2 11a15.1 15.1 0 0 0 3.763 10 3 3 0 0 0 3.648.648 5.5 5.5 0 0 1 5.178 0A3 3 0 0 0 18.237 21" }]]);
+export const ArrowDownRightIcon = icon("ArrowDownRightIcon", [["path", { d: "m7 7 10 10" }], ["path", { d: "M17 7v10H7" }]]);
 export const ArrowLeftIcon = icon("ArrowLeftIcon", [["path", { d: "m12 19-7-7 7-7" }], ["path", { d: "M19 12H5" }]]);
 export const ArrowRightIcon = icon("ArrowRightIcon", [["path", { d: "M5 12h14" }], ["path", { d: "m12 5 7 7-7 7" }]]);
+export const ArrowUpRightIcon = icon("ArrowUpRightIcon", [["path", { d: "M7 7h10v10" }], ["path", { d: "M7 17 17 7" }]]);
 export const BellIcon = icon("BellIcon", [["path", { d: "M10.268 21a2 2 0 0 0 3.464 0" }], ["path", { d: "M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" }]]);
 export const BoldIcon = icon("BoldIcon", [["path", { d: "M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8" }]]);
 export const CalendarIcon = icon("CalendarIcon", [["path", { d: "M8 2v3" }], ["path", { d: "M16 2v3" }], ["rect", { x: "3", y: "3", width: "18", height: "18", rx: "2" }], ["path", { d: "M3 9h18" }]]);

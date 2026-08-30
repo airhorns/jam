@@ -43,7 +43,7 @@ through to theme resolution, then to the literal string.
 
 ## Themes
 
-Themes are built with `createDefaultThemes()` (tamagui v4's palettes and
+Themes are built with `createDefaultThemes()` (tamagui v5's palettes and
 templates): `light`, `dark`, colour children (`light_blue`, `dark_red`, …),
 `accent`, and component themes (`light_Button`, `light_blue_Card`,
 `dark_Input`, …). Theme facts `["theme", name, key, value]` are the source of
@@ -65,6 +65,10 @@ one class on `<html>` and no atomic classes are rehashed.
   `Button` inside `light_blue` renders with `t_light_blue_Button` classes.
   Component themes never nest: a `Button` inside `light_Card` resolves to
   `light_Button`, and `theme="red"` inside `light_blue_Button` to `light_red`.
+- Colour scales follow the scheme: `$blue9` is the light blue in `light` and
+  the dark blue in `dark`. For a colour that must stay fixed across schemes use
+  the scheme-suffixed scale (`$blue9Light`, `$blue9Dark`), or `theme="blue"`
+  with `$color9` when the tint should track the theme.
 - `useThemeName()` / `useTheme()` read the theme in effect for the current
   component; `resolveThemeValue("$background")` returns the concrete colour.
 
@@ -110,9 +114,14 @@ Style props also accept:
 - pseudo groups: `hoverStyle`, `pressStyle`, `focusStyle`,
   `focusVisibleStyle`, `focusWithinStyle`, `disabledStyle`, `placeholderStyle`.
   `disabledStyle` matches both `:disabled` and `[aria-disabled="true"]`.
+  Their rules are prefixed with `:root` by priority (hover 2, press 3, focus
+  4, disabled 5) so `pressStyle` beats `hoverStyle` while both apply, whatever
+  order their classes were injected in. `exitStyle` is accepted but does
+  nothing: elements leave the DOM synchronously.
 - media props: `$sm={{ padding: "$4" }}` emits an `@media` rule whose
-  selector repeats `:root` by the query's position in the media config, so
-  later (larger min-width) queries win regardless of injection order.
+  selector repeats `:root` above every pseudo priority and by the query's
+  position in the media config, so later (larger min-width) queries win
+  regardless of injection order.
 - shorthands (`p`, `px`, `bg`, `br`, `ai`, `jc`, …) from `shorthandMap`.
   `padding`, `margin`, `borderWidth`, `borderColor`, `borderStyle`,
   `borderRadius`, `inset` and the `Horizontal`/`Vertical` variants expand to
@@ -122,6 +131,13 @@ Style props also accept:
   supported; set the sides individually.
 - transform pieces `x y scale rotate …` composed into `transform`, and
   `shadowColor/Offset/Radius/Opacity` composed into `box-shadow`.
+- numbers are pixels except for the unitless properties (`flex`, `opacity`,
+  `zIndex`, `fontWeight`, `scale`, …), so `lineHeight: 1.3` is `1.3px` as in
+  React Native; pass `"1.3"` for a unitless line height.
+- variant names that are also DOM state attributes (`disabled`, `checked`,
+  `open`, `hidden`, `readOnly`, `required`, `selected`) are forwarded to the
+  element as well as applied as variants; pick a different name
+  (`highlighted`) when the attribute is unwanted.
 - `animation="quick"` → `transition: all <preset>`; `animateOnly={["opacity",
   "transform"]}` limits it to those properties.
 - `enterStyle={{ opacity: 0, y: -4 }}` with an `animation` plays a keyframe

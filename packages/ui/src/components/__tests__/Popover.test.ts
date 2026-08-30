@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { h } from "@jam/core/jsx";
-import { render, css, setupDefaultUI, click, keydown, tick } from "../../testing";
+import { render, css, setupDefaultUI, click, keydown, tick, pointerEnter, pointerLeave } from "../../testing";
 import { Popover } from "../Popover";
 import { Button } from "../Button";
 import type { Placement } from "../../floating";
@@ -122,6 +122,41 @@ describe("Popover", () => {
     click(trigger);
     click(get("[data-testid=close]"));
     expect(query("[data-testid=content]")).toBeNull();
+  });
+
+  it("opens on hover when hoverable, without moving focus, and closes after leaving", async () => {
+    vi.useFakeTimers();
+    try {
+      const { get, query } = render(
+        h(
+          Popover,
+          { hoverable: true },
+          h(Popover.Trigger, { "data-testid": "trigger" }, "Open"),
+          h(Popover.Content, { "data-testid": "content" }, h("input", { "data-testid": "field" })),
+        ),
+      );
+      const trigger = get("[data-testid=trigger]");
+      trigger.focus();
+      pointerEnter(trigger);
+      await vi.advanceTimersByTimeAsync(0);
+      const content = get("[data-testid=content]");
+      expect(document.activeElement).toBe(trigger);
+
+      pointerLeave(trigger);
+      vi.advanceTimersByTime(100);
+      pointerEnter(content);
+      vi.advanceTimersByTime(300);
+      expect(query("[data-testid=content]")).not.toBeNull();
+
+      click(trigger);
+      expect(query("[data-testid=content]")).not.toBeNull();
+
+      pointerLeave(content);
+      vi.advanceTimersByTime(200);
+      expect(query("[data-testid=content]")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("supports controlled state", () => {

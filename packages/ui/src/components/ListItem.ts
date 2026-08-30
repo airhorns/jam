@@ -51,6 +51,10 @@ export const ListItemFrame = styled<
   context: ListItemContext,
   defaultProps: {
     role: "listitem",
+    // A `tag="button"` row must not keep the browser's outset border or centred text.
+    borderWidth: 0,
+    borderStyle: "solid",
+    textAlign: "start",
   },
   variants: {
     unstyled: {
@@ -75,6 +79,12 @@ export const ListItemFrame = styled<
         pressStyle: {
           backgroundColor: "$backgroundPress",
           borderColor: "$borderColorPress",
+        },
+        focusVisibleStyle: {
+          outlineColor: "$outlineColor",
+          outlineStyle: "solid",
+          outlineWidth: 2,
+          outlineOffset: -2,
         },
       },
     },

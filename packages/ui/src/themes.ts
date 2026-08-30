@@ -196,10 +196,10 @@ export function resolveThemeName(
     if (inverted && hasTheme(inverted)) base = inverted;
   }
   if (name?.startsWith("$")) name = name.slice(1);
-  if (base && (name || componentName)) base = withoutComponentTheme(base);
+  const scope = base && (name || componentName) ? withoutComponentTheme(base) : base;
 
   if (name) {
-    const parts = base ? base.split("_") : [];
+    const parts = scope ? scope.split("_") : [];
     for (let i = parts.length; i >= 1; i--) {
       const prefix = parts.slice(0, i).join("_");
       if (componentName && hasTheme(`${prefix}_${name}_${componentName}`)) return `${prefix}_${name}_${componentName}`;
@@ -208,7 +208,7 @@ export function resolveThemeName(
     if (componentName && hasTheme(`${name}_${componentName}`)) return `${name}_${componentName}`;
     if (hasTheme(name)) return name;
   }
-  if (componentName && base && hasTheme(`${base}_${componentName}`)) return `${base}_${componentName}`;
+  if (componentName && scope && hasTheme(`${scope}_${componentName}`)) return `${scope}_${componentName}`;
   return base;
 }
 

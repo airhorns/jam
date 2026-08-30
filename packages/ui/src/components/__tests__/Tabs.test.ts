@@ -176,9 +176,9 @@ describe("Tabs", () => {
     );
     const all = r.all("[role=tabpanel]");
     expect(all).toHaveLength(2);
-    expect(all[0].hasAttribute("hidden")).toBe(false);
-    expect(all[1].hasAttribute("hidden")).toBe(true);
+    expect(all[0].dataset.state).toBe("active");
     expect(all[1].dataset.state).toBe("inactive");
+    expect(all[1].hasAttribute("hidden")).toBe(false);
   });
 
   it("stacks the list beside the panel when vertical", () => {

@@ -15,7 +15,14 @@ import { type VChild, type ElementRef, expandRoot, emitExpanded } from "./jsx";
 // Props applied as element properties (so form state updates live).
 const DOM_PROPERTIES = new Set([
   "checked", "value", "disabled", "selected", "indeterminate", "readOnly", "multiple", "open",
+  "defaultValue", "defaultChecked",
 ]);
+
+// Properties whose reflected attribute has a different name.
+const PROPERTY_ATTRIBUTES: Record<string, string> = {
+  defaultValue: "value",
+  defaultChecked: "checked",
+};
 
 // True boolean attributes: `false` removes them, `true` sets them empty.
 // Everything else (aria-*, draggable, contenteditable…) stringifies booleans.
@@ -59,8 +66,11 @@ const ATTRIBUTE_ALIASES: Record<string, string> = {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-function attributeName(key: string): string {
-  return ATTRIBUTE_ALIASES[key] ?? key;
+// HTML lowercases attribute names on set, so match that or the cleanup sweep
+// below would strip every camelCase attribute it just wrote. SVG is case-sensitive.
+function attributeName(key: string, svg: boolean): string {
+  const name = ATTRIBUTE_ALIASES[key] ?? key;
+  return svg ? name : name.toLowerCase();
 }
 
 /**
@@ -194,7 +204,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       const activeAttrs = new Set<string>();
       if (elProps) {
         for (const [key, value] of elProps) {
-          const attr = attributeName(key);
+          const attr = PROPERTY_ATTRIBUTES[key] ?? attributeName(key, svg);
           if (DOM_PROPERTIES.has(key) && key in el) {
             if ((el as any)[key] !== value) (el as any)[key] = value;
             // Keep any attribute the property reflects to (e.g. a hidden input's value).
@@ -257,13 +267,16 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
         const node = reconcile(childId, svg && tag !== "foreignObject");
         if (node) childNodes.push(node);
       }
+      // Drop stale nodes first so surviving siblings keep their place instead of
+      // being re-inserted (which would restart their CSS animations).
+      const keep = new Set(childNodes);
+      for (let i = el.childNodes.length - 1; i >= 0; i--) {
+        if (!keep.has(el.childNodes[i])) el.removeChild(el.childNodes[i]);
+      }
       for (let i = 0; i < childNodes.length; i++) {
         if (el.childNodes[i] !== childNodes[i]) {
           el.insertBefore(childNodes[i], el.childNodes[i] || null);
         }
-      }
-      while (el.childNodes.length > childNodes.length) {
-        el.removeChild(el.lastChild!);
       }
 
       return el;

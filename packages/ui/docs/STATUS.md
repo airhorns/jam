@@ -103,11 +103,49 @@ Component themes never nest: a `Button` inside `light_Card` resolves to
 (`value`, `checked`, …) are kept across reconciles so hidden form inputs keep
 their value.
 
-**QA.** 404 unit tests across 40 files in `packages/jamagui`, 76 in
+**QA.** 408 unit tests across 40 files in `packages/jamagui`, 79 in
 `packages/core`. The catalog has a demo page per component with "shot
 recipes" (click/hover/focus before capture) so open overlays are
 screenshotted; `pnpm test:e2e` renders every demo and performs every recipe,
 `pnpm shots` writes light and dark screenshots for review.
+
+## After the example UIs
+
+Eighteen tamagui/Bento-style screens (`examples/catalog/src/demos/examples/`)
+were rebuilt on `@jam/ui` by parallel builders whose job was to report every
+place the library got in the way. What they surfaced, and what changed:
+
+**Core.** A component's `id` prop is an ordinary prop, not its entity id (two
+`<Field id="email">` instances no longer collide). `defaultValue`/
+`defaultChecked` are applied as properties, and camelCase attributes are
+lowercased before the stale-attribute sweep so they survive it. Removing a
+keyed child now removes its node before repositioning siblings, so surviving
+rows keep their DOM nodes (and don't replay `enterStyle`).
+
+**Style system.** Pseudo rules carry a fixed precedence (`placeholder` <
+`hover` < `active` < `focus` < `disabled`), and media rules sit above them
+all, independent of injection order. A wrapper that defaults to
+`unstyled: true` keeps the styles declared alongside it. Text nested in text
+inherits `white-space` so an `ellipsis` parent still truncates. Children with
+a `name` but no component theme inherit the surrounding component theme
+(`Tooltip` text is readable again).
+
+**Themes.** Component themes follow tamagui v5 (`Button`/`Switch` surface2,
+`Input`/`TextArea`/`Progress`/`Slider` surface1, `SliderActive` surface3,
+`Tooltip`/`SwitchThumb` accent) plus `Checkbox`/`RadioGroupItem` surface2 and
+`ProgressIndicator` accent so unchecked controls and progress bars are visible
+in dark. Dark themes take `$outlineColor` one palette step further out so the
+focus ring has the same contrast as in light.
+
+**Components.** `Popover` gained `hoverable` (grace-period hover menus whose
+trigger click keeps them open) and `disableFocus`; `Tabs.Content forceMount`
+renders inactive panels visible with `data-state="inactive"` as upstream does;
+`Accordion.Indicator` is a `1em` SVG chevron; `ListItem` has a
+`focusVisibleStyle` and no UA button border.
+
+**QA.** Every example has light/dark shots and recipes that open its
+overlays; `pnpm test:e2e` covers them with a 180 s budget for the whole-catalog
+sweeps.
 
 **Known constraints.**
 
@@ -121,3 +159,8 @@ screenshotted; `pnpm test:e2e` renders every demo and performs every recipe,
 - Plain `Card` and `Avatar` fallbacks share the page background in the
   default theme; use `bordered`/`elevate` or a sub-theme on flat surfaces.
 - `styled(Base, { name })` looks up a component theme by the new name only.
+- `$accentBackground`/`$accentColor` are the *opposite* palette's edge colours
+  (mid-grey in `dark`), exactly as in tamagui v5; use `theme="accent"` with
+  `$background`/`$color` for an accent surface.
+- There is no `Input` adornment slot, grid style props, or `Table`/`Chip`
+  component; the examples compose these from stacks.

@@ -318,7 +318,7 @@ TabsTabComponent.displayName = "Tabs.Tab";
 
 export type TabsContentProps = StyledProps & {
   value: string;
-  /** Keep the panel mounted (hidden) when another tab is selected. */
+  /** Render the panel even when its tab is not selected (it stays visible with `data-state="inactive"`). */
   forceMount?: boolean;
   size?: string | number;
   unstyled?: boolean;
@@ -341,7 +341,6 @@ function TabsContentComponent(props: TabsContentProps): VNode | null {
       "aria-labelledby": tabId(state.baseId, value),
       "data-state": selected ? "active" : "inactive",
       "data-orientation": state.orientation,
-      hidden: selected ? undefined : true,
       tabIndex: 0,
     },
     ...(([] as VChild[]).concat(children ?? [])),

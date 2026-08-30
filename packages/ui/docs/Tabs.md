@@ -52,9 +52,9 @@ navigation over its tabs.
 from the root's component id, so nothing needs wiring by hand.
 
 `Tabs.Content` — `role="tabpanel"` with `aria-labelledby` and `tabIndex={0}`.
-Renders nothing unless its tab is selected; `forceMount` keeps it in the DOM
-with the `hidden` attribute instead, for when the content is expensive to
-rebuild or is being animated.
+Renders nothing unless its tab is selected; `forceMount` renders it regardless
+(visible, with `data-state="inactive"`), for pagers and cross-fades that
+position or hide inactive panels themselves.
 
 `Tabs.Frame` — the styled root. `Tabs.Apply` provides `size`/`orientation` to
 every Tabs beneath.

@@ -51,6 +51,8 @@ Position against a wider element than the button that opens it:
 | `modal` | `boolean` | `false` | Trap focus inside and lock body scroll while open. |
 | `dismissOnEscape` | `boolean` | `true` | Close on Escape. |
 | `dismissOnOutsidePress` | `boolean` | `true` | Close on pointerdown outside the content, trigger and anchor. |
+| `hoverable` | `boolean \| { delay?: number }` | `false` | Open while the pointer is over the trigger/anchor or content; `delay` (150ms) is the grace period for moving between them. Clicking the trigger keeps it open instead of toggling. |
+| `disableFocus` | `boolean` | `hoverable` | Leave focus where it is when the popover opens. |
 
 `Placement` is `"top" | "bottom" | "left" | "right"` or one of those suffixed
 with `-start` / `-end`.
@@ -102,7 +104,11 @@ component theme.
   open, `aria-controls` points at the content's id.
 - Opening moves focus to the first `[autofocus]` element, else the first
   focusable element, else the content; closing restores focus to the
-  trigger.
+  trigger. `hoverable` popovers (or `disableFocus`) leave focus on the
+  trigger so a pointer pass doesn't steal it.
+- Trigger opens on click, not on Enter/Space, so `Popover.Trigger asChild`
+  around a non-button element (an `<input>`) needs its own key handler to be
+  keyboard-openable; prefer a real button trigger next to the field.
 - Escape closes the topmost open layer only, so a popover inside a dialog
   closes before the dialog does.
 - Pass `modal` to trap Tab focus inside; by default focus can move out to

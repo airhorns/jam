@@ -28,6 +28,23 @@ import { SpinnerDemos } from "./demos/Spinner";
 import { AccordionDemos } from "./demos/Accordion";
 import { TabsDemos } from "./demos/Tabs";
 import { SignInExample } from "./demos/examples/SignIn";
+import { InputsExample } from "./demos/examples/Inputs";
+import { CheckboxCardsExample } from "./demos/examples/CheckboxCards";
+import { GroupedRadioExample } from "./demos/examples/GroupedRadio";
+import { SettingsExample } from "./demos/examples/Settings";
+import { WritePreviewExample } from "./demos/examples/WritePreview";
+import { ChipsExample } from "./demos/examples/Chips";
+import { ButtonGalleryExample } from "./demos/examples/ButtonGallery";
+import { AvatarsExample } from "./demos/examples/Avatars";
+import { UsersTableExample } from "./demos/examples/UsersTable";
+import { TabBarExample } from "./demos/examples/TabBar";
+import { SlidingPopoverExample } from "./demos/examples/SlidingPopover";
+import { DatePickerExample } from "./demos/examples/DatePicker";
+import { PricingExample } from "./demos/examples/Pricing";
+import { DashboardExample } from "./demos/examples/Dashboard";
+import { StoreExample } from "./demos/examples/Store";
+import { OnboardingExample } from "./demos/examples/Onboarding";
+import { MicrointeractionsExample } from "./demos/examples/Microinteractions";
 
 export const registry: ComponentDemos[] = [
   StacksDemos,
@@ -63,6 +80,23 @@ export const registry: ComponentDemos[] = [
   TabsDemos,
   VisuallyHiddenDemos,
   SignInExample,
+  InputsExample,
+  CheckboxCardsExample,
+  GroupedRadioExample,
+  SettingsExample,
+  WritePreviewExample,
+  ChipsExample,
+  ButtonGalleryExample,
+  AvatarsExample,
+  UsersTableExample,
+  TabBarExample,
+  SlidingPopoverExample,
+  DatePickerExample,
+  PricingExample,
+  DashboardExample,
+  StoreExample,
+  OnboardingExample,
+  MicrointeractionsExample,
 ];
 
 export const groupOrder: DemoGroup[] = [

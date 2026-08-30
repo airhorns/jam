@@ -149,6 +149,27 @@ describe("token and theme resolution", () => {
     expect(injectedRules().some((rule) => rule.includes(":root:root:root .") && rule.includes("(min-width: 1000px)"))).toBe(true);
   });
 
+  it("ranks pseudo rules so press beats hover and media beats both, whatever the injection order", () => {
+    const Early = styled("div", { defaultProps: { pressStyle: { opacity: 0.5 } } });
+    const Late = styled("div", { defaultProps: { hoverStyle: { opacity: 0.8 }, pressStyle: { opacity: 0.5 }, $sm: { opacity: 1 } } });
+    render(h(Early, null));
+    const r = render(h(Late, null));
+    const rules = injectedRules();
+    const rootsBefore = (selectorFor: string) => {
+      const rule = rules.find((text) => text.includes(selectorFor));
+      expect(rule, selectorFor).toBeDefined();
+      return (rule!.match(/:root/g) ?? []).length;
+    };
+    const hoverClass = Array.from(r.root.classList).find((c) => c.includes("-hover-"))!;
+    const pressClass = Array.from(r.root.classList).find((c) => c.includes("-active-"))!;
+    const mediaClass = Array.from(r.root.classList).find((c) => c.includes("-m-"))!;
+    expect(rootsBefore(`.${hoverClass}:hover`)).toBe(2);
+    expect(rootsBefore(`.${pressClass}:active`)).toBe(3);
+    expect(rootsBefore(`.${mediaClass}`)).toBeGreaterThan(5);
+    expect(css(r.root, ":hover").opacity).toBe("0.8");
+    expect(css(r.root, ":active").opacity).toBe("0.5");
+  });
+
   it("applies disabledStyle inline when disabled and forwards the attribute", () => {
     const Btn = styled("button", { defaultProps: { opacity: 1, disabledStyle: { opacity: 0.5 } }, variants: { disabled: { true: { pointerEvents: "none" } } } });
     const r = render(h(Btn, { disabled: true }));
@@ -266,6 +287,17 @@ describe("variants", () => {
     const s = css(render(h(Box, { unstyled: true, big: true })).root);
     expect(s.padding).toBeUndefined();
     expect(s.margin).toBe("2px");
+  });
+
+  it("a wrapper that defaults to unstyled keeps the styles declared with it", () => {
+    const Base = styled("button", { defaultProps: { padding: 8, color: "red" } });
+    const Bare = styled(Base, { defaultProps: { unstyled: true, color: "blue" } });
+    const Ext = styled(Bare, { defaultProps: { margin: 2 } });
+    expect(css(render(h(Bare, null)).root)).toMatchObject({ color: "blue" });
+    expect(css(render(h(Bare, null)).root).padding).toBeUndefined();
+    expect(css(render(h(Ext, null)).root)).toMatchObject({ color: "blue", margin: "2px" });
+    expect(css(render(h(Ext, { unstyled: true })).root).margin).toBeUndefined();
+    expect(css(render(h(Ext, { unstyled: false })).root).padding).toBe("8px");
   });
 
   it("merges variants one level deep when extending", () => {

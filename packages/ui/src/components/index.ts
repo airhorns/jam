@@ -15,6 +15,7 @@ export { Square, Circle } from "./Shapes";
 export { Button } from "./Button";
 export { Input, TextArea } from "./Input";
 export { Checkbox } from "./Checkbox";
+export type { CheckedState } from "./Checkbox";
 export { Switch } from "./Switch";
 export { RadioGroup } from "./RadioGroup";
 export { Slider } from "./Slider";

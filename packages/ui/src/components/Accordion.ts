@@ -329,11 +329,17 @@ export type AccordionIndicatorProps = StyledProps & {
   children?: VChild | VChild[];
 };
 
+const chevron = h(
+  "svg",
+  { width: "1em", height: "1em", viewBox: "0 0 16 16", fill: "none", "aria-hidden": "true" },
+  h("path", { d: "M3.5 6 8 10.5 12.5 6", stroke: "currentColor", "stroke-width": 1.75, "stroke-linecap": "round", "stroke-linejoin": "round" }),
+);
+
 /** The chevron on the right of a trigger; flips when its item opens. */
 function AccordionIndicatorComponent(props: AccordionIndicatorProps): VNode {
   const { children, ...frameProps } = props;
   const item = useContext(ItemState);
-  const content = children === undefined ? ["▾"] : ([] as VChild[]).concat(children);
+  const content = children === undefined ? [chevron] : ([] as VChild[]).concat(children);
 
   return h(
     AccordionIndicatorFrame,

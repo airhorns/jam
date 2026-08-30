@@ -224,6 +224,57 @@ describe("mount", () => {
     expect(styled.getAttribute("style")).toBe("background-color: red; --x: 1; z-index: 3");
   });
 
+  it("keeps camelCase attributes and applies defaultValue/defaultChecked", () => {
+    set("form", "tick", 0);
+    const Root = () => {
+      when(["form", "tick", $.t]);
+      return h("div", null,
+        h("input", { defaultValue: "ada", "data-testid": "name" }),
+        h("input", { type: "checkbox", defaultChecked: true }),
+        h("div", { fooBar: "x" }),
+      );
+    };
+    dispose = mount(h(Root, null), container);
+    const [text, box] = Array.from(container.querySelectorAll("input"));
+    const div = container.querySelectorAll("div")[1];
+    expect(text.value).toBe("ada");
+    expect(text.getAttribute("value")).toBe("ada");
+    expect(box.checked).toBe(true);
+    expect(div.getAttribute("foobar")).toBe("x");
+
+    text.value = "typed";
+    set("form", "tick", 1);
+    expect(text.value).toBe("typed");
+    expect(text.getAttribute("value")).toBe("ada");
+    expect(div.getAttribute("foobar")).toBe("x");
+  });
+
+  it("removing a keyed child leaves its siblings' DOM nodes in place", () => {
+    set("list", "items", "a,b,c,d");
+    const Root = () => {
+      const items = String(when(["list", "items", $.v])[0]?.v ?? "").split(",").filter(Boolean);
+      return h("ul", null, items.map((item) => h("li", { key: item }, item)));
+    };
+    dispose = mount(h(Root, null), container);
+    const before = Array.from(container.querySelectorAll("li"));
+    const ul = container.querySelector("ul")!;
+    const inserted: Node[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const r of records) inserted.push(...Array.from(r.addedNodes));
+    });
+    observer.observe(ul, { childList: true });
+
+    set("list", "items", "a,c,d");
+    observer.takeRecords().forEach((r) => inserted.push(...Array.from(r.addedNodes)));
+    observer.disconnect();
+
+    const after = Array.from(container.querySelectorAll("li"));
+    expect(after.map((li) => li.textContent)).toEqual(["a", "c", "d"]);
+    expect(after[1]).toBe(before[2]);
+    expect(after[2]).toBe(before[3]);
+    expect(inserted).toHaveLength(0);
+  });
+
   it("wires event handlers and updates after re-render", () => {
     replace("counter", "n", 0);
     const Root = () => {
