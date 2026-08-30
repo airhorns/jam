@@ -97,14 +97,14 @@ function ChoiceRow({ id, title, subTitle, icon, value, onValueChange, entries }:
 }) {
   return (
     <YGroup.Item>
-      <ListItem.Frame gap="$space.3">
+      <ListItem.Frame gap="$space.3" flexWrap="wrap">
         <ListItem.Icon placement="before">{icon}</ListItem.Icon>
-        <YStack flexGrow={1} flexShrink={1} minWidth={0}>
+        <YStack flexGrow={1} flexShrink={1} flexBasis={140} minWidth={0}>
           <ListItem.Title tag="label" htmlFor={id}>{title}</ListItem.Title>
           <ListItem.Subtitle>{subTitle}</ListItem.Subtitle>
         </YStack>
         <Select id={id} size="$3" value={value} onValueChange={onValueChange} placement="bottom-end">
-          <Select.Trigger width={180}>
+          <Select.Trigger flexGrow={1} flexBasis={180} minWidth={140} maxWidth={240}>
             <Select.Value />
           </Select.Trigger>
           <Select.Content>

@@ -103,7 +103,7 @@ Component themes never nest: a `Button` inside `light_Card` resolves to
 (`value`, `checked`, …) are kept across reconciles so hidden form inputs keep
 their value.
 
-**QA.** 408 unit tests across 40 files in `packages/jamagui`, 79 in
+**QA.** 409 unit tests across 40 files in `packages/jamagui`, 79 in
 `packages/core`. The catalog has a demo page per component with "shot
 recipes" (click/hover/focus before capture) so open overlays are
 screenshotted; `pnpm test:e2e` renders every demo and performs every recipe,
@@ -134,18 +134,25 @@ a `name` but no component theme inherit the surrounding component theme
 `Input`/`TextArea`/`Progress`/`Slider` surface1, `SliderActive` surface3,
 `Tooltip`/`SwitchThumb` accent) plus `Checkbox`/`RadioGroupItem` surface2 and
 `ProgressIndicator` accent so unchecked controls and progress bars are visible
-in dark. Dark themes take `$outlineColor` one palette step further out so the
-focus ring has the same contrast as in light.
+in dark. `$outlineColor` sits far enough from the base background (light step
+7, dark step 8 at 60% alpha) for a ≈3:1 focus ring in both schemes, and the
+`animation` prop's `transition` excludes `outline-*` so the ring appears at
+once instead of fading in.
 
 **Components.** `Popover` gained `hoverable` (grace-period hover menus whose
-trigger click keeps them open) and `disableFocus`; `Tabs.Content forceMount`
+trigger click keeps them open), `disableFocus` and `dismissOnFocusOutside`
+(on by default for non-modal popovers and `Select`, so tabbing past an open
+layer closes it as Radix does); its trigger's `aria-haspopup` and content's
+`role` can be overridden for menus. `Tabs.Content forceMount`
 renders inactive panels visible with `data-state="inactive"` as upstream does;
 `Accordion.Indicator` is a `1em` SVG chevron; `ListItem` has a
 `focusVisibleStyle` and no UA button border.
 
 **QA.** Every example has light/dark shots and recipes that open its
 overlays; `pnpm test:e2e` covers them with a 180 s budget for the whole-catalog
-sweeps.
+sweeps. A second round of cheap QA agents then read every shot, exercised the
+interactions and resized to 420 px; the library fixes above came out of that
+round, and the examples now wrap or scroll horizontally at phone widths.
 
 **Known constraints.**
 
@@ -164,3 +171,6 @@ sweeps.
   `$background`/`$color` for an accent surface.
 - There is no `Input` adornment slot, grid style props, or `Table`/`Chip`
   component; the examples compose these from stacks.
+- Dark shadows are pure black and `bordered` frames use `$borderColor`
+  (≈1.2:1 against the surface in dark), as in tamagui v5; muted `$color10`
+  text and light `theme="red"` button text sit just above 4:1.

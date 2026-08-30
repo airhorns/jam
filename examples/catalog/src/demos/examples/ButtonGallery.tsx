@@ -72,7 +72,7 @@ function LeftIconGrid() {
         <Button theme="accent" icon={<HeartIcon size={15} />}>Accent</Button>
         <Button variant="outlined" icon={<HeartIcon size={15} />}>Outlined</Button>
         <Button variant="ghost" icon={<HeartIcon size={15} />}>Ghost</Button>
-        <Button chromeless icon={<HeartIcon size={15} />}>Chromeless</Button>
+        <Button chromeless="all" icon={<HeartIcon size={15} />}>Chromeless</Button>
         <Button theme="red" variant="outlined" icon={<Trash2Icon size={15} />}>Destructive</Button>
       </Column>
       <Column label="Sizes">
@@ -176,16 +176,16 @@ function SplitButton() {
         </XGroup.Item>
         <XGroup.Item>
           <Popover.Trigger asChild>
-            <Button aria-label="More save options" paddingHorizontal="$space.2" icon={<ChevronDownIcon size={16} />} data-testid="split-menu" />
+            <Button aria-label="More save options" aria-haspopup="menu" paddingHorizontal="$space.2" icon={<ChevronDownIcon size={16} />} data-testid="split-menu" />
           </Popover.Trigger>
         </XGroup.Item>
       </XGroup>
-      <Popover.Content padding={0} width={260} overflow="hidden">
-        <YGroup role="menu" separator={<Separator />}>
+      <Popover.Content role="menu" aria-label="Save options" padding={0} width={260} overflow="hidden">
+        <YGroup separator={<Separator />}>
           {actions.map(([title, subtitle, Icon]) => (
             <YGroup.Item key={title}>
               <Popover.Close asChild>
-                <ListItem role="menuitem" hoverTheme pressTheme size="$3" title={title} subTitle={subtitle} icon={<Icon size={16} />} />
+                <ListItem tag="button" role="menuitem" hoverTheme pressTheme size="$3" title={title} subTitle={subtitle} icon={<Icon size={16} />} />
               </Popover.Close>
             </YGroup.Item>
           ))}

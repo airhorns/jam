@@ -178,10 +178,12 @@ describe("token and theme resolution", () => {
     expect(css(r.root)["pointer-events"]).toBe("none");
   });
 
-  it("maps animation names to transitions", () => {
+  it("maps animation names to transitions, never easing the focus ring in", () => {
     setAnimations({ quick: "150ms ease-out" });
     const Box = styled("div");
-    expect(css(render(h(Box, { animation: "quick" })).root).transition).toBe("all 150ms ease-out");
+    expect(css(render(h(Box, { animation: "quick" })).root).transition).toBe(
+      "all 150ms ease-out, outline-color 0s, outline-width 0s, outline-offset 0s",
+    );
     const el = render(h(Box, { animation: "quick", animateOnly: ["opacity", "backgroundColor"] })).root;
     expect(css(el).transition).toBe("opacity 150ms ease-out, background-color 150ms ease-out");
     expect(el.hasAttribute("animateOnly")).toBe(false);

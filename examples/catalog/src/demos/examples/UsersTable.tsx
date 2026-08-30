@@ -60,7 +60,7 @@ const users: User[] = [
   { id: "barbara", name: "Barbara Liskov", email: "liskov@csail.mit.edu", role: "Member", status: "Active", lastActive: "3 days ago", lastActiveMinutes: 60 * 24 * 3, theme: "gray" },
 ];
 
-const totalMembers = 42;
+const pageSize = 5;
 
 const initials = (name: string) =>
   name
@@ -73,7 +73,11 @@ const initials = (name: string) =>
 
 const TableFrame = styled(YStack, {
   tag: "table",
-  defaultProps: { width: "100%", flexShrink: 0 },
+  defaultProps: { width: "100%", minWidth: 640, flexShrink: 0 },
+});
+
+const TableScroller = styled(ScrollView, {
+  defaultProps: { horizontal: true, width: "100%" },
 });
 
 const TableHead = styled(YStack, {
@@ -97,7 +101,7 @@ const TableRow = styled(XStack, {
     interactive: {
       true: { hoverStyle: { backgroundColor: "$color0075" } },
     },
-    highlighted: { true: { backgroundColor: "$color01" } },
+    highlighted: { true: { backgroundColor: "$blue3", hoverStyle: { backgroundColor: "$blue4" } } },
   },
 });
 
@@ -414,8 +418,14 @@ function MembersCard() {
   const stateKey = "userstable.members";
   const id = useStableId();
   const [search, setSearch] = useDemoState(`${stateKey}.search`, "");
+  const [pageState, setPage] = useDemoState(`${stateKey}.page`, 0);
   const query = search.trim().toLowerCase();
-  const rows = query ? users.filter((u) => `${u.name} ${u.email} ${u.role}`.toLowerCase().includes(query)) : users;
+  const matches = query ? users.filter((u) => `${u.name} ${u.email} ${u.role}`.toLowerCase().includes(query)) : users;
+  const pageCount = Math.max(1, Math.ceil(matches.length / pageSize));
+  const page = Math.min(pageState, pageCount - 1);
+  const rows = matches.slice(page * pageSize, (page + 1) * pageSize);
+  const first = matches.length === 0 ? 0 : page * pageSize + 1;
+  const last = page * pageSize + rows.length;
   return (
     <Panel>
       <XStack alignItems="center" justifyContent="space-between" gap="$space.3" padding="$space.4" flexWrap="wrap">
@@ -432,22 +442,47 @@ function MembersCard() {
           </Button>
         </XStack>
       </XStack>
-      <UsersTable stateKey={stateKey} rows={rows} menuTestId="userstable-menu-0" />
+      <TableScroller>
+        <UsersTable stateKey={stateKey} rows={rows} menuTestId="userstable-menu-0" />
+      </TableScroller>
       <XStack
         alignItems="center"
         justifyContent="space-between"
+        gap="$space.3"
+        flexWrap="wrap"
         paddingHorizontal="$space.4"
         paddingVertical="$space.3"
         borderTopWidth={1}
         borderTopStyle="solid"
         borderTopColor="$borderColor"
       >
-        <SizableText size="$2" color="$color10">
-          {query ? `${rows.length} of ${users.length} members match “${search.trim()}”` : `Showing 1–${rows.length} of ${totalMembers}`}
+        <SizableText size="$2" color="$color10" aria-live="polite">
+          {query
+            ? `${matches.length} of ${users.length} members match “${search.trim()}”`
+            : `Showing ${first}–${last} of ${users.length}`}
         </SizableText>
-        <XStack gap="$space.2">
-          <Button size="$2" variant="outlined" aria-label="Previous page" icon={<ChevronLeftIcon size={14} />} disabled />
-          <Button size="$2" variant="outlined" aria-label="Next page" icon={<ChevronRightIcon size={14} />} />
+        <XStack gap="$space.2" alignItems="center">
+          <SizableText size="$2" color="$color10">
+            Page {page + 1} of {pageCount}
+          </SizableText>
+          <Button
+            size="$2"
+            variant="outlined"
+            aria-label="Previous page"
+            icon={<ChevronLeftIcon size={14} />}
+            disabled={page === 0}
+            onClick={() => setPage(page - 1)}
+            data-testid={`${stateKey}-prev`}
+          />
+          <Button
+            size="$2"
+            variant="outlined"
+            aria-label="Next page"
+            icon={<ChevronRightIcon size={14} />}
+            disabled={page >= pageCount - 1}
+            onClick={() => setPage(page + 1)}
+            data-testid={`${stateKey}-next`}
+          />
         </XStack>
       </XStack>
     </Panel>
@@ -457,7 +492,9 @@ function MembersCard() {
 function SortableCard() {
   return (
     <Panel>
-      <UsersTable stateKey="userstable.sortable" rows={users} sortable />
+      <TableScroller>
+        <UsersTable stateKey="userstable.sortable" rows={users} sortable />
+      </TableScroller>
     </Panel>
   );
 }
@@ -492,7 +529,9 @@ function SelectableCard() {
           <Button size="$2" variant="ghost" circular aria-label="Clear selection" icon={<XIcon size={14} />} onClick={() => selection.set([])} />
         </XStack>
       ) : null}
-      <UsersTable stateKey={stateKey} rows={users} selectable />
+      <TableScroller>
+        <UsersTable stateKey={stateKey} rows={users} selectable />
+      </TableScroller>
     </Panel>
   );
 }
@@ -500,7 +539,7 @@ function SelectableCard() {
 function CompactCard() {
   return (
     <Panel>
-      <ScrollView height={220}>
+      <ScrollView height={220} overflowX="auto">
         <UsersTable stateKey="userstable.compact" rows={[...users, ...users.map((u) => ({ ...u, id: `${u.id}-2` }))]} dense stickyHeader />
       </ScrollView>
     </Panel>

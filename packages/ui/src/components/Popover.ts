@@ -44,6 +44,8 @@ export type PopoverProps = {
   modal?: boolean;
   dismissOnEscape?: boolean;
   dismissOnOutsidePress?: boolean;
+  /** Close when keyboard focus leaves the popover (default: true unless `modal`). */
+  dismissOnFocusOutside?: boolean;
   /**
    * Open while the pointer is over the trigger or content. `delay` (default 150ms) is the
    * grace period for moving between them; clicking the trigger keeps it open rather than toggling.
@@ -75,6 +77,7 @@ function PopoverRoot(props: PopoverProps): VNode {
     restoreFocus: true,
     dismissOnEscape: props.dismissOnEscape,
     dismissOnOutsidePress: props.dismissOnOutsidePress,
+    dismissOnFocusOutside: props.dismissOnFocusOutside ?? !(props.modal ?? false),
     onReposition: () => repositionLayer(id, { placement, offset }),
   });
   let hover: PopoverContextValue["hover"];
@@ -119,7 +122,7 @@ function PopoverTrigger(props: PopoverTriggerProps): VNode {
   return h(asChild ? Slot : Button, {
     ...ctx.hover,
     ...rest,
-    "aria-haspopup": "dialog",
+    "aria-haspopup": (rest as Record<string, unknown>)["aria-haspopup"] ?? "dialog",
     "aria-expanded": ctx.open,
     "aria-controls": ctx.contentId,
     "data-state": dataState(ctx.open),

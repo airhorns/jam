@@ -246,15 +246,15 @@ function ToggleReveal() {
       <Separator />
 
       <XStack alignItems="center" justifyContent="space-between" gap="$space.4">
-        <XStack alignItems="center" gap="$space.3">
-          <Avatar size="$4" circular>
+        <XStack alignItems="center" gap="$space.3" flex={1} minWidth={0}>
+          <Avatar size="$4" circular flexShrink={0}>
             <Avatar.Fallback backgroundColor="$purple5">
               <Text fontWeight="600" fontSize={14} color="$purple11">NW</Text>
             </Avatar.Fallback>
           </Avatar>
-          <YStack>
-            <SizableText size="$3" fontWeight="600">Nate Wienert</SizableText>
-            <SizableText size="$2" color="$color10">@natebirdman</SizableText>
+          <YStack flex={1} minWidth={0}>
+            <SizableText size="$3" fontWeight="600" ellipsis>Nate Wienert</SizableText>
+            <SizableText size="$2" color="$color10" ellipsis>@natebirdman</SizableText>
           </YStack>
         </XStack>
         <Button
@@ -262,6 +262,8 @@ function ToggleReveal() {
           theme={following ? undefined : "accent"}
           variant={following ? "outlined" : undefined}
           width={124}
+          flexShrink={0}
+          aria-pressed={following}
           onClick={() => setFollowing(!following)}
           icon={
             following ? (

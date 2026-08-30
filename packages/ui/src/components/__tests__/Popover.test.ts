@@ -159,6 +159,17 @@ describe("Popover", () => {
     }
   });
 
+  it("closes when focus moves outside, but not when it moves within", async () => {
+    const { get, query } = render(h("div", null, h(Example, {}), h("button", { "data-testid": "outside" }, "Elsewhere")));
+    const trigger = get("[data-testid=trigger]");
+    click(trigger);
+    await tick();
+    get("[data-testid=close]").focus();
+    expect(query("[data-testid=content]")).not.toBeNull();
+    get("[data-testid=outside]").focus();
+    expect(query("[data-testid=content]")).toBeNull();
+  });
+
   it("supports controlled state", () => {
     const onOpenChange = vi.fn();
     const { get, query } = render(h(Example, { open: false, onOpenChange }));

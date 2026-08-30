@@ -6,7 +6,8 @@ import { YStack, styled } from "@jam/ui";
 export const PhoneFrame = styled(YStack, {
   name: "PhoneFrame",
   defaultProps: {
-    width: 390,
+    width: "100%",
+    maxWidth: 390,
     height: 720,
     position: "relative",
     overflow: "hidden",
@@ -15,7 +16,6 @@ export const PhoneFrame = styled(YStack, {
     borderColor: "$borderColor",
     borderRadius: 32,
     backgroundColor: "$background",
-    flexShrink: 0,
   },
 });
 
@@ -24,6 +24,7 @@ export const Page = styled(YStack, {
   name: "ExamplePage",
   defaultProps: {
     width: "100%",
+    minWidth: 0,
     minHeight: 400,
     backgroundColor: "$background",
     borderRadius: "$radius.4",

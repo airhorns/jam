@@ -377,7 +377,7 @@ function ProductDetail() {
               <SizableText size="$3" color="$color10">· {product.reviews.toLocaleString()} reviews</SizableText>
             </XStack>
           </YStack>
-          <XStack alignItems="baseline" gap="$space.2">
+          <XStack alignItems="baseline" gap="$space.2" flexWrap="wrap">
             <SizableText size="$8" fontWeight="700">${product.price}</SizableText>
             <SizableText size="$3" color="$color10" textDecorationLine="line-through">$299</SizableText>
             <SizableText size="$2" theme="green" color="$color10" fontWeight="600" backgroundColor="$color3" paddingHorizontal="$space.2" borderRadius={999}>Save $50</SizableText>
@@ -389,11 +389,11 @@ function ProductDetail() {
           <Separator />
 
           <YStack gap="$space.2">
-            <XStack justifyContent="space-between" alignItems="center">
+            <XStack justifyContent="space-between" alignItems="center" flexWrap="wrap" gap="$space.2">
               <SizableText size="$3" fontWeight="600">Colour</SizableText>
               <SizableText size="$3" color="$color10">{colourLabel}</SizableText>
             </XStack>
-            <RadioGroup value={colour} onValueChange={setColour} orientation="horizontal" gap="$space.3" aria-label="Colour">
+            <RadioGroup value={colour} onValueChange={setColour} orientation="horizontal" gap="$space.3" flexWrap="wrap" aria-label="Colour">
               {colours.map((c) => (
                 <RadioGroup.Item key={c.value} value={c.value} id={`${id}-colour-${c.value}`} size={32} aria-label={c.label} data-testid={`store-colour-${c.value}`}>
                   <Circle size={22} backgroundColor={c.color} />
@@ -403,7 +403,7 @@ function ProductDetail() {
           </YStack>
 
           <YStack gap="$space.2">
-            <XStack justifyContent="space-between" alignItems="center">
+            <XStack justifyContent="space-between" alignItems="center" flexWrap="wrap" gap="$space.2">
               <SizableText size="$3" fontWeight="600">Band size</SizableText>
               <SizableText tag="a" href="#" size="$2" color="$color10" textDecorationLine="underline" hoverStyle={{ color: "$color12" }}>Size guide</SizableText>
             </XStack>

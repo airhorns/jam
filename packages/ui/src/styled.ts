@@ -501,7 +501,10 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
     const animation = typeof merged.animation === "string" ? getAnimation(merged.animation) : undefined;
     if (animation && resolvedBase.transition === undefined) {
       const only = Array.isArray(merged.animateOnly) ? (merged.animateOnly as string[]) : ["all"];
-      resolvedBase.transition = only.map((prop) => `${camelToKebab(prop)} ${animation}`).join(", ");
+      const transitions = only.map((prop) => `${camelToKebab(prop)} ${animation}`);
+      // A focus ring must appear at once, so `all` never eases the outline in.
+      if (only.includes("all")) transitions.push("outline-color 0s", "outline-width 0s", "outline-offset 0s");
+      resolvedBase.transition = transitions.join(", ");
     }
 
     for (const [prop, value] of Object.entries(stylesToCSS(resolvedBase))) {

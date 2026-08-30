@@ -57,22 +57,33 @@ function Walkthrough() {
           </YStack>
         </YStack>
 
-        <XStack justifyContent="center" gap="$space.2" role="tablist" aria-label="Steps">
+        <XStack justifyContent="center" gap="$space.1" role="tablist" aria-label="Steps">
           {steps.map((s, i) => (
             <YStack
               key={s.title}
-              theme={i === step ? "accent" : undefined}
-              backgroundColor={i === step ? "$background" : "$color6"}
-              height={8}
-              width={i === step ? 24 : 8}
-              borderRadius={999}
-              animation="quick"
+              tag="button"
+              type="button"
               role="tab"
               aria-selected={i === step}
-              aria-label={`Step ${i + 1}`}
+              aria-label={`Step ${i + 1}: ${s.title}`}
+              padding={4}
+              borderWidth={0}
+              backgroundColor="transparent"
+              borderRadius={999}
               cursor="pointer"
+              focusVisibleStyle={{ outlineColor: "$outlineColor", outlineStyle: "solid", outlineWidth: 2, outlineOffset: 0 }}
               onClick={() => setStep(i)}
-            />
+              data-testid={`onboarding-step-${i}`}
+            >
+              <YStack
+                theme={i === step ? "accent" : undefined}
+                backgroundColor={i === step ? "$background" : "$color6"}
+                height={8}
+                width={i === step ? 24 : 8}
+                borderRadius={999}
+                animation="quick"
+              />
+            </YStack>
           ))}
         </XStack>
 

@@ -49,7 +49,7 @@ function Logo() {
 
 function TopBar({ children }: { children?: VChild | VChild[] }) {
   return (
-    <XStack tag="header" alignItems="center" justifyContent="space-between" paddingHorizontal="$space.5" height={64} borderBottomWidth={1} borderBottomStyle="solid" borderBottomColor="$borderColor" gap="$space.4">
+    <XStack tag="header" alignItems="center" justifyContent="space-between" flexWrap="wrap" paddingHorizontal="$space.5" paddingVertical="$space.2" minHeight={64} borderBottomWidth={1} borderBottomStyle="solid" borderBottomColor="$borderColor" gap="$space.3">
       {children}
     </XStack>
   );
@@ -141,7 +141,7 @@ function NavMenuScreen() {
     <Page>
       <TopBar>
         <Logo />
-        <XStack tag="nav" aria-label="Main" gap="$space.1">
+        <XStack tag="nav" aria-label="Main" gap="$space.1" flexWrap="wrap">
           {navItems.map((item) => {
             const open = menu.active === item.id;
             return (
@@ -158,11 +158,9 @@ function NavMenuScreen() {
                     {item.label}
                   </Button>
                 </Popover.Trigger>
-                <Popover.Content width={320} padding="$space.2">
+                <Popover.Content role="menu" aria-label={item.label} width={320} padding="$space.2" gap={2}>
                   <Popover.Arrow />
-                  <YStack role="menu" aria-label={item.label} gap={2}>
-                    {item.entries.map((entry) => <MenuRow key={entry.title} entry={entry} />)}
-                  </YStack>
+                  {item.entries.map((entry) => <MenuRow key={entry.title} entry={entry} />)}
                 </Popover.Content>
               </Popover>
             );
@@ -199,7 +197,7 @@ function ProfileMenuScreen() {
                 <UserAvatar size={32} />
               </Button>
             </Popover.Trigger>
-            <Popover.Content width={260} padding="$space.2">
+            <Popover.Content aria-label="Account" width={260} padding="$space.2">
               <Popover.Arrow />
               <XStack alignItems="center" gap="$space.3" padding="$space.3">
                 <UserAvatar size="$4" />
@@ -254,7 +252,10 @@ const notifications: Notification[] = [
 ];
 
 function NotificationsScreen() {
-  const [unread, setUnread] = useDemoState("slidingpopover.unread", 3);
+  const [readList, setReadList] = useDemoState("slidingpopover.read", notifications[notifications.length - 1].title);
+  const read = new Set(readList.split("\n").filter(Boolean));
+  const markRead = (titles: string[]) => setReadList([...new Set([...read, ...titles])].join("\n"));
+  const unread = notifications.filter((n) => !read.has(n.title)).length;
   return (
     <Page>
       <TopBar>
@@ -287,28 +288,30 @@ function NotificationsScreen() {
               <Popover.Arrow />
               <XStack alignItems="center" justifyContent="space-between" paddingLeft="$space.4" paddingRight="$space.2" paddingVertical="$space.2">
                 <SizableText size="$4" fontWeight="600">Notifications</SizableText>
-                <Button size="$2" chromeless disabled={unread === 0} onClick={() => setUnread(0)} data-testid="notif-mark-read">
+                <Button size="$2" chromeless disabled={unread === 0} onClick={() => markRead(notifications.map((n) => n.title))} data-testid="notif-mark-read">
                   Mark all read
                 </Button>
               </XStack>
               <Separator />
-              <YStack role="list" padding="$space.2" gap={2}>
-                {notifications.map((n, i) => {
-                  const isUnread = i < unread;
+              <YStack padding="$space.2" gap={2}>
+                {notifications.map((n) => {
+                  const isUnread = !read.has(n.title);
                   return (
                     <ListItem
                       key={n.title}
+                      tag="button"
                       hoverTheme
                       pressTheme
                       backgroundColor="transparent"
                       borderRadius="$radius.3"
+                      onClick={() => markRead([n.title])}
                       icon={<Tile icon={n.icon} tint={n.tint} />}
                       title={<ListItem.Title fontWeight={isUnread ? "600" : "400"}>{n.title}</ListItem.Title>}
                       subTitle={n.body}
                       iconAfter={
                         <XStack alignItems="center" gap="$space.2">
                           <SizableText size="$1" color="$color10">{n.time}</SizableText>
-                          <Circle size={8} backgroundColor={isUnread ? "$blue9" : "transparent"} />
+                          <Circle size={8} backgroundColor={isUnread ? "$blue9" : "transparent"} role="img" aria-label={isUnread ? "Unread" : ""} />
                         </XStack>
                       }
                     />
@@ -357,7 +360,7 @@ export const SlidingPopoverExample: ComponentDemos = {
     },
     {
       title: "Notifications",
-      description: "A bell with an unread badge; Mark all read clears it.",
+      description: "A bell with an unread badge; opening a notification or Mark all read clears it.",
       render: () => <NotificationsScreen />,
       shot: { click: "notif-bell" },
     },

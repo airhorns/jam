@@ -206,8 +206,8 @@ const BG_OFFSET = PALETTE_BACKGROUND_OFFSET + 1;
 function computedValues({ palette, scheme }: GetThemeProps): ThemeDefinition {
   const bg = palette[BG_OFFSET];
   const fg = palette[palette.length - 2];
-  // Dark palettes step up more slowly, so the focus ring sits one step further out to match light's contrast.
-  const outlineStep = scheme === "dark" ? 5 : 4;
+  // Far enough from the base background for a ~3:1 focus ring in both schemes (dark palettes step more slowly).
+  const outlineStep = scheme === "dark" ? 8 : 7;
   return {
     color01: opacify(fg, 0.1),
     color0075: opacify(fg, 0.075),

@@ -111,6 +111,7 @@ const DemoBody = styled("div", {
     padding: 24,
     minHeight: 80,
     alignItems: "flex-start",
+    "$max-sm": { padding: 12 },
   },
 });
 
@@ -205,7 +206,7 @@ function Main() {
   const isAll = state.component === "all";
   const selected = isAll ? null : findComponent(state.component);
   return (
-    <YStack flex={1} padding="$space.7" gap="$space.8" minWidth={0} data-testid="main">
+    <YStack flex={1} padding="$space.7" $max-sm={{ padding: "$space.3" }} gap="$space.8" minWidth={0} data-testid="main">
       {isAll
         ? registry.map((c) => <ComponentPage key={c.name} component={c} only={null} />)
         : selected

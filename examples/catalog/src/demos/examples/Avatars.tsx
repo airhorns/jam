@@ -115,7 +115,8 @@ function StatusDot({ online, size }: { online: boolean; size: string }) {
       position="absolute"
       right={-1}
       bottom={-1}
-      aria-label={online ? "Online" : "Offline"}
+      role="img"
+      aria-label={online ? "Online" : "Away"}
     />
   );
 }

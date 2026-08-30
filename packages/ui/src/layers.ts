@@ -1,6 +1,7 @@
 // Dismissable layers: one document-level program that closes the topmost
-// open overlay on Escape or outside press, traps Tab inside modal layers,
-// locks body scroll while a modal is open, and restores focus on close.
+// open overlay on Escape, outside press or (opt-in) focus moving outside,
+// traps Tab inside modal layers, locks body scroll while a modal is open,
+// and restores focus on close.
 //
 // Components register while rendering (`useDismissableLayer`) and mark
 // their DOM with `data-layer={id}` (content), `data-layer-trigger={id}` and
@@ -15,6 +16,8 @@ export type LayerOptions = {
   dismissOnEscape?: boolean;
   /** Close on pointerdown outside the content and anchor (default true). */
   dismissOnOutsidePress?: boolean;
+  /** Close when focus lands outside the content, trigger and anchor (default false). */
+  dismissOnFocusOutside?: boolean;
   /** Trap Tab focus inside the content and lock body scroll. */
   modal?: boolean;
   /** Move focus into the content when it opens (default: modal). */
@@ -106,6 +109,14 @@ function onPointerDown(event: PointerEvent | MouseEvent): void {
   layer.onDismiss();
 }
 
+function onFocusIn(event: FocusEvent): void {
+  prune();
+  const layer = topmost();
+  if (!layer || !layer.dismissOnFocusOutside) return;
+  if (isInsideLayer(layer.id, event.target as Node)) return;
+  layer.onDismiss();
+}
+
 function onReposition(): void {
   for (const layer of layers.values()) layer.onReposition?.();
 }
@@ -115,6 +126,7 @@ function installListeners(): void {
   listenersInstalled = true;
   document.addEventListener("keydown", onKeyDown, true);
   document.addEventListener("pointerdown", onPointerDown, true);
+  document.addEventListener("focusin", onFocusIn, true);
   window.addEventListener("scroll", onReposition, true);
   window.addEventListener("resize", onReposition);
 }

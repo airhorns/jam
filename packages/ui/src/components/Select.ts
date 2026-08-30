@@ -122,6 +122,7 @@ function SelectRoot(props: SelectProps): VNode {
     modal: false,
     autoFocus: true,
     restoreFocus: true,
+    dismissOnFocusOutside: true,
     onReposition: () => repositionLayer(id, { placement, offset: 4 }),
   });
   const ctx: SelectContextValue = {

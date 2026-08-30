@@ -57,7 +57,7 @@ function LabelledInputs() {
   return (
     <Column>
       <Field id={`${id}-name`} label="Full name" required>
-        <Input id={`${id}-name`} placeholder="Ada Lovelace" />
+        <Input id={`${id}-name`} placeholder="Ada Lovelace" required />
       </Field>
       <Field id={`${id}-email`} label="Email address" hint="We never share your email with anyone else.">
         <Input id={`${id}-email`} type="email" placeholder="email@example.com" aria-describedby={`${id}-email-hint`} data-testid="inputs-email" />
@@ -86,6 +86,7 @@ function ValidationStates() {
         <Input
           id={`${id}-username`}
           defaultValue="ada"
+          required
           aria-invalid="true"
           aria-describedby={`${id}-username-hint`}
           data-testid="inputs-username"
@@ -229,10 +230,10 @@ function GroupedInputs() {
 
       <Field id={`${id}-newsletter`} label="Newsletter" hint="One email a month. Unsubscribe any time.">
         <XGroup width="100%">
-          <XGroup.Item flexGrow={1}>
+          <XGroup.Item flexGrow={1} flexShrink={1} minWidth={0}>
             <Input id={`${id}-newsletter`} type="email" placeholder="you@example.com" aria-describedby={`${id}-newsletter-hint`} />
           </XGroup.Item>
-          <XGroup.Item>
+          <XGroup.Item flexShrink={0}>
             <Button theme="accent">Subscribe</Button>
           </XGroup.Item>
         </XGroup>

@@ -93,7 +93,7 @@ function Sparkline({ values, up }: { values: number[]; up: boolean }) {
 
 function StatCard({ stat }: { stat: Stat }) {
   return (
-    <Card bordered flex={1} padding="$space.4" gap="$space.3" backgroundColor="$color1">
+    <Card bordered flex={1} flexBasis={180} minWidth={160} padding="$space.4" gap="$space.3" backgroundColor="$color1">
       <SizableText size="$2" color="$color10" fontWeight="500">{stat.label}</SizableText>
       <XStack alignItems="center" justifyContent="space-between" gap="$space.2">
         <SizableText size="$8" fontWeight="700" letterSpacing={-0.5} whiteSpace="nowrap">{stat.value}</SizableText>
@@ -139,14 +139,14 @@ function RevenueCard() {
   const [range, setRange] = useDemoState("dashboard.revenueRange", "month");
   const data = revenue[range] ?? revenue.month;
   return (
-    <Card bordered flex={3} padding="$space.5" backgroundColor="$color1">
+    <Card bordered flex={3} flexBasis={420} minWidth={280} padding="$space.5" backgroundColor="$color1">
       <Tabs value={range} onValueChange={setRange} size="$2" gap="$space.5" flex={1}>
-        <XStack alignItems="flex-start" justifyContent="space-between" gap="$space.3">
+        <XStack alignItems="flex-start" justifyContent="space-between" gap="$space.3" flexWrap="wrap">
           <YStack gap={2}>
             <H4 margin={0} size="$5">Revenue</H4>
             <XStack alignItems="baseline" gap="$space.2">
               <SizableText size="$7" fontWeight="700" letterSpacing={-0.5}>{data.total}</SizableText>
-              <SizableText size="$2" color="$color10">this {range}</SizableText>
+              <SizableText size="$2" color="$color10" whiteSpace="nowrap">this {range}</SizableText>
             </XStack>
           </YStack>
           <Tabs.List aria-label="Revenue period">
@@ -226,7 +226,7 @@ function TopBar({ onExport }: { onExport?: () => void }) {
         <H3 margin={0} size="$8">Overview</H3>
         <Paragraph margin={0} size="$3" color="$color10">Welcome back, Ada. Here's what's happening across your workspace.</Paragraph>
       </YStack>
-      <XStack gap="$space.2" alignItems="center">
+      <XStack gap="$space.2" alignItems="center" flexWrap="wrap">
         <Select value={range} onValueChange={setRange} size="$3">
           <Select.Trigger width={170} variant="outlined" icon={<CalendarIcon size={14} />} aria-label="Date range" data-testid="dashboard-range">
             <Select.Value />
@@ -257,12 +257,12 @@ function Overview({ onExport }: { onExport?: () => void }) {
   return (
     <Page padding="$space.6" gap="$space.5">
       <TopBar onExport={onExport} />
-      <XStack gap="$space.4">
+      <XStack gap="$space.4" flexWrap="wrap">
         {stats.map((stat) => <StatCard key={stat.label} stat={stat} />)}
       </XStack>
-      <XStack gap="$space.4" alignItems="stretch">
+      <XStack gap="$space.4" alignItems="stretch" flexWrap="wrap">
         <RevenueCard />
-        <YStack flex={2} gap="$space.4">
+        <YStack flex={2} flexBasis={280} minWidth={260} gap="$space.4">
           <StorageCard />
           <ActivityCard />
         </YStack>

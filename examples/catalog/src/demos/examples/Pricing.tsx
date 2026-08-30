@@ -1,6 +1,6 @@
 import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
-import { XStack, YStack, H2, H3, H4, Paragraph, SizableText, Text, Button, Card, Separator, ToggleGroup, Accordion } from "@jam/ui";
+import { XStack, YStack, H2, H3, H4, Paragraph, SizableText, Text, Button, Card, Separator, ToggleGroup, Accordion, ScrollView } from "@jam/ui";
 import type { ComponentDemos } from "../../types";
 import { useDemoState } from "../state";
 import { Page } from "./shared";
@@ -136,6 +136,8 @@ function PlanCard({ plan, yearly }: { plan: Plan; yearly: boolean }) {
       bordered
       elevate
       flex={1}
+      flexBasis={260}
+      minWidth={240}
       padding="$space.5"
       gap="$space.5"
       backgroundColor="$color1"
@@ -193,7 +195,7 @@ function Plans() {
         </Paragraph>
         <BillingToggle />
       </YStack>
-      <XStack gap="$space.4" width="100%" maxWidth={960} alignItems="stretch">
+      <XStack gap="$space.4" width="100%" maxWidth={960} alignItems="stretch" flexWrap="wrap">
         {plans.map((plan) => <PlanCard key={plan.id} plan={plan} yearly={yearly} />)}
       </XStack>
     </Page>
@@ -209,43 +211,47 @@ function ComparisonCell({ value }: { value: Cell }) {
 function ComparisonTable() {
   return (
     <Page padding="$space.8" alignItems="center">
-      <Card bordered width="100%" maxWidth={880} backgroundColor="$color1" paddingVertical="$space.2">
-        <XStack paddingHorizontal="$space.5" paddingVertical="$space.3" alignItems="center">
-          <YStack flex={2}>
-            <H4 margin={0} size="$5">Compare plans</H4>
-          </YStack>
-          {plans.map((plan) => (
-            <YStack key={plan.id} flex={1} alignItems="center" gap={2}>
-              <SizableText size="$3" fontWeight="600">{plan.name}</SizableText>
-              <SizableText size="$1" color="$color10">${plan.monthly}/mo</SizableText>
-            </YStack>
-          ))}
-        </XStack>
-        {comparison.map((section) => (
-          <YStack key={section.group}>
-            <Separator />
-            <XStack paddingHorizontal="$space.5" paddingTop="$space.3" paddingBottom="$space.1">
-              <SizableText size="$1" fontWeight="600" color="$color10" textTransform="uppercase" letterSpacing={0.6}>
-                {section.group}
-              </SizableText>
+      <Card bordered width="100%" maxWidth={880} backgroundColor="$color1" paddingVertical="$space.2" overflow="hidden">
+        <ScrollView horizontal>
+          <YStack width="100%" minWidth={560}>
+            <XStack paddingHorizontal="$space.5" paddingVertical="$space.3" alignItems="center">
+              <YStack flex={2}>
+                <H4 margin={0} size="$5">Compare plans</H4>
+              </YStack>
+              {plans.map((plan) => (
+                <YStack key={plan.id} flex={1} alignItems="center" gap={2}>
+                  <SizableText size="$3" fontWeight="600">{plan.name}</SizableText>
+                  <SizableText size="$1" color="$color10">${plan.monthly}/mo</SizableText>
+                </YStack>
+              ))}
             </XStack>
-            {section.rows.map(([feature, ...cells], index) => (
-              <YStack key={feature}>
-                {index > 0 ? <Separator marginHorizontal="$space.5" /> : null}
-                <XStack paddingHorizontal="$space.5" height={40} alignItems="center" hoverStyle={{ backgroundColor: "$backgroundHover" }}>
-                  <YStack flex={2}>
-                    <SizableText size="$3" color="$color11">{feature}</SizableText>
-                  </YStack>
-                  {cells.map((cell, i) => (
-                    <XStack key={plans[i].id} flex={1} justifyContent="center" alignItems="center">
-                      <ComparisonCell value={cell} />
-                    </XStack>
-                  ))}
+            {comparison.map((section) => (
+              <YStack key={section.group}>
+                <Separator />
+                <XStack paddingHorizontal="$space.5" paddingTop="$space.3" paddingBottom="$space.1">
+                  <SizableText size="$1" fontWeight="600" color="$color10" textTransform="uppercase" letterSpacing={0.6}>
+                    {section.group}
+                  </SizableText>
                 </XStack>
+                {section.rows.map(([feature, ...cells], index) => (
+                  <YStack key={feature}>
+                    {index > 0 ? <Separator marginHorizontal="$space.5" /> : null}
+                    <XStack paddingHorizontal="$space.5" height={40} alignItems="center" hoverStyle={{ backgroundColor: "$backgroundHover" }}>
+                      <YStack flex={2}>
+                        <SizableText size="$3" color="$color11">{feature}</SizableText>
+                      </YStack>
+                      {cells.map((cell, i) => (
+                        <XStack key={plans[i].id} flex={1} justifyContent="center" alignItems="center">
+                          <ComparisonCell value={cell} />
+                        </XStack>
+                      ))}
+                    </XStack>
+                  </YStack>
+                ))}
               </YStack>
             ))}
           </YStack>
-        ))}
+        </ScrollView>
       </Card>
     </Page>
   );
