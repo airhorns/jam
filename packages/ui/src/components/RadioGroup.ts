@@ -249,7 +249,7 @@ function RadioGroupComponent(props: RadioGroupProps): VNode {
       "aria-orientation": orientation,
       "aria-required": required || undefined,
       "data-name": name,
-      "data-disabled": props.disabled ? "true" : undefined,
+      "data-disabled": props.disabled ? "" : undefined,
       onKeyDown: (event: KeyboardEvent) => {
         onKeyDown?.(event);
         if (props.disabled) return;

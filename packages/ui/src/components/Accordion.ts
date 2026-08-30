@@ -283,7 +283,7 @@ function AccordionItemComponent(props: AccordionItemProps): VNode {
       ...(frameProps as Record<string, unknown>),
       "data-state": open ? "open" : "closed",
       "data-value": value,
-      "data-disabled": isDisabled ? "true" : undefined,
+      "data-disabled": isDisabled ? "" : undefined,
     },
     h(ItemState.Provider, { value: state }, ...(([] as VChild[]).concat(children ?? []))),
   );
@@ -459,7 +459,7 @@ function AccordionComponent(props: AccordionProps): VNode {
       orientation,
       class: [lastChildBorderlessClass(), props.class].filter(Boolean).join(" ") || undefined,
       "data-orientation": orientation,
-      "data-disabled": disabled ? "true" : undefined,
+      "data-disabled": disabled ? "" : undefined,
       onKeyDown: (event: KeyboardEvent) => {
         onKeyDown?.(event);
         if (disabled) return;

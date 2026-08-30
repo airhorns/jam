@@ -184,7 +184,7 @@ describe("Slider", () => {
     const onValueChange = vi.fn();
     const r = slider({ defaultValue: 50, disabled: true, onValueChange });
     const { frame, thumbs } = parts(r);
-    expect(frame.getAttribute("data-disabled")).toBe("true");
+    expect(frame.getAttribute("data-disabled")).toBe("");
     expect(css(frame)).toMatchObject({ opacity: "0.5", cursor: "not-allowed" });
     expect(thumbs[0].hasAttribute("disabled")).toBe(true);
     stubRect(frame);

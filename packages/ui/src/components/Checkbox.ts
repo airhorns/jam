@@ -4,6 +4,7 @@ import { createStyledContext, styled } from "../styled";
 import type { StyledProps, VariantExtras } from "../styled";
 import { tokenValue } from "../variants";
 import { useControllableState } from "../state";
+import { useFormReset } from "../form";
 
 export type CheckedState = boolean | "indeterminate";
 
@@ -170,6 +171,7 @@ function CheckboxComponent(props: CheckboxProps): VNode {
     onChange: onCheckedChange,
   });
   const state: CheckedState = checked ?? false;
+  const resetProps = useFormReset(() => setChecked(defaultChecked ?? false));
 
   const frame = h(
     CheckboxFrame,
@@ -179,10 +181,14 @@ function CheckboxComponent(props: CheckboxProps): VNode {
       "aria-checked": state === "indeterminate" ? "mixed" : String(state),
       "aria-required": required || undefined,
       "data-state": state === "indeterminate" ? "indeterminate" : state ? "checked" : "unchecked",
+      "data-disabled": props.disabled ? "" : undefined,
       onClick: (event: MouseEvent) => {
         onClick?.(event);
         if (props.disabled) return;
         setChecked(state === true ? false : true);
+      },
+      onKeyDown: (event: KeyboardEvent) => {
+        if (event.key === "Enter") event.preventDefault();
       },
     },
     h(CheckboxState.Provider, { value: { checked: state } }, ...(([] as VChild[]).concat(children ?? []))),
@@ -194,6 +200,7 @@ function CheckboxComponent(props: CheckboxProps): VNode {
     null,
     frame,
     h("input", {
+      ...resetProps,
       type: "checkbox",
       name,
       value: value ?? "on",

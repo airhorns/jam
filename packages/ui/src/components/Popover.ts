@@ -129,7 +129,7 @@ function PopoverTrigger(props: PopoverTriggerProps): VNode {
     ...rest,
     "aria-haspopup": (rest as Record<string, unknown>)["aria-haspopup"] ?? "dialog",
     "aria-expanded": ctx.open,
-    "aria-controls": ctx.contentId,
+    "aria-controls": ctx.open ? ctx.contentId : undefined,
     "data-state": dataState(ctx.open),
     "data-layer-trigger": ctx.id,
     onClick: (event: MouseEvent) => {

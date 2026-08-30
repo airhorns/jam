@@ -231,7 +231,7 @@ function ToggleGroupComponent(props: ToggleGroupProps): VNode {
       class: [groupedChildrenClass(orientation), props.class].filter(Boolean).join(" ") || undefined,
       "aria-orientation": orientation,
       "data-orientation": orientation,
-      "data-disabled": props.disabled ? "true" : undefined,
+      "data-disabled": props.disabled ? "" : undefined,
       onKeyDown: (event: KeyboardEvent) => {
         onKeyDown?.(event);
         if (props.disabled) return;

@@ -153,7 +153,7 @@ describe("Accordion", () => {
   it("disables one item and the whole accordion", () => {
     const onValueChange = vi.fn();
     const one = accordion({ onValueChange }, { disabled: true });
-    expect(one.get("[data-value=c]").dataset.disabled).toBe("true");
+    expect(one.get("[data-value=c]").dataset.disabled).toBe("");
     expect(triggers(one)[2].hasAttribute("disabled")).toBe(true);
     click(triggers(one)[2]);
     expect(onValueChange).not.toHaveBeenCalled();

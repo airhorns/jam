@@ -430,7 +430,7 @@ function SliderComponent(props: SliderProps): VNode {
       orientation,
       "aria-orientation": orientation,
       "data-orientation": orientation,
-      "data-disabled": disabled ? "true" : undefined,
+      "data-disabled": disabled ? "" : undefined,
       onPointerDown,
     },
     h(SliderState.Provider, { value: state }, ...(([] as VChild[]).concat(children ?? []))),

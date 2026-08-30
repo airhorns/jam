@@ -22,6 +22,8 @@ export type LayerOptions = {
   modal?: boolean;
   /** Move focus into the content when it opens (default: modal). */
   autoFocus?: boolean;
+  /** Selector for the element to focus on open when nothing inside carries `autofocus` (default: first focusable). */
+  initialFocus?: string;
   /** Return focus to the previously focused element on close (default: modal). */
   restoreFocus?: boolean;
   /** Keep this layer's floating position up to date (see floating.ts). */
@@ -117,7 +119,10 @@ function onFocusIn(event: FocusEvent): void {
   prune();
   const layer = topmost();
   if (!layer || !layer.dismissOnFocusOutside) return;
-  if (isInsideLayer(layer.id, event.target as Node)) return;
+  const target = event.target as Node;
+  // Focus falling back to the document when a nested layer unmounts is not the user leaving.
+  if (target === document.body || target === document.documentElement) return;
+  if (isInsideLayer(layer.id, target)) return;
   layer.onDismiss();
 }
 
@@ -159,7 +164,8 @@ function startLayer(layer: Layer): void {
     if ((layer.autoFocus ?? layer.modal) && !layer.focused) {
       layer.focused = true;
       if (!content.contains(document.activeElement)) {
-        const target = content.querySelector<HTMLElement>("[autofocus]") ?? focusableElements(content)[0] ?? content;
+        const preferred = layer.initialFocus ? content.querySelector<HTMLElement>(layer.initialFocus) : null;
+        const target = content.querySelector<HTMLElement>("[autofocus]") ?? preferred ?? focusableElements(content)[0] ?? content;
         target.focus();
       }
     }
