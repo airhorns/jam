@@ -9,7 +9,27 @@
 
 import { autorun, reaction, runInAction } from "mobx";
 import { db, type Term } from "./db";
-import { type VNode, type VChild, emitVdom } from "./jsx";
+import { type VNode, type VChild, emitVdom, expandComponents } from "./jsx";
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * Execute the whole component tree — the root component and every nested
+ * one — returning a VDOM tree whose component nodes carry their output.
+ * Run this inside a tracking context so nested when() calls are tracked.
+ */
+export function renderTree(root: VChild): VChild {
+  const expanded = expandComponents(root);
+  if (
+    typeof expanded === "object" &&
+    expanded !== null &&
+    "__vnode" in expanded &&
+    typeof (expanded as VNode).tag === "function"
+  ) {
+    return (expanded as VNode).rendered;
+  }
+  return expanded;
+}
 
 /**
  * Mount a component tree into a DOM container.
@@ -23,18 +43,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
   // per-pattern indexes via when()), the effect function writes VDOM claims.
   // This cleanly separates tracked reads from map writes.
   const emitDisposer = reaction(
-    () => {
-      // TRACKED: execute component tree. Components call when().get()
-      // which reads per-pattern version counters (fine-grained tracking).
-      let vnode: VChild = rootVnode;
-      if (typeof rootVnode === "object" && rootVnode !== null && "__vnode" in rootVnode) {
-        const rn = rootVnode as VNode;
-        if (typeof rn.tag === "function") {
-          vnode = (rn.tag as Function)(rn.props);
-        }
-      }
-      return vnode;
-    },
+    () => renderTree(rootVnode),
     (vnode) => {
       // EFFECT: clear old component claims and emit new ones.
       // This writes to db.facts but doesn't re-trigger the data function
@@ -54,13 +63,13 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
   );
 
   // --- Phase 2: Patch DOM from all VDOM claims ---
-  const managed = new Map<string, HTMLElement | Text>();
+  const managed = new Map<string, Element | Text>();
   const mountedRefs = new Map<
     string,
     {
-      element: HTMLElement;
+      element: Element;
       refKey: string;
-      callback: (element: HTMLElement | null) => void;
+      callback: (element: Element | null) => void;
     }
   >();
 
@@ -114,7 +123,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
 
     const visited = new Set<string>();
 
-    function syncElementRef(entityId: string, el: HTMLElement) {
+    function syncElementRef(entityId: string, el: Element) {
       const refKey = elementRefs.get(entityId);
       const mounted = mountedRefs.get(entityId);
 
@@ -124,7 +133,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       }
 
       const callback = db.getRef(refKey) as
-        | ((element: HTMLElement | null) => void)
+        | ((element: Element | null) => void)
         | undefined;
       if (!callback) {
         releaseElementRef(entityId);
@@ -137,7 +146,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       mountedRefs.set(entityId, { element: el, refKey, callback });
     }
 
-    function reconcile(entityId: string): Node | null {
+    function reconcile(entityId: string, parentIsSvg: boolean): Node | null {
       const tag = tags.get(entityId);
       if (!tag || visited.has(entityId)) return null;
       visited.add(entityId);
@@ -154,9 +163,22 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
         return node;
       }
 
-      let el = managed.get(entityId);
-      if (!(el instanceof HTMLElement) || el.tagName.toLowerCase() !== tag) {
-        el = document.createElement(tag);
+      // SVG tags are case-sensitive (foreignObject, linearGradient), HTML tags are not.
+      const isSvg = tag === "svg" || parentIsSvg;
+      const existing = managed.get(entityId);
+      const reusable =
+        existing instanceof Element &&
+        (isSvg
+          ? existing.namespaceURI === SVG_NS && existing.localName === tag
+          : existing.namespaceURI !== SVG_NS &&
+            existing.localName === tag.toLowerCase());
+      let el: Element;
+      if (reusable) {
+        el = existing;
+      } else {
+        el = isSvg
+          ? document.createElementNS(SVG_NS, tag)
+          : document.createElement(tag);
         managed.set(entityId, el);
       }
 
@@ -173,7 +195,10 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       if (elProps) {
         for (const [key, value] of elProps) {
           activeAttrs.add(key);
-          if (key === "checked" || key === "value" || key === "disabled") {
+          if (
+            !isSvg &&
+            (key === "checked" || key === "value" || key === "disabled")
+          ) {
             if ((el as any)[key] !== value) (el as any)[key] = value;
           } else {
             const strVal = String(value);
@@ -208,8 +233,9 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       if (ownsChildren) {
         const childList = children.get(entityId) ?? [];
         const childNodes: Node[] = [];
+        const childIsSvg = isSvg && tag !== "foreignObject";
         for (const [, childId] of childList) {
-          const node = reconcile(childId);
+          const node = reconcile(childId, childIsSvg);
           if (node) childNodes.push(node);
         }
         for (let i = 0; i < childNodes.length; i++) {
@@ -228,7 +254,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
     const rootChildren = children.get("dom") ?? [];
     const rootNodes: Node[] = [];
     for (const [, childId] of rootChildren) {
-      const node = reconcile(childId);
+      const node = reconcile(childId, false);
       if (node) rootNodes.push(node);
     }
     for (let i = 0; i < rootNodes.length; i++) {

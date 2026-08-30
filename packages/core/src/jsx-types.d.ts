@@ -10,4 +10,9 @@ declare namespace JSX {
   interface ElementChildrenAttribute {
     children: {};
   }
+
+  interface IntrinsicAttributes {
+    key?: unknown;
+    id?: string;
+  }
 }
