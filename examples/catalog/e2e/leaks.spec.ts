@@ -1,14 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import type { DemoGroup } from "../src/types";
-import { loadRegistry, performRecipe, trackErrors } from "./helpers";
+import { GROUPS, loadRegistry, performRecipe, trackErrors } from "./helpers";
 
 /**
  * Mount every demo, drive its recipe, then unmount it by navigating away in-page
  * (no reload, so the fact database survives) and check nothing was left behind:
  * component-scoped facts, dismissable layers, the body scroll lock, or timers.
  */
-
-const GROUPS: DemoGroup[] = ["Layout", "Typography", "Forms", "Overlays", "Content", "Feedback", "Navigation", "Utilities", "Examples"];
 
 /** Entities that legitimately outlive a demo: catalog navigation and demo-level app state. */
 const APP_ENTITIES = new Set(["catalog", "demo", "toasts", "media"]);
