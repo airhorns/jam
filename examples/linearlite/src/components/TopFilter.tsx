@@ -2,7 +2,7 @@ import { h } from "@jam/core/jsx";
 import { $, replace, when } from "@jam/core";
 import { queryMeta, readValue } from "../facts";
 import { filterStateToParams, type FilterState } from "../filter-state";
-import { navigate, type Route } from "../programs/router";
+import { currentRoute, navigate, type Route } from "../programs/router";
 import {
   PriorityDisplay,
   PriorityValues,
@@ -156,6 +156,12 @@ function FilterChips({ route }: { route: Route }) {
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
+function commitSearch(query: string) {
+  const route = currentRoute();
+  if (route.page !== "search") return;
+  applyFilter(route, { query: query.trim() || undefined }, true);
+}
+
 function SearchBox({ route }: { route: Route }) {
   const text = readValue("ui", "search", "text");
   const value = typeof text === "string" ? text : route.filter.query ?? "";
@@ -170,7 +176,7 @@ function SearchBox({ route }: { route: Route }) {
         const next = (event.target as HTMLInputElement).value;
         replace("ui", "search", "text", next);
         clearTimeout(searchTimer);
-        searchTimer = setTimeout(() => applyFilter(route, { query: next.trim() || undefined }, true), SEARCH_DEBOUNCE);
+        searchTimer = setTimeout(() => commitSearch(next), SEARCH_DEBOUNCE);
       }}
     />
   );

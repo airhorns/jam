@@ -8,7 +8,7 @@ import type { PGliteWithLive } from "@electric-sql/pglite/live";
 import type { PGliteWithSync } from "@electric-sql/pglite-sync";
 import { replace, transaction } from "@jam/core";
 import type { ChangeSet, CommentChange, IssueChange } from "./changes";
-import { createIndexes } from "./migrations";
+import { createIndexes, createSearchIndex } from "./migrations";
 
 export type SyncStatus = "standalone" | "initial-sync" | "done";
 
@@ -61,6 +61,8 @@ export async function markSent(pg: PGliteWithLive, changes: ChangeSet): Promise<
 export interface WritePathOptions {
   applyChangesUrl: string;
   fetch?: typeof fetch;
+  /** Delay before retrying a failed push; doubles on each consecutive failure up to a minute. */
+  retryDelay?: number;
 }
 
 export async function pushChanges(pg: PGliteWithLive, options: WritePathOptions): Promise<ChangeSet> {
@@ -77,9 +79,34 @@ export async function pushChanges(pg: PGliteWithLive, options: WritePathOptions)
   return changes;
 }
 
-/** Watch for unsynced rows and push them; returns a disposer. */
+/**
+ * Watch for unsynced rows and push them; returns a disposer. The live query only
+ * fires when the unsynced counts change, so a failed push schedules its own retry.
+ */
 export function startWritePath(pg: PGliteWithLive, options: WritePathOptions): () => Promise<void> {
   const mutex = new Mutex();
+  const baseDelay = options.retryDelay ?? 1000;
+  let failures = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+
+  const push = async () => {
+    clearTimeout(retryTimer);
+    await mutex.acquire();
+    try {
+      await pushChanges(pg, options);
+      failures = 0;
+    } catch (error) {
+      console.error("[linearlite] write path failed", error);
+      if (!stopped) {
+        retryTimer = setTimeout(push, Math.min(baseDelay * 2 ** failures, 60_000));
+        failures++;
+      }
+    } finally {
+      mutex.release();
+    }
+  };
+
   const query = pg.live.query<{ issue_count: number; comment_count: number }>({
     query: `SELECT
       (SELECT count(*)::int FROM issue WHERE synced = false AND sent_to_server = false) AS issue_count,
@@ -87,17 +114,12 @@ export function startWritePath(pg: PGliteWithLive, options: WritePathOptions): (
     callback: async (results) => {
       const { issue_count, comment_count } = results.rows[0];
       if (issue_count === 0 && comment_count === 0) return;
-      await mutex.acquire();
-      try {
-        await pushChanges(pg, options);
-      } catch (error) {
-        console.error("[linearlite] write path failed", error);
-      } finally {
-        mutex.release();
-      }
+      await push();
     },
   });
   return async () => {
+    stopped = true;
+    clearTimeout(retryTimer);
     await (await query).unsubscribe();
   };
 }
@@ -139,6 +161,7 @@ export async function startShapeSync(pg: PGliteWithLive & PGliteWithSync, option
       if (!hadIssues) {
         setSyncStatus("initial-sync", "Creating indexes…");
         await createIndexes(pg);
+        await createSearchIndex(pg);
       }
       initialSyncDone();
     },

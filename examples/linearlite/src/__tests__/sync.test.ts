@@ -11,7 +11,7 @@ import { changeSetSchema } from "../changes";
 import { migrate } from "../migrations";
 import { addComment, createIssue, deleteIssue, moveIssue, updateIssue } from "../mutations";
 import { startQueries } from "../programs/queries";
-import { collectChanges, pushChanges } from "../sync";
+import { collectChanges, pushChanges, startWritePath } from "../sync";
 
 let pg: PGlite & PGliteWithLive;
 let stopQueries: () => Promise<void>;
@@ -216,5 +216,28 @@ describe("linearlite data layer in Electric mode", () => {
   it("applies a remote hard delete", async () => {
     await electricWrite([`DELETE FROM issue WHERE id = '${ISSUE_B}'`]);
     expect((await pg.query(`SELECT 1 FROM issue WHERE id = $1`, [ISSUE_B])).rows).toEqual([]);
+  });
+
+  it("retries a failed push until the write server accepts it", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchStub = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("nope", { status: 503 }))
+      .mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
+    updateIssue(ISSUE_A, { title: "Retry me" });
+    const stop = startWritePath(pg, { applyChangesUrl: "http://write/apply-changes", fetch: fetchStub, retryDelay: 20 });
+    try {
+      await waitForRow<{ sent_to_server: boolean }>(
+        `SELECT sent_to_server FROM issue WHERE id = $1`,
+        [ISSUE_A],
+        (r) => r?.sent_to_server === true,
+      );
+      expect(fetchStub.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(errorSpy).toHaveBeenCalledWith("[linearlite] write path failed", expect.any(Error));
+      expect(await collectChanges(pg)).toEqual({ issues: [], comments: [] });
+    } finally {
+      await stop();
+      errorSpy.mockRestore();
+    }
   });
 });
