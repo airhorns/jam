@@ -1,4 +1,4 @@
-import { $, _, Portal, retract, set, when } from "@jam/core";
+import { $, _, Portal, forget, replace, when } from "@jam/core";
 import { createContext, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { styled } from "../styled";
@@ -303,18 +303,18 @@ function startDrag(ctx: SheetContextValue, event: PointerEvent): void {
   const startY = event.clientY;
   const { current, max } = currentHeights(ctx);
   const offsetFor = (clientY: number) => Math.min(current, Math.max(current - max, clientY - startY));
-  const move = (e: PointerEvent) => set(ctx.id, "dragOffset", offsetFor(e.clientY));
+  const move = (e: PointerEvent) => replace(ctx.id, "dragOffset", offsetFor(e.clientY));
   const finish = (e: PointerEvent) => {
     document.removeEventListener("pointermove", move);
     document.removeEventListener("pointerup", finish);
     document.removeEventListener("pointercancel", finish);
-    retract(ctx.id, "dragOffset", _);
+    forget(ctx.id, "dragOffset", _);
     settle(ctx, offsetFor(e.clientY));
   };
   document.addEventListener("pointermove", move);
   document.addEventListener("pointerup", finish);
   document.addEventListener("pointercancel", finish);
-  set(ctx.id, "dragOffset", 0);
+  replace(ctx.id, "dragOffset", 0);
 }
 
 function SheetHandle(props: StyledProps): VNode {

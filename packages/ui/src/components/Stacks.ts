@@ -120,7 +120,7 @@ const ZStackFill = styled("div", {
 // The fill is transparent to the pointer so lower layers stay clickable; its
 // content is not. Doubling the class beats the atomic class specificity.
 function injectZStackRules(): void {
-  injectRule("jamagui-zstack", ".is_ZStackFill.is_ZStackFill > * { pointer-events: auto }");
+  injectRule("jam-ui-zstack", ".is_ZStackFill.is_ZStackFill > * { pointer-events: auto }");
 }
 
 const toArray = (children: VChild | VChild[] | undefined): VChild[] =>

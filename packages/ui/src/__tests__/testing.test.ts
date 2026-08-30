@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from "vitest";
 import { h } from "@jam/core/jsx";
-import { set, when, $ } from "@jam/core";
+import { replace, when, $ } from "@jam/core";
 import { render, css, click, resetUI, computed, injectedRules } from "../testing";
 import { createJamUI } from "../config";
 import { styled } from "../styled";
@@ -43,10 +43,10 @@ describe("testing harness", () => {
   });
 
   it("dispatches events and re-renders reactively", () => {
-    set("t", "count", 0);
+    replace("t", "count", 0);
     const Counter = () => {
       const n = Number(when(["t", "count", $.n])[0]?.n ?? 0);
-      return h(Button, { onClick: () => set("t", "count", n + 1) }, String(n));
+      return h(Button, { onClick: () => replace("t", "count", n + 1) }, String(n));
     };
     const r = render(h(Counter, null));
     click(r.get("button"));

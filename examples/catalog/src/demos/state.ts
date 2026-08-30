@@ -1,4 +1,4 @@
-import { $, set, when } from "@jam/core";
+import { $, replace, when } from "@jam/core";
 
 type Widen<T> = T extends string ? string : T extends number ? number : T extends boolean ? boolean : T;
 
@@ -12,5 +12,5 @@ export function useDemoState<T extends string | number | boolean>(
 ): [Widen<T>, (next: Widen<T>) => void] {
   const rows = when(["demo", key, $.v]);
   const value = rows.length > 0 ? (rows[0].v as Widen<T>) : (initial as Widen<T>);
-  return [value, (next) => set("demo", key, next)];
+  return [value, (next) => replace("demo", key, next)];
 }

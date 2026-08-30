@@ -1,4 +1,4 @@
-import { assert, retract, set, transaction, when, $, _ } from "@jam/core";
+import { remember, forget, replace, transaction, when, $, _ } from "@jam/core";
 import { createContext, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import type { ThemeValues } from "./types";
@@ -32,7 +32,7 @@ export function createThemes(themes: Record<string, ThemeValues>): void {
     for (const [name, values] of Object.entries(themes)) {
       registerTheme(name, values);
       for (const [key, value] of Object.entries(values)) {
-        assert("theme", name, key, value);
+        remember("theme", name, key, value);
       }
     }
   });
@@ -48,8 +48,8 @@ export function updateTheme(name: string, values: Partial<ThemeValues>): void {
   transaction(() => {
     for (const [key, value] of Object.entries(values)) {
       if (value == null) continue;
-      retract("theme", name, key, _);
-      assert("theme", name, key, value);
+      forget("theme", name, key, _);
+      remember("theme", name, key, value);
     }
   });
   registerTheme(name, values as ThemeValues);
@@ -100,7 +100,7 @@ export function getResolvedThemeValues(name: string): Record<string, string> {
 
 /** Set the root theme by name. Writes the theme class onto the configured root element. */
 export function setTheme(name: string): void {
-  set("ui", "theme", name);
+  replace("ui", "theme", name);
   applyRootThemeClass(name);
 }
 
@@ -235,10 +235,10 @@ let themeStyleEl: HTMLStyleElement | null = null;
 function getThemeStyleElement(): HTMLStyleElement | null {
   if (typeof document === "undefined") return null;
   if (themeStyleEl?.isConnected) return themeStyleEl;
-  themeStyleEl = document.getElementById("jamagui-themes") as HTMLStyleElement | null;
+  themeStyleEl = document.getElementById("jam-ui-themes") as HTMLStyleElement | null;
   if (!themeStyleEl) {
     themeStyleEl = document.createElement("style");
-    themeStyleEl.id = "jamagui-themes";
+    themeStyleEl.id = "jam-ui-themes";
     document.head.appendChild(themeStyleEl);
   }
   return themeStyleEl;

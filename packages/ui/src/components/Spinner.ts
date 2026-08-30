@@ -5,13 +5,13 @@ import { styled } from "../styled";
 import type { StyledProps, VariantFunction } from "../styled";
 import { tokenValue } from "../variants";
 
-const SPIN = "jamagui-spin";
+const SPIN = "jam-ui-spin";
 
 // The keyframes and the animation shorthand can't come from style props, so
 // they are one injected rule; the doubled class beats the atomic classes.
 function injectSpinnerRules(): void {
   injectRule(`@keyframes ${SPIN}`, `@keyframes ${SPIN} { to { transform: rotate(360deg) } }`);
-  injectRule("jamagui-spinner", `.is_Spinner.is_Spinner { animation: ${SPIN} 0.85s linear infinite }`);
+  injectRule("jam-ui-spinner", `.is_Spinner.is_Spinner { animation: ${SPIN} 0.85s linear infinite }`);
 }
 
 const ringSized = (diameter: number) => ({

@@ -225,7 +225,7 @@ describe("mount", () => {
   });
 
   it("keeps camelCase attributes and applies defaultValue/defaultChecked", () => {
-    set("form", "tick", 0);
+    replace("form", "tick", 0);
     const Root = () => {
       when(["form", "tick", $.t]);
       return h("div", null,
@@ -243,14 +243,14 @@ describe("mount", () => {
     expect(div.getAttribute("foobar")).toBe("x");
 
     text.value = "typed";
-    set("form", "tick", 1);
+    replace("form", "tick", 1);
     expect(text.value).toBe("typed");
     expect(text.getAttribute("value")).toBe("ada");
     expect(div.getAttribute("foobar")).toBe("x");
   });
 
   it("removing a keyed child leaves its siblings' DOM nodes in place", () => {
-    set("list", "items", "a,b,c,d");
+    replace("list", "items", "a,b,c,d");
     const Root = () => {
       const items = String(when(["list", "items", $.v])[0]?.v ?? "").split(",").filter(Boolean);
       return h("ul", null, items.map((item) => h("li", { key: item }, item)));
@@ -264,7 +264,7 @@ describe("mount", () => {
     });
     observer.observe(ul, { childList: true });
 
-    set("list", "items", "a,c,d");
+    replace("list", "items", "a,c,d");
     observer.takeRecords().forEach((r) => inserted.push(...Array.from(r.addedNodes)));
     observer.disconnect();
 
@@ -314,7 +314,7 @@ describe("mount", () => {
   });
 
   it("creates svg elements in the SVG namespace and updates them in place", () => {
-    set("icon", "d", "M0 0L1 1");
+    replace("icon", "d", "M0 0L1 1");
     const Icon = () => {
       const d = String(when(["icon", "d", $.d])[0]?.d ?? "");
       return h(
@@ -334,7 +334,7 @@ describe("mount", () => {
     expect(path.getAttribute("stroke-width")).toBe("1.5");
     expect(container.querySelector("foreignObject div")!.namespaceURI).toBe("http://www.w3.org/1999/xhtml");
 
-    set("icon", "d", "M1 1L2 2");
+    replace("icon", "d", "M1 1L2 2");
     expect(container.querySelector("path")).toBe(path);
     expect(path.getAttribute("d")).toBe("M1 1L2 2");
   });

@@ -50,7 +50,7 @@ templates): `light`, `dark`, colour children (`light_blue`, `dark_red`, …),
 truth; `addTheme`/`updateTheme` change them at runtime.
 
 Themes render as CSS variables. Each theme gets a rule
-`.t_<name> { --background: …; --color: …; }` in `<style id="jamagui-themes">`,
+`.t_<name> { --background: …; --color: …; }` in `<style id="jam-ui-themes">`,
 and an element carrying a theme gets the whole ancestor chain as classes:
 `t_light t_light_blue t_light_blue_Button`. Style props that reference the
 theme emit `var(--background)`, so switching theme (`setTheme("dark")`) changes
@@ -146,7 +146,7 @@ Style props also accept:
   child element instead of rendering a wrapper (see `docs/Slot.md`).
 
 Every declaration becomes its own atomic class `_<abbrev>[-pseudo|-m]-<hash>`
-in `<style id="jamagui-styles">`, deduped per declaration.
+in `<style id="jam-ui-styles">`, deduped per declaration.
 
 ## Fonts
 

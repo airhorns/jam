@@ -8,7 +8,7 @@
 // optionally `data-layer-anchor={id}` so the program can tell inside from
 // outside and floating.ts knows what to position against.
 
-import { $, _, db, retract, set, when } from "@jam/core";
+import { $, _, db, forget, replace, when } from "@jam/core";
 
 export type LayerOptions = {
   onDismiss: () => void;
@@ -241,9 +241,9 @@ export function writeFloatingPosition(id: string, position: FloatingPosition): v
   const json = JSON.stringify(position);
   const rows = db.index([id, "floating", $.json]).get();
   if (rows.length > 0 && rows[0].json === json) return;
-  set(id, "floating", json);
+  replace(id, "floating", json);
 }
 
 export function clearFloatingPosition(id: string): void {
-  retract(id, "floating", _);
+  forget(id, "floating", _);
 }

@@ -3,7 +3,7 @@
 Composite screens built only from `@jam/ui` components, modelled on tamagui's
 Bento and demo screens. They exist to exercise the library the way an app
 would, so anything awkward to build here is a library bug worth fixing in
-`packages/jamagui`, not something to work around in the example.
+`packages/ui`, not something to work around in the example.
 
 ## Conventions
 

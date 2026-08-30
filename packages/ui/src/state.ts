@@ -1,4 +1,4 @@
-import { $, set, useComponentId, when } from "@jam/core";
+import { $, replace, useComponentId, when } from "@jam/core";
 import type { Term } from "@jam/core";
 
 export type ControllableStateOptions<T> = {
@@ -24,7 +24,7 @@ export function useControllableState<T extends Term>(
   const update = (next: T) => {
     if (next === current) return;
     options.onChange?.(next);
-    if (!controlled) set(id, key, next);
+    if (!controlled) replace(id, key, next);
   };
   return [current, update];
 }

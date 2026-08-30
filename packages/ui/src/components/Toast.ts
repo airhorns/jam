@@ -1,4 +1,4 @@
-import { $, Portal, db, set, when } from "@jam/core";
+import { $, Portal, db, replace, when } from "@jam/core";
 import { createContext, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { styled } from "../styled";
@@ -86,7 +86,7 @@ function readToastIds(): string[] {
 }
 
 function writeToastIds(ids: string[]): void {
-  set(TOASTS, "ids", JSON.stringify(ids));
+  replace(TOASTS, "ids", JSON.stringify(ids));
 }
 
 function currentToastIds(): string[] {

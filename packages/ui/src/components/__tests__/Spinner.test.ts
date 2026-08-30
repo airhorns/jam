@@ -48,10 +48,10 @@ describe("Spinner", () => {
   it("spins from one injected keyframe rule", () => {
     render(h(Spinner, null));
     const rules = injectedRules();
-    expect(rules.some((rule) => rule.includes("@keyframes jamagui-spin"))).toBe(true);
+    expect(rules.some((rule) => rule.includes("@keyframes jam-ui-spin"))).toBe(true);
     expect(rules.filter((rule) => rule.includes(".is_Spinner.is_Spinner")).length).toBe(1);
     render(h(Spinner, null));
-    expect(injectedRules().filter((rule) => rule.includes("@keyframes jamagui-spin")).length).toBe(1);
+    expect(injectedRules().filter((rule) => rule.includes("@keyframes jam-ui-spin")).length).toBe(1);
   });
 
   it("takes layout props like any other component", () => {

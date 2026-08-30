@@ -74,13 +74,13 @@ const BORDERED = "_jui_grp_b";
 function injectGroupRules(): void {
   const edge = (marker: string, first: [string, string], last: [string, string]) => {
     const item = `.${PASS_RADIUS}.${marker} > .is_GroupItem`;
-    injectRule(`jamagui-group-${marker}-reset`, `${item}, ${item} > * { border-radius: 0 }`);
+    injectRule(`jam-ui-group-${marker}-reset`, `${item}, ${item} > * { border-radius: 0 }`);
     injectRule(
-      `jamagui-group-${marker}-first`,
+      `jam-ui-group-${marker}-first`,
       `${item}:first-child, ${item}:first-child > * { border-${first[0]}-radius: inherit; border-${first[1]}-radius: inherit }`,
     );
     injectRule(
-      `jamagui-group-${marker}-last`,
+      `jam-ui-group-${marker}-last`,
       `${item}:last-child, ${item}:last-child > * { border-${last[0]}-radius: inherit; border-${last[1]}-radius: inherit }`,
     );
   };
@@ -92,7 +92,7 @@ function injectGroupRules(): void {
     [VERTICAL, "top"],
   ] as const) {
     const inner = `.${BORDERED}.${marker} > .is_GroupItem:not(:first-child)`;
-    injectRule(`jamagui-group-${marker}-collapse`, `${inner}, ${inner} > * { border-${side}-width: 0 }`);
+    injectRule(`jam-ui-group-${marker}-collapse`, `${inner}, ${inner} > * { border-${side}-width: 0 }`);
   }
 }
 

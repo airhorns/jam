@@ -8,10 +8,10 @@ let styleElement: HTMLStyleElement | null = null;
 function getStyleElement(): HTMLStyleElement | null {
   if (typeof document === "undefined") return null;
   if (styleElement?.isConnected) return styleElement;
-  styleElement = document.getElementById("jamagui-styles") as HTMLStyleElement | null;
+  styleElement = document.getElementById("jam-ui-styles") as HTMLStyleElement | null;
   if (!styleElement) {
     styleElement = document.createElement("style");
-    styleElement.id = "jamagui-styles";
+    styleElement.id = "jam-ui-styles";
     document.head.appendChild(styleElement);
   }
   return styleElement;

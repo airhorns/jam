@@ -1,5 +1,5 @@
 import { h } from "@jam/core/jsx";
-import { $, set, when } from "@jam/core";
+import { $, replace, when } from "@jam/core";
 import { XStack, YStack, Text, H2, H3, H4, Paragraph, Button, Separator, styled, setTheme } from "@jam/ui";
 import { registry, groupOrder, findComponent } from "./registry";
 import type { ComponentDemos, Demo } from "./types";
@@ -35,10 +35,10 @@ function writeUrl(state: CatalogState): void {
 }
 
 export function applyState(state: CatalogState): void {
-  set("catalog", "component", state.component);
-  set("catalog", "theme", state.theme);
-  set("catalog", "chrome", state.chrome);
-  set("catalog", "demo", state.demo ?? -1);
+  replace("catalog", "component", state.component);
+  replace("catalog", "theme", state.theme);
+  replace("catalog", "chrome", state.chrome);
+  replace("catalog", "demo", state.demo ?? -1);
   setTheme(state.theme);
   document.documentElement.dataset.theme = state.theme;
   writeUrl(state);

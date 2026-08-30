@@ -6,7 +6,7 @@ import type { StyledProps, VariantFunction } from "../styled";
 import { tokenValue } from "../variants";
 import { Stack } from "./Stacks";
 
-const SWEEP = "jamagui-progress-sweep";
+const SWEEP = "jam-ui-progress-sweep";
 
 // An indeterminate bar has no value to position it by, so it sweeps instead.
 // The attribute selector outranks the atomic transform class.
@@ -16,7 +16,7 @@ function injectProgressRules(): void {
     `@keyframes ${SWEEP} { from { transform: translateX(-100%) } to { transform: translateX(250%) } }`,
   );
   injectRule(
-    "jamagui-progress-indeterminate",
+    "jam-ui-progress-indeterminate",
     `.is_ProgressIndicator[data-state="indeterminate"] { animation: ${SWEEP} 1.4s ease-in-out infinite }`,
   );
 }

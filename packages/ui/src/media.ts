@@ -1,4 +1,4 @@
-import { set, when, $ } from "@jam/core";
+import { replace, when, $ } from "@jam/core";
 import type { MediaConfig, MediaQueryConfig } from "./types";
 
 const listeners: Array<() => void> = [];
@@ -20,12 +20,12 @@ export function createMedia(config: MediaConfig): void {
     const queryString = buildMediaQuery(query);
     mediaQueries.set(name, queryString);
     if (!canMatch) {
-      set("media", name, false);
+      replace("media", name, false);
       continue;
     }
     const mql = window.matchMedia(queryString);
-    set("media", name, mql.matches);
-    const handler = (e: MediaQueryListEvent) => set("media", name, e.matches);
+    replace("media", name, mql.matches);
+    const handler = (e: MediaQueryListEvent) => replace("media", name, e.matches);
     mql.addEventListener("change", handler);
     listeners.push(() => mql.removeEventListener("change", handler));
   }

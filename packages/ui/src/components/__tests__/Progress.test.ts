@@ -66,7 +66,7 @@ describe("Progress", () => {
     expect(indicator.getAttribute("data-state")).toBe("indeterminate");
     expect(css(indicator).width).toBe("40%");
     expect(css(indicator).transform).toBe("translateX(75%)");
-    expect(injectedRules().some((rule) => rule.includes("@keyframes jamagui-progress-sweep"))).toBe(true);
+    expect(injectedRules().some((rule) => rule.includes("@keyframes jam-ui-progress-sweep"))).toBe(true);
     expect(
       injectedRules().some(
         (rule) => rule.includes('.is_ProgressIndicator[data-state="indeterminate"]') && rule.includes("animation"),

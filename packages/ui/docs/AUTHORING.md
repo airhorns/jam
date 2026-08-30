@@ -53,7 +53,7 @@ Read `STYLE-SYSTEM.md` first.
    variant group plus one interactive demo with `data-testid`s. Run
    `CATALOG_PORT=5176 pnpm shots <Name>` from `examples/catalog` and look at
    both PNGs in `shots/` — fix anything that looks off before moving on.
-5. `pnpm exec vitest run` and `pnpm typecheck` pass in `packages/jamagui`,
+5. `pnpm exec vitest run` and `pnpm typecheck` pass in `packages/ui`,
    `pnpm typecheck` passes in `examples/catalog`.
 
 ## Doc template (`docs/<Name>.md`)

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { resetUI } from "../testing";
-import { set } from "@jam/core";
+import { replace } from "@jam/core";
 import { createMedia, useMedia, disposeMedia } from "../media";
 
 beforeEach(() => {
@@ -77,9 +77,9 @@ describe("useMedia", () => {
 
   it("returns all configured breakpoints", () => {
     // Directly set media facts for testing without matchMedia
-    set("media", "sm", true);
-    set("media", "md", false);
-    set("media", "lg", false);
+    replace("media", "sm", true);
+    replace("media", "md", false);
+    replace("media", "lg", false);
 
     const media = useMedia();
     expect(media.sm).toBe(true);

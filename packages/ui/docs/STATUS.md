@@ -103,7 +103,7 @@ Component themes never nest: a `Button` inside `light_Card` resolves to
 (`value`, `checked`, …) are kept across reconciles so hidden form inputs keep
 their value.
 
-**QA.** 409 unit tests across 40 files in `packages/jamagui`, 79 in
+**QA.** 409 unit tests across 40 files in `packages/ui`, 79 in
 `packages/core`. The catalog has a demo page per component with "shot
 recipes" (click/hover/focus before capture) so open overlays are
 screenshotted; `pnpm test:e2e` renders every demo and performs every recipe,

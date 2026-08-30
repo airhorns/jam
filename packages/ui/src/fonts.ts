@@ -1,4 +1,4 @@
-import { assert, transaction, when, $ } from "@jam/core";
+import { remember, transaction, when, $ } from "@jam/core";
 import type { FontConfig } from "./types";
 
 const fontNames = new Set<string>();
@@ -12,10 +12,10 @@ export function createFont(name: string, config: FontConfig): void {
   fontNames.add(name);
   fontCache.delete(name);
   transaction(() => {
-    assert("font", name, "family", config.family);
+    remember("font", name, "family", config.family);
 
     for (const [key, value] of Object.entries(config.size)) {
-      assert("font", name, "size", key, value);
+      remember("font", name, "size", key, value);
     }
 
     const tables: Array<[string, Record<string, string | number> | undefined]> = [
@@ -26,15 +26,15 @@ export function createFont(name: string, config: FontConfig): void {
     for (const [prop, values] of tables) {
       if (!values) continue;
       for (const [key, value] of Object.entries(fillSizes(config.size, values))) {
-        assert("font", name, prop, key, value);
+        remember("font", name, prop, key, value);
       }
     }
 
     if (config.face) {
       for (const [weight, faces] of Object.entries(config.face)) {
-        assert("font", name, "face", weight, faces.normal);
+        remember("font", name, "face", weight, faces.normal);
         if (faces.italic) {
-          assert("font", name, "faceItalic", weight, faces.italic);
+          remember("font", name, "faceItalic", weight, faces.italic);
         }
       }
     }

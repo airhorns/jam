@@ -1,19 +1,10 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { db, mount, replace, when, $ } from "@jam/core";
+import { mount, replace, when, $ } from "@jam/core";
 import { h } from "@jam/core/jsx";
-import {
-  Button,
-  Checkbox,
-  Input,
-  Progress,
-  Text,
-  XStack,
-  YStack,
-  clearInjectedStyles,
-  createJamUI,
-} from "../..";
+import { Button, Checkbox, Input, Progress, Text, XStack, YStack, createJamUI } from "../..";
+import { resetUI } from "../../testing";
 
 let dispose: (() => void) | undefined;
 
@@ -49,10 +40,7 @@ function configureTestUI() {
 }
 
 beforeEach(() => {
-  db.clear();
-  document.body.innerHTML = "";
-  document.head.innerHTML = "";
-  clearInjectedStyles();
+  resetUI();
   configureTestUI();
 });
 
@@ -97,9 +85,9 @@ describe("Jam UI DOM rendering", () => {
       "review@example.com",
     );
     expect(container.textContent).toContain("Component review");
-    expect(document.getElementById("jam-ui-themes")?.textContent).toContain(
-      "--background: #f7f4ef",
-    );
+    const themeSheet = (document.getElementById("jam-ui-themes") as HTMLStyleElement | null)?.sheet;
+    const themeRules = Array.from(themeSheet?.cssRules ?? []).map((rule) => rule.cssText);
+    expect(themeRules.some((rule) => rule.includes("--background: #f7f4ef"))).toBe(true);
     const styleElement = document.getElementById("jam-ui-styles") as HTMLStyleElement | null;
     expect(styleElement?.sheet?.cssRules.length).toBeGreaterThan(0);
   });

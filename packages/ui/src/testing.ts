@@ -84,7 +84,7 @@ export function resetUI(): void {
   if (typeof document === "undefined") return;
   document.body.innerHTML = "";
   document.documentElement.className = "";
-  document.querySelectorAll("style[id^='jamagui']").forEach((el) => el.remove());
+  document.querySelectorAll("style[id^='jam-ui']").forEach((el) => el.remove());
 }
 
 /** `resetUI()` followed by `createJamUI(defaultConfig)`: a clean default design system. */
@@ -127,10 +127,10 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Every `.class[pseudo] { … }` rule text from all jamagui style sheets. */
+/** Every `.class[pseudo] { … }` rule text from all @jam/ui style sheets. */
 export function injectedRules(): string[] {
   const rules: string[] = [];
-  for (const style of Array.from(document.querySelectorAll<HTMLStyleElement>("style[id^='jamagui']"))) {
+  for (const style of Array.from(document.querySelectorAll<HTMLStyleElement>("style[id^='jam-ui']"))) {
     const sheet = style.sheet;
     if (!sheet) continue;
     for (const rule of Array.from(sheet.cssRules)) rules.push(rule.cssText);
