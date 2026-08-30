@@ -4,7 +4,7 @@
 pnpm install       # Install all dependencies
 pnpm dev           # Run folk-todo example dev server
 pnpm test          # Run package/example unit tests where present
-pnpm test:e2e      # Run folk-todo, puddy-vite, and linearlite e2e tests (Playwright)
+pnpm test:e2e      # Run folk-todo, puddy-vite, linearlite and catalog e2e tests (Playwright)
 pnpm typecheck     # TypeScript check all packages
 
 # Optional just conveniences, if just is installed

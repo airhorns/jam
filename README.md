@@ -28,7 +28,7 @@ Useful commands:
 ```bash
 pnpm dev             # Run the folk-todo example dev server
 pnpm test            # Run unit tests for packages/examples that define them
-pnpm test:e2e        # Run folk-todo, puddy-vite, and linearlite Playwright suites
+pnpm test:e2e        # Run folk-todo, puddy-vite, linearlite and catalog Playwright suites
 pnpm typecheck       # TypeScript check all packages and examples
 pnpm run dev:ui      # Run the @jam/ui catalog example
 ```
