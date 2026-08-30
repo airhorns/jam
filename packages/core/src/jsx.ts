@@ -120,7 +120,7 @@ let currentComponentId: string | null = null;
 
 /**
  * The entity ID the currently-executing component's root output will
- * receive. Stable across renders for a given tree position (or `id`/`key`),
+ * receive. Stable across renders for a given tree position (or `key`),
  * so it can key per-instance state stored in the fact database.
  * Only valid while a component function is executing.
  */
@@ -230,7 +230,7 @@ function expandSlotList(
 /**
  * Expand a VNode tree: run components, resolve context and portals, and
  * compute entity IDs. Appends the resulting nodes to `out`.
- * @param inheritId — if set, use this as the entity ID (for component key/id propagation)
+ * @param inheritId — if set, use this as the entity ID (a component's root takes the component's id)
  */
 export function expandVdom(
   out: ExpandedNode[],
@@ -285,12 +285,14 @@ export function expandVdom(
       return;
     }
 
-    // Component: execute it, propagate key/id to root output element.
+    // Component: execute it, propagate the key to its root output element.
+    // `id` stays an ordinary prop here; only the element it ends up on takes
+    // it as an entity id, so a component may hand it to a nested input.
     // Merge children into props so components can access them.
     const propsWithChildren = vnode.children.length > 0
       ? { ...vnode.props, children: vnode.children.length === 1 ? vnode.children[0] : vnode.children }
       : vnode.props;
-    const componentId = computeEntityId(parentId, childIndex, vnode.props, inheritId);
+    const componentId = computeEntityId(parentId, childIndex, { key: vnode.props.key }, inheritId);
     const prevComponentId = currentComponentId;
     currentComponentId = componentId;
     let result: VChild;

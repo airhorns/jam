@@ -92,11 +92,11 @@ describe("mount", () => {
   it("useComponentId is stable across renders and per-instance", () => {
     replace("tick", "n", 0);
     const seen: string[][] = [];
-    const Widget = () => {
+    const Widget = (props: { id?: string }) => {
       when(["tick", "n", $.n]);
       const id = useComponentId();
       seen[seen.length - 1].push(id);
-      return h("div", { "data-cid": id });
+      return h("div", { id: props.id, "data-cid": id });
     };
     const Root = () => {
       seen.push([]);
@@ -108,9 +108,22 @@ describe("mount", () => {
     expect(seen.length).toBe(2);
     expect(seen[0]).toEqual(seen[1]);
     expect(new Set(seen[0]).size).toBe(3);
-    expect(seen[0][2]).toBe("explicit");
-    expect(container.querySelector("[data-cid='explicit']")).not.toBeNull();
+    expect(seen[0][1]).toContain(":k:x");
+    expect(container.querySelector("#explicit")).not.toBeNull();
     expect(db.query(["explicit", "tag", "div"])).toHaveLength(1);
+  });
+
+  it("a component's id prop is not its entity id, so it can pass id to a nested element", () => {
+    const Field = (props: { id: string; label: string }) =>
+      h("div", { class: "field" }, h("label", { for: props.id }, props.label), h("input", { id: props.id }));
+    const Root = () => h("form", null, h(Field, { id: "email", label: "Email" }), h(Field, { id: "name", label: "Name" }));
+
+    dispose = mount(h(Root, null), container);
+    expect(container.querySelectorAll(".field")).toHaveLength(2);
+    expect(container.querySelectorAll("label")).toHaveLength(2);
+    expect(container.querySelector("#email")?.tagName).toBe("INPUT");
+    expect(container.querySelector("#name")?.tagName).toBe("INPUT");
+    expect(db.query(["email", "tag", "input"])).toHaveLength(1);
   });
 
   it("useComponentId can key per-instance state in the db", () => {

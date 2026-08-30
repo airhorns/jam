@@ -27,7 +27,8 @@ export type DemoGroup =
   | "Content"
   | "Feedback"
   | "Navigation"
-  | "Utilities";
+  | "Utilities"
+  | "Examples";
 
 export type ComponentDemos = {
   name: string;

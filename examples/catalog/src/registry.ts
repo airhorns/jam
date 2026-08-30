@@ -27,6 +27,7 @@ import { ProgressDemos } from "./demos/Progress";
 import { SpinnerDemos } from "./demos/Spinner";
 import { AccordionDemos } from "./demos/Accordion";
 import { TabsDemos } from "./demos/Tabs";
+import { SignInExample } from "./demos/examples/SignIn";
 
 export const registry: ComponentDemos[] = [
   StacksDemos,
@@ -61,6 +62,7 @@ export const registry: ComponentDemos[] = [
   AccordionDemos,
   TabsDemos,
   VisuallyHiddenDemos,
+  SignInExample,
 ];
 
 export const groupOrder: DemoGroup[] = [
@@ -72,6 +74,7 @@ export const groupOrder: DemoGroup[] = [
   "Feedback",
   "Navigation",
   "Utilities",
+  "Examples",
 ];
 
 export function findComponent(name: string): ComponentDemos | undefined {
