@@ -1,12 +1,14 @@
-// persist() — durable fact storage in a PGlite `jam_facts` table.
+// persist() — local-only durable fact storage in a PGlite `jam_local_facts` table.
 //
 // Usage:
 //   import { persist } from "@jam/core";
 //   await persist({ name: "my-app" });
 //
 // On startup, restores persisted facts into the FactDB.
-// On changes, debounce-flushes added/removed facts to the database.
-// VDOM facts (first term starts with "dom") are excluded by default.
+// On changes, debounce-flushes remembered/forgotten facts to the database.
+// Claimed (derived) facts are skipped — they are rebuilt by the programs that
+// derive them. VDOM facts (first term starts with "dom") are excluded by default.
+// For facts that should also reach a server, see sync().
 
 import { runInAction } from "mobx";
 import { db, type Fact } from "./db";
@@ -15,7 +17,7 @@ import { openDatabase, type JamPGlite } from "./pglite";
 export interface PersistOptions {
   /** Database name, used as the PGlite data directory `idb://${name}` (default: "jam"). Ignored when `pg` is given. */
   name?: string;
-  /** Use an already-open PGlite instance instead of opening one. Required when the app also uses syncTable(). */
+  /** Use an already-open PGlite instance instead of opening one. Required when the app also uses sync() or syncTable(). */
   pg?: JamPGlite;
   /** Debounce interval in ms (default: 500) */
   debounce?: number;
@@ -25,6 +27,8 @@ export interface PersistOptions {
   /** Allowlist — when given, only facts for which this returns true are persisted and `exclude` is ignored. */
   include?: (fact: Fact) => boolean;
 }
+
+export const PERSIST_TABLE = "jam_local_facts";
 
 export const defaultExclude = (fact: Fact): boolean => {
   const first = fact[0];
@@ -46,9 +50,9 @@ export async function persist(options: PersistOptions = {}): Promise<PersistHand
   const ownsDatabase = !options.pg;
   const pg = options.pg ?? (await openDatabase({ name }));
 
-  await pg.exec(`CREATE TABLE IF NOT EXISTS jam_facts (key TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
+  await pg.exec(`CREATE TABLE IF NOT EXISTS ${PERSIST_TABLE} (key TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
 
-  const restored = await pg.query<{ key: string; terms: Fact }>(`SELECT key, terms FROM jam_facts`);
+  const restored = await pg.query<{ key: string; terms: Fact }>(`SELECT key, terms FROM ${PERSIST_TABLE}`);
   runInAction(() => {
     for (const row of restored.rows) db.insert(...row.terms);
   });
@@ -76,8 +80,8 @@ export async function persist(options: PersistOptions = {}): Promise<PersistHand
     return inflight;
   };
 
-  const unobserve = db.observe((type, key, fact) => {
-    if (!shouldPersist(fact)) return;
+  const unobserve = db.observe((type, key, fact, info) => {
+    if (!info.durable || !shouldPersist(fact)) return;
     pending.set(key, type === "add" ? fact : null);
     scheduleFlush();
   });
@@ -95,11 +99,11 @@ async function writeBatch(pg: JamPGlite, batch: Map<string, Fact | null>): Promi
     for (const [key, fact] of batch) {
       if (fact) {
         await tx.query(
-          `INSERT INTO jam_facts (key, terms) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET terms = EXCLUDED.terms`,
+          `INSERT INTO ${PERSIST_TABLE} (key, terms) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET terms = EXCLUDED.terms`,
           [key, JSON.stringify(fact)],
         );
       } else {
-        await tx.query(`DELETE FROM jam_facts WHERE key = $1`, [key]);
+        await tx.query(`DELETE FROM ${PERSIST_TABLE} WHERE key = $1`, [key]);
       }
     }
   });

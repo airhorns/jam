@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { live } from "@electric-sql/pglite/live";
 import { db, $, _ } from "../db";
-import { whenever, replace, claim } from "../primitives";
+import { whenever, replace, claim, remember } from "../primitives";
 import { persist } from "../persist";
 import type { JamPGlite } from "../pglite";
 
@@ -12,7 +12,7 @@ const disposers: Array<() => Promise<void>> = [];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function rows(): Promise<Array<[string, unknown[]]>> {
-  const res = await pg.query<{ key: string; terms: unknown[] }>(`SELECT key, terms FROM jam_facts ORDER BY key`);
+  const res = await pg.query<{ key: string; terms: unknown[] }>(`SELECT key, terms FROM jam_local_facts ORDER BY key`);
   return res.rows.map((r) => [r.key, r.terms]);
 }
 
@@ -32,7 +32,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   while (disposers.length) await disposers.pop()!();
-  await pg.exec(`DROP TABLE IF EXISTS jam_facts`);
+  await pg.exec(`DROP TABLE IF EXISTS jam_local_facts`);
   db.clear();
 });
 
@@ -50,8 +50,8 @@ describe("persist", () => {
   });
 
   it("restores persisted facts on start with their original types", async () => {
-    await pg.exec(`CREATE TABLE jam_facts (key TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
-    await pg.query(`INSERT INTO jam_facts (key, terms) VALUES ($1, $2), ($3, $4)`, [
+    await pg.exec(`CREATE TABLE jam_local_facts (key TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
+    await pg.query(`INSERT INTO jam_local_facts (key, terms) VALUES ($1, $2), ($3, $4)`, [
       JSON.stringify(["todo", 1, "title", "A"]),
       JSON.stringify(["todo", 1, "title", "A"]),
       JSON.stringify(["counter", "n", 42]),
@@ -64,8 +64,8 @@ describe("persist", () => {
   });
 
   it("does not write restored facts back", async () => {
-    await pg.exec(`CREATE TABLE jam_facts (key TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
-    await pg.query(`INSERT INTO jam_facts (key, terms) VALUES ($1, $2)`, [
+    await pg.exec(`CREATE TABLE jam_local_facts (key TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
+    await pg.query(`INSERT INTO jam_local_facts (key, terms) VALUES ($1, $2)`, [
       JSON.stringify(["todo", 1, "title", "A"]),
       JSON.stringify(["todo", 1, "title", "A"]),
     ]);
@@ -120,17 +120,21 @@ describe("persist", () => {
     expect(await rows()).toEqual([[JSON.stringify(["ui", "menu", "open", true]), ["ui", "menu", "open", true]]]);
   });
 
-  it("persists deletions made by whenever cleanup", async () => {
+  it("skips claimed facts and their revocation; a later remember() of the same fact is persisted", async () => {
     await start();
     replace("todo", 1, "done", true);
     const stop = whenever([["todo", $.id, "done", true]], (matches) => {
       for (const { id } of matches) claim("todo", id, "class", "completed");
     });
     await sleep(30);
-    expect((await rows()).map(([k]) => k)).toContain(JSON.stringify(["todo", 1, "class", "completed"]));
+    expect((await rows()).map(([k]) => k)).toEqual([JSON.stringify(["todo", 1, "done", true])]);
+    remember("todo", 1, "class", "completed");
     replace("todo", 1, "done", false);
     await sleep(30);
-    expect((await rows()).map(([k]) => k)).not.toContain(JSON.stringify(["todo", 1, "class", "completed"]));
+    expect((await rows()).map(([k]) => k)).toEqual([
+      JSON.stringify(["todo", 1, "class", "completed"]),
+      JSON.stringify(["todo", 1, "done", false]),
+    ]);
     stop();
   });
 
