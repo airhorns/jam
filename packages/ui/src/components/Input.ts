@@ -1,82 +1,155 @@
+import { h } from "@jam/core/jsx";
+import type { VNode } from "@jam/core/jsx";
 import { styled } from "../styled";
+import type { StyledComponent, StyledProps, VariantFunction } from "../styled";
+import { getButtonSized, getFontSized, steppedSpace } from "../variants";
 
-/**
- * Input: single-line text input with theme-aware styling.
- */
-export const Input = styled("input", {
-  name: "Input",
-  defaultProps: {
-    display: "flex",
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "$borderColor",
-    backgroundColor: "$background",
-    color: "$color",
-    borderRadius: "$radius.3",
-    fontFamily: "inherit",
-    width: "100%",
-    focusStyle: {
-      borderColor: "$borderColorFocus",
-      outlineWidth: 2,
-      outlineStyle: "solid",
-      outlineColor: "$outlineColor",
-      outlineOffset: -1,
-    },
-    disabledStyle: {
-      opacity: 0.5,
-      cursor: "not-allowed",
-    },
+const inputDefaults = {
+  size: "$true",
+  fontFamily: "$body",
+  color: "$color",
+  backgroundColor: "$background",
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: "$borderColor",
+  outlineWidth: 0,
+  display: "flex",
+  // Keeps a flex child from overflowing its container.
+  minWidth: 0,
+  hoverStyle: {
+    borderColor: "$borderColorHover",
   },
+  focusStyle: {
+    borderColor: "$borderColorFocus",
+    outlineColor: "$outlineColor",
+    outlineStyle: "solid",
+    outlineWidth: 2,
+    outlineOffset: -1,
+  },
+  placeholderStyle: {
+    color: "$placeholderColor",
+  },
+  disabledStyle: {
+    opacity: 0.5,
+    cursor: "not-allowed",
+  },
+};
+
+const unstyledReset = {
+  outlineWidth: 0,
+  borderWidth: 0,
+  backgroundColor: "transparent",
+};
+
+/** Height, radius and padding from a size token; text from the font in effect. */
+export const inputSizeVariant: VariantFunction = (value = "$true", extras) => ({
+  ...getFontSized(value, extras),
+  ...getButtonSized(value, extras),
+  paddingHorizontal: steppedSpace(extras.tokens, value, -1),
+});
+
+/** Same, plus vertical padding and a height of `rows` lines. */
+export const textAreaSizeVariant: VariantFunction = (value = "$true", extras) => {
+  const font = getFontSized(value, extras) as { lineHeight?: number };
+  const rows = Number(extras.props.rows) || 3;
+  return {
+    ...getButtonSized(value, extras),
+    ...font,
+    height: "auto",
+    minHeight: font.lineHeight ? rows * font.lineHeight : undefined,
+    paddingHorizontal: steppedSpace(extras.tokens, value, -1),
+    paddingVertical: steppedSpace(extras.tokens, value, -2),
+  };
+};
+
+export type InputProps = StyledProps & {
+  size?: string | number;
+  value?: string;
+  defaultValue?: string;
+  placeholder?: string;
+  disabled?: boolean;
+  readOnly?: boolean;
+  unstyled?: boolean;
+  type?: string;
+  onInput?: (event: Event) => void;
+  /** Called with the new text on every edit. */
+  onChangeText?: (text: string) => void;
+};
+
+export const InputFrame = styled<InputProps>("input", {
+  name: "Input",
   variants: {
+    unstyled: {
+      true: unstyledReset,
+      false: inputDefaults,
+    },
+
     size: {
-      "1": { paddingHorizontal: 6, paddingVertical: 4, fontSize: 12, height: 28 },
-      "2": { paddingHorizontal: 8, paddingVertical: 6, fontSize: 13, height: 32 },
-      "3": { paddingHorizontal: 12, paddingVertical: 8, fontSize: 14, height: 36 },
-      "4": { paddingHorizontal: 16, paddingVertical: 10, fontSize: 16, height: 44 },
+      "...size": inputSizeVariant,
+      ":number": inputSizeVariant,
     },
   },
   defaultVariants: {
-    size: "3",
+    unstyled: false,
   },
 });
 
-/**
- * TextArea: multi-line text input.
- */
-export const TextArea = styled("textarea", {
+export const TextAreaFrame = styled<InputProps & { rows?: number }>(InputFrame, {
   name: "TextArea",
+  tag: "textarea",
   defaultProps: {
-    display: "flex",
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "$borderColor",
-    backgroundColor: "$background",
-    color: "$color",
-    borderRadius: "$radius.3",
-    fontFamily: "inherit",
-    width: "100%",
-    minHeight: 80,
-    focusStyle: {
-      borderColor: "$borderColorFocus",
-      outlineWidth: 2,
-      outlineStyle: "solid",
-      outlineColor: "$outlineColor",
-      outlineOffset: -1,
-    },
-    disabledStyle: {
-      opacity: 0.5,
-      cursor: "not-allowed",
-    },
+    rows: 3,
+    // Firefox needs this to keep newlines in the value.
+    whiteSpace: "pre-wrap",
   },
   variants: {
+    unstyled: {
+      false: {
+        height: "auto",
+      },
+    },
+
     size: {
-      "1": { padding: 6, fontSize: 12 },
-      "2": { padding: 8, fontSize: 13 },
-      "3": { padding: 12, fontSize: 14 },
-      "4": { padding: 16, fontSize: 16 },
+      "...size": textAreaSizeVariant,
+      ":number": textAreaSizeVariant,
     },
   },
-  defaultVariants: {
-    size: "3",
-  },
+});
+
+// `onChangeText` is the value-only form of `onInput`, so both fire.
+function withChangeText(Frame: StyledComponent<any>, props: InputProps): VNode {
+  const { onChangeText, onInput, ...rest } = props;
+  if (!onChangeText) return h(Frame, props as Record<string, unknown>);
+  return h(Frame, {
+    ...(rest as Record<string, unknown>),
+    onInput: (event: Event) => {
+      onInput?.(event);
+      onChangeText((event.target as HTMLInputElement).value);
+    },
+  });
+}
+
+/**
+ * Input: a single-line text field. `size` sets its height, radius, padding and
+ * font size together; `onChangeText` receives the value directly.
+ */
+function InputComponent(props: InputProps): VNode {
+  return withChangeText(InputFrame, props);
+}
+InputComponent.displayName = "Input";
+
+/** TextArea: a multi-line Input. `rows` sets the minimum height. */
+function TextAreaComponent(props: InputProps & { rows?: number }): VNode {
+  return withChangeText(TextAreaFrame, props);
+}
+TextAreaComponent.displayName = "TextArea";
+
+export const Input = Object.assign(InputComponent, {
+  Frame: InputFrame,
+  staticConfig: InputFrame.staticConfig,
+});
+
+export const TextArea = Object.assign(TextAreaComponent, {
+  Frame: TextAreaFrame,
+  staticConfig: TextAreaFrame.staticConfig,
 });

@@ -29,6 +29,17 @@ jobs:
       - run: corepack pnpm --dir examples/puddy-vite exec playwright install --with-deps chromium
       - run: corepack pnpm --dir examples/linearlite exec playwright install --with-deps chromium
       - run: corepack pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-test-results
+          path: |
+            examples/folk-todo/test-results
+            examples/puddy-vite/test-results
+            examples/linearlite/test-results
+            examples/catalog/test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
   core-benchmarks:
     name: Core Benchmarks

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { db } from "@jam/core";
+import { resetUI } from "../testing";
 import {
   createThemes,
   setTheme,
@@ -12,7 +12,7 @@ import {
 } from "../themes";
 
 beforeEach(() => {
-  db.clear();
+  resetUI();
 });
 
 describe("createThemes", () => {
@@ -50,7 +50,7 @@ describe("setTheme / getActiveThemeName", () => {
 });
 
 describe("useTheme", () => {
-  it("returns empty object when no theme is remember", () => {
+  it("returns empty object when no theme is set", () => {
     expect(useTheme()).toEqual({});
   });
 
@@ -121,7 +121,7 @@ describe("resolveThemeValue", () => {
     expect(resolveThemeValue("$nonexistent")).toBeUndefined();
   });
 
-  it("returns undefined when no theme is remember", () => {
+  it("returns undefined when no theme is set", () => {
     createThemes({ light: { background: "#fff" } });
     expect(resolveThemeValue("$background")).toBeUndefined();
   });

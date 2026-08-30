@@ -20,6 +20,7 @@ export type ThemeKey =
   | "backgroundHover"
   | "backgroundPress"
   | "backgroundFocus"
+  | "backgroundActive"
   | "backgroundStrong"
   | "backgroundTransparent"
   | "color"
@@ -33,7 +34,9 @@ export type ThemeKey =
   | "borderColorFocus"
   | "placeholderColor"
   | "outlineColor"
-  | "shadowColor";
+  | "shadowColor"
+  | "accentBackground"
+  | "accentColor";
 
 // ---- Media types ----
 
@@ -42,6 +45,10 @@ export type MediaQueryConfig = {
   maxWidth?: number;
   minHeight?: number;
   maxHeight?: number;
+  hover?: "hover" | "none";
+  pointer?: "coarse" | "fine" | "none";
+  orientation?: "portrait" | "landscape";
+  prefersColorScheme?: "light" | "dark";
 };
 
 export type MediaConfig = Record<string, MediaQueryConfig>;
@@ -62,6 +69,9 @@ export type FontConfig = {
 /** A value that can be a raw value or a token reference like "$size.4" or a theme ref like "$background" */
 export type TokenValue<T> = T | `$${string}.${string}` | `$${string}`;
 
+type Length = TokenValue<number | string>;
+type Color = TokenValue<string>;
+
 export type StyleProps = {
   // Layout
   display?: TokenValue<string>;
@@ -70,107 +80,176 @@ export type StyleProps = {
   flexWrap?: "wrap" | "nowrap" | "wrap-reverse";
   flexGrow?: TokenValue<number>;
   flexShrink?: TokenValue<number>;
-  flexBasis?: TokenValue<number | string>;
+  flexBasis?: Length;
   alignItems?: "flex-start" | "flex-end" | "center" | "stretch" | "baseline";
   alignSelf?: "auto" | "flex-start" | "flex-end" | "center" | "stretch" | "baseline";
   alignContent?: "flex-start" | "flex-end" | "center" | "stretch" | "space-between" | "space-around";
   justifyContent?: "flex-start" | "flex-end" | "center" | "space-between" | "space-around" | "space-evenly";
-  gap?: TokenValue<number | string>;
-  rowGap?: TokenValue<number | string>;
-  columnGap?: TokenValue<number | string>;
+  gap?: Length;
+  rowGap?: Length;
+  columnGap?: Length;
+  order?: number;
+  boxSizing?: "border-box" | "content-box";
+  aspectRatio?: number | string;
+  visibility?: "visible" | "hidden" | "collapse";
+  contain?: string;
 
   // Sizing
-  width?: TokenValue<number | string>;
-  height?: TokenValue<number | string>;
-  minWidth?: TokenValue<number | string>;
-  minHeight?: TokenValue<number | string>;
-  maxWidth?: TokenValue<number | string>;
-  maxHeight?: TokenValue<number | string>;
+  width?: Length;
+  height?: Length;
+  minWidth?: Length;
+  minHeight?: Length;
+  maxWidth?: Length;
+  maxHeight?: Length;
 
   // Spacing
-  padding?: TokenValue<number | string>;
-  paddingTop?: TokenValue<number | string>;
-  paddingRight?: TokenValue<number | string>;
-  paddingBottom?: TokenValue<number | string>;
-  paddingLeft?: TokenValue<number | string>;
-  paddingHorizontal?: TokenValue<number | string>;
-  paddingVertical?: TokenValue<number | string>;
-  margin?: TokenValue<number | string>;
-  marginTop?: TokenValue<number | string>;
-  marginRight?: TokenValue<number | string>;
-  marginBottom?: TokenValue<number | string>;
-  marginLeft?: TokenValue<number | string>;
-  marginHorizontal?: TokenValue<number | string>;
-  marginVertical?: TokenValue<number | string>;
+  padding?: Length;
+  paddingTop?: Length;
+  paddingRight?: Length;
+  paddingBottom?: Length;
+  paddingLeft?: Length;
+  paddingHorizontal?: Length;
+  paddingVertical?: Length;
+  paddingStart?: Length;
+  paddingEnd?: Length;
+  margin?: Length;
+  marginTop?: Length;
+  marginRight?: Length;
+  marginBottom?: Length;
+  marginLeft?: Length;
+  marginHorizontal?: Length;
+  marginVertical?: Length;
+  marginStart?: Length;
+  marginEnd?: Length;
 
   // Position
-  position?: "relative" | "absolute" | "fixed" | "sticky";
-  top?: TokenValue<number | string>;
-  right?: TokenValue<number | string>;
-  bottom?: TokenValue<number | string>;
-  left?: TokenValue<number | string>;
+  position?: "relative" | "absolute" | "fixed" | "sticky" | "static";
+  top?: Length;
+  right?: Length;
+  bottom?: Length;
+  left?: Length;
+  inset?: Length;
   zIndex?: TokenValue<number>;
 
   // Border
-  borderWidth?: TokenValue<number>;
-  borderTopWidth?: TokenValue<number>;
-  borderRightWidth?: TokenValue<number>;
-  borderBottomWidth?: TokenValue<number>;
-  borderLeftWidth?: TokenValue<number>;
-  borderColor?: TokenValue<string>;
-  borderTopColor?: TokenValue<string>;
-  borderRightColor?: TokenValue<string>;
-  borderBottomColor?: TokenValue<string>;
-  borderLeftColor?: TokenValue<string>;
+  borderWidth?: Length;
+  borderTopWidth?: Length;
+  borderRightWidth?: Length;
+  borderBottomWidth?: Length;
+  borderLeftWidth?: Length;
+  borderColor?: Color;
+  borderTopColor?: Color;
+  borderRightColor?: Color;
+  borderBottomColor?: Color;
+  borderLeftColor?: Color;
   borderStyle?: "solid" | "dashed" | "dotted" | "none";
-  borderRadius?: TokenValue<number | string>;
-  borderTopLeftRadius?: TokenValue<number | string>;
-  borderTopRightRadius?: TokenValue<number | string>;
-  borderBottomLeftRadius?: TokenValue<number | string>;
-  borderBottomRightRadius?: TokenValue<number | string>;
+  borderTopStyle?: "solid" | "dashed" | "dotted" | "none";
+  borderRightStyle?: "solid" | "dashed" | "dotted" | "none";
+  borderBottomStyle?: "solid" | "dashed" | "dotted" | "none";
+  borderLeftStyle?: "solid" | "dashed" | "dotted" | "none";
+  borderRadius?: Length;
+  borderTopLeftRadius?: Length;
+  borderTopRightRadius?: Length;
+  borderBottomLeftRadius?: Length;
+  borderBottomRightRadius?: Length;
 
   // Background
-  backgroundColor?: TokenValue<string>;
+  backgroundColor?: Color;
+  backgroundImage?: string;
+  backgroundSize?: string;
+  backgroundPosition?: string;
+  backgroundRepeat?: string;
+  backgroundClip?: string;
   opacity?: TokenValue<number>;
+  mixBlendMode?: string;
 
   // Text
-  color?: TokenValue<string>;
+  color?: Color;
   fontFamily?: TokenValue<string>;
-  fontSize?: TokenValue<number | string>;
+  fontSize?: Length;
   fontWeight?: TokenValue<string | number>;
   fontStyle?: "normal" | "italic";
-  lineHeight?: TokenValue<number | string>;
-  letterSpacing?: TokenValue<number | string>;
-  textAlign?: "left" | "right" | "center" | "justify";
+  lineHeight?: Length;
+  letterSpacing?: Length;
+  textAlign?: "left" | "right" | "center" | "justify" | "start" | "end";
   textDecorationLine?: "none" | "underline" | "line-through" | "underline line-through";
+  textDecorationColor?: Color;
+  textDecorationStyle?: "solid" | "double" | "dotted" | "dashed" | "wavy";
   textTransform?: "none" | "capitalize" | "uppercase" | "lowercase";
+  textShadowColor?: Color;
+  textShadowOffset?: { width: number; height: number };
+  textShadowRadius?: number;
   whiteSpace?: "normal" | "nowrap" | "pre" | "pre-wrap" | "pre-line";
   wordBreak?: "normal" | "break-all" | "break-word" | "keep-all";
+  wordWrap?: "normal" | "break-word";
+  overflowWrap?: "normal" | "break-word" | "anywhere";
   textOverflow?: "clip" | "ellipsis";
+  verticalAlign?: string;
+  fontVariant?: string;
+  textIndent?: Length;
 
   // Overflow
-  overflow?: "visible" | "hidden" | "scroll" | "auto";
-  overflowX?: "visible" | "hidden" | "scroll" | "auto";
-  overflowY?: "visible" | "hidden" | "scroll" | "auto";
+  overflow?: "visible" | "hidden" | "scroll" | "auto" | "clip";
+  overflowX?: "visible" | "hidden" | "scroll" | "auto" | "clip";
+  overflowY?: "visible" | "hidden" | "scroll" | "auto" | "clip";
 
-  // Shadow
+  // Shadow (React Native style; combined into box-shadow on web)
   boxShadow?: string;
+  shadowColor?: Color;
+  shadowOffset?: { width: number; height: number };
+  shadowOpacity?: number;
+  shadowRadius?: number;
+  filter?: string;
+  backdropFilter?: string;
 
-  // Cursor
+  // Cursor / interaction
   cursor?: string;
   pointerEvents?: "auto" | "none" | "box-none" | "box-only";
   userSelect?: "auto" | "text" | "none" | "contain" | "all";
+  touchAction?: string;
+  resize?: "none" | "both" | "horizontal" | "vertical";
+  appearance?: string;
+  outline?: string;
 
   // Transform
   transform?: string;
   transformOrigin?: string;
+  x?: Length;
+  y?: Length;
+  scale?: number;
+  scaleX?: number;
+  scaleY?: number;
+  rotate?: string;
+  rotateX?: string;
+  rotateY?: string;
+  rotateZ?: string;
+  skewX?: string;
+  skewY?: string;
+  perspective?: number;
+
+  // Transitions / animation
   transition?: string;
+  transitionProperty?: string;
+  transitionDuration?: string;
+  transitionTimingFunction?: string;
+  animationName?: string;
+  willChange?: string;
 
   // Outline
-  outlineColor?: TokenValue<string>;
+  outlineColor?: Color;
   outlineStyle?: string;
-  outlineWidth?: TokenValue<number>;
-  outlineOffset?: TokenValue<number>;
+  outlineWidth?: Length;
+  outlineOffset?: Length;
+
+  // Misc
+  objectFit?: "contain" | "cover" | "fill" | "none" | "scale-down";
+  objectPosition?: string;
+  listStyle?: string;
+  content?: string;
+  scrollbarWidth?: "auto" | "thin" | "none";
+  scrollSnapType?: string;
+  scrollSnapAlign?: string;
+  columns?: number | string;
 };
 
 export type PseudoProps = {
@@ -178,7 +257,11 @@ export type PseudoProps = {
   pressStyle?: Partial<StyleProps>;
   focusStyle?: Partial<StyleProps>;
   focusVisibleStyle?: Partial<StyleProps>;
+  focusWithinStyle?: Partial<StyleProps>;
   disabledStyle?: Partial<StyleProps>;
+  placeholderStyle?: Partial<StyleProps>;
+  enterStyle?: Partial<StyleProps>;
+  exitStyle?: Partial<StyleProps>;
 };
 
 export type ShorthandProps = {
@@ -213,6 +296,42 @@ export type ShorthandProps = {
   o?: StyleProps["opacity"];
   pe?: StyleProps["pointerEvents"];
   us?: StyleProps["userSelect"];
+  zi?: StyleProps["zIndex"];
+  pos?: StyleProps["position"];
+  t?: StyleProps["top"];
+  r?: StyleProps["right"];
+  b?: StyleProps["bottom"];
+  l?: StyleProps["left"];
+  ov?: StyleProps["overflow"];
+  ff?: StyleProps["fontFamily"];
+  fos?: StyleProps["fontSize"];
+  fow?: StyleProps["fontWeight"];
+  lh?: StyleProps["lineHeight"];
+  ls?: StyleProps["letterSpacing"];
+  col?: StyleProps["color"];
+  tt?: StyleProps["textTransform"];
+};
+
+/** Props accepted by every styled component in addition to style props. */
+export type ThemeableProps = {
+  /** Apply a sub-theme (e.g. "blue", "accent", "dark_red") to this element and its children. */
+  theme?: string;
+  /** Flip between light and dark for this element and its children. */
+  themeInverse?: boolean;
+  /** Skip the component's built-in styles and only apply the styles you pass. */
+  unstyled?: boolean;
+  /** Render the single child element instead of this component's own element, merging props onto it. */
+  asChild?: boolean;
+  /** Override the rendered HTML tag. */
+  tag?: string;
+  /** Name of a configured animation; applied as a CSS transition. */
+  animation?: string;
+  /** Restrict the transition to these style props (default: all). */
+  animateOnly?: string[];
+  /** Add a class to this element in addition to generated ones. */
+  className?: string;
+  class?: string;
+  style?: Record<string, unknown> | string;
 };
 
 export type AllStyleProps = StyleProps & ShorthandProps & PseudoProps;
@@ -233,5 +352,14 @@ export type JamUIConfig = {
   themes?: Record<string, ThemeValues>;
   media?: MediaConfig;
   fonts?: Record<string, FontConfig>;
+  /** Named CSS transitions usable via the `animation` prop, e.g. `{ quick: "150ms ease-out" }`. */
+  animations?: Record<string, string>;
   defaultTheme?: string;
+  /** Font used when a text component doesn't specify one. Defaults to "body". */
+  defaultFont?: string;
+  /**
+   * Where the active theme's class is written when `setTheme()` is called:
+   * "html" (default), "body", or false to manage it yourself.
+   */
+  themeClassTarget?: "html" | "body" | false;
 };

@@ -59,7 +59,7 @@ export function TodoApp() {
       <ul class="todo-list">
         {items.map(({ id, title, done }) => (
           <TodoItem
-            key={id}
+            key={id as number}
             todoId={id as number}
             title={title as string}
             done={done as boolean}

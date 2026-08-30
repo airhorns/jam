@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { db, remember } from "@jam/core";
+import { resetUI } from "../testing";
+import { replace } from "@jam/core";
 import { createMedia, useMedia, disposeMedia } from "../media";
 
 beforeEach(() => {
-  db.clear();
+  resetUI();
   disposeMedia();
 });
 
@@ -43,10 +44,7 @@ describe("createMedia", () => {
     const mockMatchMedia = vi.fn((query: string) => ({
       matches: query.includes("max-width: 860px"), // Pretend viewport <= 860
       media: query,
-      addEventListener: (
-        _event: string,
-        handler: (e: { matches: boolean }) => void,
-      ) => {
+      addEventListener: (_event: string, handler: (e: { matches: boolean }) => void) => {
         listeners.set(query, handler);
       },
       removeEventListener: vi.fn(),
@@ -78,10 +76,10 @@ describe("useMedia", () => {
   });
 
   it("returns all configured breakpoints", () => {
-    // Directly remember media facts for testing without matchMedia
-    remember("media", "sm", true);
-    remember("media", "md", false);
-    remember("media", "lg", false);
+    // Directly set media facts for testing without matchMedia
+    replace("media", "sm", true);
+    replace("media", "md", false);
+    replace("media", "lg", false);
 
     const media = useMedia();
     expect(media.sm).toBe(true);

@@ -28,7 +28,7 @@ Useful commands:
 ```bash
 pnpm dev             # Run the folk-todo example dev server
 pnpm test            # Run unit tests for packages/examples that define them
-pnpm test:e2e        # Run folk-todo, puddy-vite, and linearlite Playwright suites
+pnpm test:e2e        # Run folk-todo, puddy-vite, linearlite and catalog Playwright suites
 pnpm typecheck       # TypeScript check all packages and examples
 pnpm run dev:ui      # Run the @jam/ui catalog example
 ```
@@ -46,8 +46,7 @@ another app's dev server. Set `PLAYWRIGHT_PORT` or the example-specific
 - `examples/obsidian-clone` — linked-note workspace with graph-derived views
 - `examples/puddy-vite` — chat/session app with VCR-style network tests
 - `examples/linearlite` — Linear clone on PGlite + Electric sync, with unit and e2e coverage
-- `examples/ui-catalog` — browser catalog for `@jam/ui` components
-- `examples/counter-ios`, `examples/spatial-counter`, and `examples/ui-catalog-native` — SwiftUI/native runtime examples
+- `examples/catalog` — browser catalog for `@jam/ui` components, with screenshot and e2e tooling
 
 ## Core API
 

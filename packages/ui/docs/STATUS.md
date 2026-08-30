@@ -1,0 +1,176 @@
+# @jam/ui status
+
+Baseline inventory taken before the quality pass (2026-08-29), kept here so the
+"after" can be compared against it.
+
+## Baseline findings
+
+**Components.** 34 files, ~45 exported components. Almost all are pure
+`styled()` shells:
+
+- Only three event handlers exist in the whole package (`Checkbox`, `Switch`,
+  `RadioGroup.Item` onClick). Every `Trigger`, `Close`, `Item`, `Tab` is inert.
+- `open` / `value` are decorative on `Dialog`, `AlertDialog`, `Popover`,
+  `Select`, `Tooltip`, `Tabs`, `Accordion` — content always renders, so the
+  absolutely-positioned overlays are permanently visible.
+- No keyboard support anywhere; `role="checkbox|switch|slider"` divs are not
+  focusable.
+- Props declared in types but not destructured leak onto DOM nodes
+  (`Select` open/onOpenChange, `Tooltip` delayDuration, `ToggleGroup` value…).
+- Dead code: `Progress` computes `percent` and never uses it; `Spinner` injects
+  keyframes nothing references; `Portal` drops its children on the web;
+  `Image.objectFit` variants are empty objects; `Slider` ignores value/step.
+- Hardcoded colors/shadows/z-indexes bypass tokens and themes.
+- No default tokens/themes ship — every consumer defines a palette from scratch.
+
+**Style system.** Theme refs (`$background`) resolve to literal values at render
+time, so switching theme re-hashes every class; no sub-tree theming. Media props
+(`$gtSm`) are evaluated in JS via `matchMedia` facts rather than emitted as
+`@media` rules (`injectMediaRule` is dead code). No `::placeholder` support.
+Boolean variants must be passed as the strings `"true"`/`"false"`.
+
+**Core.** `mount()` only tracks the root component; nested components execute
+inside the untracked effect, so a `when()` read in a child component does not
+re-render when the fact changes.
+
+**QA.** Unit tests call components as plain functions and assert on the returned
+VNode's `tag` / that `props.class` is defined / that sub-components exist. No
+DOM rendering, no CSS inspection, no events. No visual catalog, no browser
+tests for the library. CI does not exercise the library beyond `vitest run`.
+
+## After the style-system pass
+
+See [STYLE-SYSTEM.md](./STYLE-SYSTEM.md) for how the system now works.
+
+**Style system.** Ported from tamagui v4: default tokens/fonts/media/animations
+(`defaultConfig`), 390 generated themes (`createDefaultThemes`: light/dark ×
+colour × component), themes as CSS variables behind `t_<name>` class chains so
+switching theme changes one class, `<Theme>` / `theme` / `themeInverse`
+sub-tree theming, component themes (`light_Button`) picked up by `name`.
+Variants support spreads, typed catch-alls, functional variants with tamagui's
+`extras`, nested variant defaults, `defaultVariants`, `unstyled`, and
+`mergeVariants` on extension. `createStyledContext` propagates props between
+compound parts. Pseudo (`hover/press/focus/focusVisible/focusWithin/disabled/
+placeholder`) and media props emit real CSS rules. Fonts follow tamagui's
+`createFont` fill semantics; `SizableText`/`Paragraph`/`Heading`/`H1–H6` and
+`Button` (`Frame`/`Text`/`Icon`/`Apply`) match tamagui's composition.
+
+**Core.** Component expansion is tracked, so `when()` in nested components
+re-renders; `createContext`/`useContext`, `useComponentId`, `Portal`; `mount`'s
+disposer removes the tree's facts.
+
+**QA.** DOM tests through `@jam/ui/testing` (`render`, `css`, `mediaCss`,
+events, `resetUI`) — 212 unit tests across 13 files. `examples/catalog` renders
+every component in both themes; Playwright smoke suite in CI, `pnpm shots` for
+visual review.
+
+## After the component pass
+
+Every component now has real behaviour, tokenised styling, a DOM test file and
+a `docs/<Component>.md` (usage, props, parts, keyboard, theming, accessibility).
+
+**Behaviour helpers** (`state.ts`, `layers.ts`, `floating.ts`,
+`components/roving-focus.ts`): `useControllableState`, `useStableId`,
+`useDismissableLayer` (Escape/outside-press dismissal, focus trap, autofocus
+and focus restore, scroll lock), `repositionLayer`/`floatingStyle` (placement
+against an anchor, flipping and shifting to stay in the viewport),
+`rovingFocus`/`rovingTabIndex` for arrow-key groups. Overlays portal to the mount root and
+sit at `zIndex` 100000 (toasts 100001).
+
+**Components.** `Dialog`/`AlertDialog`/`Sheet` are modal layers; `Popover`,
+`Tooltip` and `Select` are anchored floating layers; `Toast` has a declarative
+form and an imperative `toastController` with a `Toast.Viewport`. `Checkbox`,
+`Switch`, `RadioGroup`, `ToggleGroup`, `Slider`, `Tabs` and `Accordion` are
+keyboard-operable with the ARIA roles/states of their tamagui counterparts.
+`Form` is a real `form` with a submit `Trigger`; `Input`/`TextArea`,
+`Label`, `Progress`, `Spinner`, `Avatar`, `Image`, `Card`, `ListItem`,
+`Group`, `Separator`, `ScrollView` and the shapes take their sizes from the
+tokens. `asChild` (via `Slot`) is supported on every trigger/close part.
+
+**Style system additions.** `enterStyle` plays as a keyframe animation from
+the given values; `animateOnly` restricts a transition to listed props
+(floating layers use `["opacity", "transform"]` so their position never
+animates). Shorthand style props (`padding`, `margin`, `borderWidth`,
+`borderColor`, `borderStyle`, `borderRadius`, `inset`, the axis variants)
+expand to longhands before styles merge, so precedence between a shorthand and
+a longhand is decided by layer order, never by stylesheet injection order.
+Component themes never nest: a `Button` inside `light_Card` resolves to
+`light_Button`. `StyledComponent<P>` lets `P` override a style prop's type
+(`Sheet`'s numeric `position`).
+
+**Core.** SVG elements are created in the SVG namespace (children of
+`foreignObject` return to HTML); attributes that back a DOM property
+(`value`, `checked`, …) are kept across reconciles so hidden form inputs keep
+their value.
+
+**QA.** 409 unit tests across 40 files in `packages/ui`, 79 in
+`packages/core`. The catalog has a demo page per component with "shot
+recipes" (click/hover/focus before capture) so open overlays are
+screenshotted; `pnpm test:e2e` renders every demo and performs every recipe,
+`pnpm shots` writes light and dark screenshots for review.
+
+## After the example UIs
+
+Eighteen tamagui/Bento-style screens (`examples/catalog/src/demos/examples/`)
+were rebuilt on `@jam/ui` by parallel builders whose job was to report every
+place the library got in the way. What they surfaced, and what changed:
+
+**Core.** A component's `id` prop is an ordinary prop, not its entity id (two
+`<Field id="email">` instances no longer collide). `defaultValue`/
+`defaultChecked` are applied as properties, and camelCase attributes are
+lowercased before the stale-attribute sweep so they survive it. Removing a
+keyed child now removes its node before repositioning siblings, so surviving
+rows keep their DOM nodes (and don't replay `enterStyle`).
+
+**Style system.** Pseudo rules carry a fixed precedence (`placeholder` <
+`hover` < `active` < `focus` < `disabled`), and media rules sit above them
+all, independent of injection order. A wrapper that defaults to
+`unstyled: true` keeps the styles declared alongside it. Text nested in text
+inherits `white-space` so an `ellipsis` parent still truncates. Children with
+a `name` but no component theme inherit the surrounding component theme
+(`Tooltip` text is readable again).
+
+**Themes.** Component themes follow tamagui v5 (`Button`/`Switch` surface2,
+`Input`/`TextArea`/`Progress`/`Slider` surface1, `SliderActive` surface3,
+`Tooltip`/`SwitchThumb` accent) plus `Checkbox`/`RadioGroupItem` surface2 and
+`ProgressIndicator` accent so unchecked controls and progress bars are visible
+in dark. `$outlineColor` sits far enough from the base background (light step
+7, dark step 8 at 60% alpha) for a ≈3:1 focus ring in both schemes, and the
+`animation` prop's `transition` excludes `outline-*` so the ring appears at
+once instead of fading in.
+
+**Components.** `Popover` gained `hoverable` (grace-period hover menus whose
+trigger click keeps them open), `disableFocus` and `dismissOnFocusOutside`
+(on by default for non-modal popovers and `Select`, so tabbing past an open
+layer closes it as Radix does); its trigger's `aria-haspopup` and content's
+`role` can be overridden for menus. `Tabs.Content forceMount`
+renders inactive panels visible with `data-state="inactive"` as upstream does;
+`Accordion.Indicator` is a `1em` SVG chevron; `ListItem` has a
+`focusVisibleStyle` and no UA button border.
+
+**QA.** Every example has light/dark shots and recipes that open its
+overlays; `pnpm test:e2e` covers them with a 180 s budget for the whole-catalog
+sweeps. A second round of cheap QA agents then read every shot, exercised the
+interactions and resized to 420 px; the library fixes above came out of that
+round, and the examples now wrap or scroll horizontally at phone widths.
+
+**Known constraints.**
+
+- Attributes and inline styles set imperatively by event handlers are removed
+  on the next reconcile; components must drive the DOM through facts.
+- `Select` discovers its options by walking its own VNode children, so items
+  must be direct descendants (arrays/fragments/`Group` are fine), not rendered
+  by another component.
+- `$backgroundActive` equals `$background` and `$borderColor` in the base
+  light theme equals the `Button` background, as in tamagui's v4 templates.
+- Plain `Card` and `Avatar` fallbacks share the page background in the
+  default theme; use `bordered`/`elevate` or a sub-theme on flat surfaces.
+- `styled(Base, { name })` looks up a component theme by the new name only.
+- `$accentBackground`/`$accentColor` are the *opposite* palette's edge colours
+  (mid-grey in `dark`), exactly as in tamagui v5; use `theme="accent"` with
+  `$background`/`$color` for an accent surface.
+- There is no `Input` adornment slot, grid style props, or `Table`/`Chip`
+  component; the examples compose these from stacks.
+- Dark shadows are pure black and `bordered` frames use `$borderColor`
+  (≈1.2:1 against the surface in dark), as in tamagui v5; muted `$color10`
+  text and light `theme="red"` button text sit just above 4:1.

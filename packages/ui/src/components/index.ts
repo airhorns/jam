@@ -1,5 +1,5 @@
 // Layout
-export { Stack, XStack, YStack, ZStack } from "./Stacks";
+export { Stack, ThemeableStack, XStack, YStack, ZStack } from "./Stacks";
 export { Spacer } from "./Spacer";
 export { Separator } from "./Separator";
 export { ScrollView } from "./ScrollView";
@@ -15,6 +15,7 @@ export { Square, Circle } from "./Shapes";
 export { Button } from "./Button";
 export { Input, TextArea } from "./Input";
 export { Checkbox } from "./Checkbox";
+export type { CheckedState } from "./Checkbox";
 export { Switch } from "./Switch";
 export { RadioGroup } from "./RadioGroup";
 export { Slider } from "./Slider";
@@ -41,8 +42,10 @@ export { Accordion } from "./Accordion";
 export { Tabs } from "./Tabs";
 
 // Notifications
-export { Toast } from "./Toast";
+export { Toast, toastController, useToastController, useToastState } from "./Toast";
+export type { ToastOptions, ToastRecord, ToastPlacement } from "./Toast";
 export { Tooltip } from "./Tooltip";
 
 // Utility
 export { VisuallyHidden } from "./VisuallyHidden";
+export { Slot } from "./Slot";

@@ -1,34 +1,76 @@
 // Renderer — two-phase reactive pipeline over the unified fact database.
 //
-// Phase 1 (emit): autorun executes the component tree. Components call
-//   when().get() which reads per-pattern indexes — fine-grained tracking.
-//   VDOM writes don't match app-state patterns, so no cycle.
+// Phase 1 (expand + emit): a reaction whose tracked data function expands
+//   the whole component tree (executing every component, so when() reads in
+//   nested components are tracked) and whose effect writes the expanded tree
+//   into the fact database as VDOM claims.
 //
 // Phase 2 (patch): autorun reads db.facts directly and reconciles ALL
 //   claims (component + external) into real DOM.
 
 import { autorun, reaction, runInAction } from "mobx";
 import { db, type Term } from "./db";
-import { type VNode, type VChild, emitVdom, expandComponents } from "./jsx";
+import { type VChild, type ElementRef, expandRoot, emitExpanded } from "./jsx";
+
+// Props applied as element properties (so form state updates live).
+const DOM_PROPERTIES = new Set([
+  "checked", "value", "disabled", "selected", "indeterminate", "readOnly", "multiple", "open",
+  "defaultValue", "defaultChecked",
+]);
+
+// Properties whose reflected attribute has a different name.
+const PROPERTY_ATTRIBUTES: Record<string, string> = {
+  defaultValue: "value",
+  defaultChecked: "checked",
+};
+
+// True boolean attributes: `false` removes them, `true` sets them empty.
+// Everything else (aria-*, draggable, contenteditable…) stringifies booleans.
+const BOOLEAN_ATTRIBUTES = new Set([
+  "checked", "selected", "disabled", "readonly", "required", "multiple", "hidden",
+  "open", "autofocus", "inert", "autoplay", "controls", "loop", "muted", "default",
+  "defer", "async", "novalidate", "formnovalidate", "allowfullscreen", "itemscope",
+  "nomodule", "playsinline", "reversed", "ismap",
+]);
+
+const ATTRIBUTE_ALIASES: Record<string, string> = {
+  className: "class",
+  htmlFor: "for",
+  tabIndex: "tabindex",
+  readOnly: "readonly",
+  autoFocus: "autofocus",
+  autoComplete: "autocomplete",
+  autoCorrect: "autocorrect",
+  autoCapitalize: "autocapitalize",
+  spellCheck: "spellcheck",
+  contentEditable: "contenteditable",
+  crossOrigin: "crossorigin",
+  srcSet: "srcset",
+  maxLength: "maxlength",
+  minLength: "minlength",
+  enterKeyHint: "enterkeyhint",
+  inputMode: "inputmode",
+  colSpan: "colspan",
+  rowSpan: "rowspan",
+  noValidate: "novalidate",
+  acceptCharset: "accept-charset",
+  httpEquiv: "http-equiv",
+  dateTime: "datetime",
+  encType: "enctype",
+  formAction: "formaction",
+  frameBorder: "frameborder",
+  allowFullScreen: "allowfullscreen",
+  referrerPolicy: "referrerpolicy",
+  viewBox: "viewBox",
+};
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-/**
- * Execute the whole component tree — the root component and every nested
- * one — returning a VDOM tree whose component nodes carry their output.
- * Run this inside a tracking context so nested when() calls are tracked.
- */
-export function renderTree(root: VChild): VChild {
-  const expanded = expandComponents(root);
-  if (
-    typeof expanded === "object" &&
-    expanded !== null &&
-    "__vnode" in expanded &&
-    typeof (expanded as VNode).tag === "function"
-  ) {
-    return (expanded as VNode).rendered;
-  }
-  return expanded;
+// HTML lowercases attribute names on set, so match that or the cleanup sweep
+// below would strip every camelCase attribute it just wrote. SVG is case-sensitive.
+function attributeName(key: string, svg: boolean): string {
+  const name = ATTRIBUTE_ALIASES[key] ?? key;
+  return svg ? name : name.toLowerCase();
 }
 
 /**
@@ -38,40 +80,27 @@ export function renderTree(root: VChild): VChild {
 export function mount(rootVnode: VChild, container: HTMLElement): () => void {
   const mountOwner = db.createChildOwner(db.getCurrentOwnerId(), "mount");
 
-  // --- Phase 1: Emit VDOM claims from component tree ---
-  // Use reaction: the data function executes the component tree (tracking
-  // per-pattern indexes via when()), the effect function writes VDOM claims.
-  // This cleanly separates tracked reads from map writes.
+  // --- Phase 1: Expand and emit VDOM claims from component tree ---
   const emitDisposer = reaction(
-    () => renderTree(rootVnode),
-    (vnode) => {
-      // EFFECT: clear old component claims and emit new ones.
-      // This writes to db.facts but doesn't re-trigger the data function
-      // because reaction separates tracking from effects.
+    () => expandRoot(rootVnode, "dom"),
+    (nodes) => {
+      // Writes to db.facts but doesn't re-trigger the data function because
+      // reaction separates tracking from effects. Revoking the mount owner
+      // drops the previous render's claims.
       runInAction(() => {
         db.revokeOwner(mountOwner);
-        db.withOwnerScope(mountOwner, () => {
-          db.emitCollector = new Set();
-          emitVdom(vnode, "dom", 0);
-          db.emitCollector = null;
-        });
+        db.withOwnerScope(mountOwner, () => emitExpanded(nodes, "dom", 0));
       });
     },
-    // Always fire effect when data function re-runs — VNodes are new objects
-    // each time so reference equality would always trigger anyway.
+    // Always fire effect when data function re-runs — expanded trees are new
+    // objects each time so reference equality would always trigger anyway.
     { fireImmediately: true, equals: () => false },
   );
 
   // --- Phase 2: Patch DOM from all VDOM claims ---
   const managed = new Map<string, Element | Text>();
-  const mountedRefs = new Map<
-    string,
-    {
-      element: Element;
-      refKey: string;
-      callback: (element: Element | null) => void;
-    }
-  >();
+  const pendingFocus: HTMLElement[] = [];
+  const mountedRefs = new Map<string, { element: Element; refKey: string; callback: ElementRef }>();
 
   function releaseElementRef(entityId: string) {
     const mounted = mountedRefs.get(entityId);
@@ -125,28 +154,19 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
 
     function syncElementRef(entityId: string, el: Element) {
       const refKey = elementRefs.get(entityId);
+      const callback = refKey ? (db.getRef(refKey) as ElementRef | undefined) : undefined;
+      if (!refKey || !callback) {
+        releaseElementRef(entityId);
+        return;
+      }
       const mounted = mountedRefs.get(entityId);
-
-      if (!refKey) {
-        releaseElementRef(entityId);
-        return;
-      }
-
-      const callback = db.getRef(refKey) as
-        | ((element: Element | null) => void)
-        | undefined;
-      if (!callback) {
-        releaseElementRef(entityId);
-        return;
-      }
-
       if (mounted?.refKey === refKey && mounted.element === el) return;
       if (mounted) mounted.callback(null);
-      callback(el);
+      callback(el as HTMLElement);
       mountedRefs.set(entityId, { element: el, refKey, callback });
     }
 
-    function reconcile(entityId: string, parentIsSvg: boolean): Node | null {
+    function reconcile(entityId: string, inSvg = false): Node | null {
       const tag = tags.get(entityId);
       if (!tag || visited.has(entityId)) return null;
       visited.add(entityId);
@@ -163,23 +183,13 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
         return node;
       }
 
-      // SVG tags are case-sensitive (foreignObject, linearGradient), HTML tags are not.
-      const isSvg = tag === "svg" || parentIsSvg;
-      const existing = managed.get(entityId);
-      const reusable =
-        existing instanceof Element &&
-        (isSvg
-          ? existing.namespaceURI === SVG_NS && existing.localName === tag
-          : existing.namespaceURI !== SVG_NS &&
-            existing.localName === tag.toLowerCase());
-      let el: Element;
-      if (reusable) {
-        el = existing;
-      } else {
-        el = isSvg
-          ? document.createElementNS(SVG_NS, tag)
-          : document.createElement(tag);
+      const svg = inSvg || tag === "svg";
+      let el = managed.get(entityId);
+      let created = false;
+      if (!(el instanceof Element) || el.tagName.toLowerCase() !== tag.toLowerCase()) {
+        el = svg ? document.createElementNS(SVG_NS, tag) : document.createElement(tag);
         managed.set(entityId, el);
+        created = true;
       }
 
       // Classes — merged from ALL sources
@@ -194,16 +204,35 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       const activeAttrs = new Set<string>();
       if (elProps) {
         for (const [key, value] of elProps) {
-          activeAttrs.add(key);
-          if (
-            !isSvg &&
-            (key === "checked" || key === "value" || key === "disabled")
-          ) {
+          const attr = PROPERTY_ATTRIBUTES[key] ?? attributeName(key, svg);
+          if (DOM_PROPERTIES.has(key) && key in el) {
             if ((el as any)[key] !== value) (el as any)[key] = value;
-          } else {
-            const strVal = String(value);
-            if (el.getAttribute(key) !== strVal) el.setAttribute(key, strVal);
+            // Keep any attribute the property reflects to (e.g. a hidden input's value).
+            activeAttrs.add(attr);
+            // Reflect boolean state as an attribute too so CSS selectors and
+            // tests can see it.
+            if (typeof value === "boolean") {
+              if (value) {
+                if (!el.hasAttribute(attr)) el.setAttribute(attr, "");
+              } else if (el.hasAttribute(attr)) {
+                el.removeAttribute(attr);
+              }
+            }
+            continue;
           }
+          if (typeof value === "boolean" && BOOLEAN_ATTRIBUTES.has(attr)) {
+            if (value) {
+              activeAttrs.add(attr);
+              if (!el.hasAttribute(attr)) el.setAttribute(attr, "");
+              if (created && attr === "autofocus" && el instanceof HTMLElement) pendingFocus.push(el);
+            } else if (el.hasAttribute(attr)) {
+              el.removeAttribute(attr);
+            }
+            continue;
+          }
+          activeAttrs.add(attr);
+          const strVal = String(value);
+          if (el.getAttribute(attr) !== strVal) el.setAttribute(attr, strVal);
         }
       }
       for (let i = el.attributes.length - 1; i >= 0; i--) {
@@ -229,22 +258,24 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
 
       syncElementRef(entityId, el);
 
-      const ownsChildren = childModes.get(entityId) !== "imperative";
-      if (ownsChildren) {
-        const childList = children.get(entityId) ?? [];
-        const childNodes: Node[] = [];
-        const childIsSvg = isSvg && tag !== "foreignObject";
-        for (const [, childId] of childList) {
-          const node = reconcile(childId, childIsSvg);
-          if (node) childNodes.push(node);
-        }
-        for (let i = 0; i < childNodes.length; i++) {
-          if (el.childNodes[i] !== childNodes[i]) {
-            el.insertBefore(childNodes[i], el.childNodes[i] || null);
-          }
-        }
-        while (el.childNodes.length > childNodes.length) {
-          el.removeChild(el.lastChild!);
+      // Imperative hosts own their subtree; leave whatever the callback put there.
+      if (childModes.get(entityId) === "imperative") return el;
+
+      const childList = children.get(entityId) ?? [];
+      const childNodes: Node[] = [];
+      for (const [, childId] of childList) {
+        const node = reconcile(childId, svg && tag !== "foreignObject");
+        if (node) childNodes.push(node);
+      }
+      // Drop stale nodes first so surviving siblings keep their place instead of
+      // being re-inserted (which would restart their CSS animations).
+      const keep = new Set(childNodes);
+      for (let i = el.childNodes.length - 1; i >= 0; i--) {
+        if (!keep.has(el.childNodes[i])) el.removeChild(el.childNodes[i]);
+      }
+      for (let i = 0; i < childNodes.length; i++) {
+        if (el.childNodes[i] !== childNodes[i]) {
+          el.insertBefore(childNodes[i], el.childNodes[i] || null);
         }
       }
 
@@ -254,7 +285,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
     const rootChildren = children.get("dom") ?? [];
     const rootNodes: Node[] = [];
     for (const [, childId] of rootChildren) {
-      const node = reconcile(childId, false);
+      const node = reconcile(childId);
       if (node) rootNodes.push(node);
     }
     for (let i = 0; i < rootNodes.length; i++) {
@@ -272,13 +303,17 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
         managed.delete(id);
       }
     }
+
+    // Focus after the tree is attached so focus() actually takes effect.
+    while (pendingFocus.length > 0) {
+      const el = pendingFocus.shift()!;
+      if (el.isConnected) el.focus();
+    }
   });
 
   return () => {
     emitDisposer();
-    runInAction(() => {
-      db.revokeOwner(mountOwner);
-    });
+    runInAction(() => db.revokeOwner(mountOwner));
     patchDisposer();
     for (const id of Array.from(mountedRefs.keys())) releaseElementRef(id);
   };

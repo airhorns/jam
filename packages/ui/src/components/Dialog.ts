@@ -1,145 +1,281 @@
-import { h } from "@jam/core/jsx";
+import { Portal } from "@jam/core";
+import { createContext, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { styled } from "../styled";
+import type { StyledProps } from "../styled";
+import { themeableVariants } from "../variants";
+import { useControllableState, useStableId } from "../state";
+import { useDismissableLayer } from "../layers";
+import { Button } from "./Button";
+import { Slot } from "./Slot";
+import { YStack } from "./Stacks";
+import { H2, Paragraph } from "./Text";
+
+export type DialogContextValue = {
+  id: string;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  modal: boolean;
+  role: "dialog" | "alertdialog";
+  contentId: string;
+  titleId: string;
+  descriptionId: string;
+};
+
+export const DialogContext = createContext<DialogContextValue | null>(null);
+
+export function useDialogContext(part: string): DialogContextValue {
+  const ctx = useContext(DialogContext);
+  if (!ctx) throw new Error(`Dialog.${part} must be rendered inside <Dialog>`);
+  return ctx;
+}
+
+export const dataState = (open: boolean): "open" | "closed" => (open ? "open" : "closed");
+
+export type DialogProps = {
+  open?: boolean;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Trap focus, lock scroll and mark the content `aria-modal` (default true). */
+  modal?: boolean;
+  /** Close on Escape (default true). */
+  dismissOnEscape?: boolean;
+  /** Close when pressing outside the content, e.g. on the overlay (default true). */
+  dismissOnOutsidePress?: boolean;
+  children?: VChild | VChild[];
+};
 
 /**
- * Dialog: modal dialog overlay.
+ * Register the dialog's open state as a dismissable layer and provide the
+ * context its parts read. Shared with AlertDialog, which only changes the
+ * role and the outside-press default.
+ */
+export function useDialogRoot(props: DialogProps, role: DialogContextValue["role"], idPrefix: string): DialogContextValue {
+  const modal = props.modal ?? true;
+  const id = useStableId(idPrefix);
+  const [openState, setOpen] = useControllableState<boolean>("open", {
+    value: props.open,
+    defaultValue: props.defaultOpen ?? false,
+    onChange: props.onOpenChange,
+  });
+  const open = openState === true;
+  useDismissableLayer(id, open, {
+    onDismiss: () => setOpen(false),
+    modal,
+    autoFocus: true,
+    restoreFocus: true,
+    dismissOnEscape: props.dismissOnEscape,
+    dismissOnOutsidePress: props.dismissOnOutsidePress,
+  });
+  return {
+    id,
+    open,
+    setOpen,
+    modal,
+    role,
+    contentId: `${id}-content`,
+    titleId: `${id}-title`,
+    descriptionId: `${id}-description`,
+  };
+}
+
+function DialogRoot(props: DialogProps): VNode {
+  const value = useDialogRoot(props, "dialog", "dialog");
+  return h(DialogContext.Provider, { value }, props.children);
+}
+DialogRoot.displayName = "Dialog";
+
+// ---- Trigger / Close ----
+
+export type DialogTriggerProps = StyledProps & {
+  /** Merge the trigger behaviour onto the single child instead of rendering a Button. */
+  asChild?: boolean;
+  onClick?: (event: MouseEvent) => void;
+};
+
+export function DialogTrigger(props: DialogTriggerProps): VNode {
+  const ctx = useDialogContext("Trigger");
+  const { asChild, onClick, ...rest } = props;
+  return h(asChild ? Slot : Button, {
+    ...rest,
+    "aria-haspopup": "dialog",
+    "aria-expanded": ctx.open,
+    "aria-controls": ctx.contentId,
+    "data-state": dataState(ctx.open),
+    "data-layer-anchor": ctx.id,
+    onClick: (event: MouseEvent) => {
+      onClick?.(event);
+      ctx.setOpen(!ctx.open);
+    },
+  });
+}
+DialogTrigger.displayName = "DialogTrigger";
+
+export function DialogClose(props: DialogTriggerProps): VNode {
+  const ctx = useDialogContext("Close");
+  const { asChild, onClick, ...rest } = props;
+  return h(asChild ? Slot : Button, {
+    ...rest,
+    onClick: (event: MouseEvent) => {
+      onClick?.(event);
+      ctx.setOpen(false);
+    },
+  });
+}
+DialogClose.displayName = "DialogClose";
+
+// ---- Portal / Overlay / Content ----
+
+export const DialogPortalFrame = styled(YStack, {
+  name: "DialogPortal",
+  variants: {
+    unstyled: {
+      false: {
+        position: "fixed",
+        inset: 0,
+        alignItems: "center",
+        justifyContent: "center",
+        pointerEvents: "none",
+        zIndex: 100_000,
+      },
+    },
+  },
+  defaultVariants: {
+    unstyled: false,
+  },
+});
+
+export type DialogPortalProps = StyledProps & {
+  /** Render the portal even while closed. */
+  forceMount?: boolean;
+};
+
+export function DialogPortal(props: DialogPortalProps): VNode | null {
+  const ctx = useDialogContext("Portal");
+  const { forceMount, children, ...rest } = props;
+  if (!ctx.open && !forceMount) return null;
+  return h(Portal, null, h(DialogPortalFrame, { "data-state": dataState(ctx.open), ...rest }, children));
+}
+DialogPortal.displayName = "DialogPortal";
+
+export const DialogOverlayFrame = styled(YStack, {
+  name: "DialogOverlay",
+  defaultProps: {
+    animation: "medium",
+  },
+  variants: {
+    unstyled: {
+      false: {
+        position: "fixed",
+        inset: 0,
+        backgroundColor: "$shadow6",
+        pointerEvents: "auto",
+        enterStyle: { opacity: 0 },
+      },
+    },
+  },
+  defaultVariants: {
+    unstyled: false,
+  },
+});
+
+export function DialogOverlay(props: StyledProps): VNode {
+  const ctx = useDialogContext("Overlay");
+  return h(DialogOverlayFrame, { "data-state": dataState(ctx.open), "aria-hidden": "true", ...props });
+}
+DialogOverlay.displayName = "DialogOverlay";
+
+export const DialogContentFrame = styled(YStack, {
+  name: "DialogContent",
+  defaultProps: {
+    animation: "quick",
+  },
+  variants: {
+    unstyled: {
+      false: {
+        position: "relative",
+        backgroundColor: "$background",
+        borderWidth: 1,
+        borderStyle: "solid",
+        borderColor: "$borderColor",
+        padding: "$true",
+        borderRadius: "$true",
+        gap: "$4",
+        elevate: true,
+        zIndex: 2,
+        pointerEvents: "auto",
+        maxWidth: "min(90vw, 560px)",
+        maxHeight: "85vh",
+        overflow: "auto",
+        outlineWidth: 0,
+        enterStyle: { opacity: 0, scale: 0.96, y: 10 },
+      },
+    },
+    elevate: themeableVariants.elevate,
+    elevation: themeableVariants.elevation,
+    bordered: themeableVariants.bordered,
+    fullscreen: themeableVariants.fullscreen,
+  },
+  defaultVariants: {
+    unstyled: false,
+  },
+});
+
+export function DialogContent(props: StyledProps): VNode {
+  const ctx = useDialogContext("Content");
+  return h(DialogContentFrame, {
+    id: ctx.contentId,
+    role: ctx.role,
+    "aria-modal": ctx.modal ? "true" : undefined,
+    "aria-labelledby": ctx.titleId,
+    "aria-describedby": ctx.descriptionId,
+    "data-state": dataState(ctx.open),
+    "data-layer": ctx.id,
+    tabIndex: -1,
+    ...props,
+  });
+}
+DialogContent.displayName = "DialogContent";
+
+// ---- Title / Description ----
+
+export const DialogTitleFrame = styled(H2, { name: "DialogTitle" });
+
+export function DialogTitle(props: StyledProps): VNode {
+  const ctx = useDialogContext("Title");
+  return h(DialogTitleFrame, { id: ctx.titleId, ...props });
+}
+DialogTitle.displayName = "DialogTitle";
+
+export const DialogDescriptionFrame = styled(Paragraph, { name: "DialogDescription" });
+
+export function DialogDescription(props: StyledProps): VNode {
+  const ctx = useDialogContext("Description");
+  return h(DialogDescriptionFrame, { id: ctx.descriptionId, ...props });
+}
+DialogDescription.displayName = "DialogDescription";
+
+/**
+ * Dialog: a modal window layered over the page.
  *
- * Usage:
- *   <Dialog open={isOpen} onOpenChange={setOpen}>
- *     <Dialog.Trigger>Open</Dialog.Trigger>
+ *   <Dialog>
+ *     <Dialog.Trigger asChild><Button>Open</Button></Dialog.Trigger>
  *     <Dialog.Portal>
  *       <Dialog.Overlay />
  *       <Dialog.Content>
- *         <Dialog.Title>Dialog Title</Dialog.Title>
- *         <Dialog.Description>Some description</Dialog.Description>
- *         <Dialog.Close>Close</Dialog.Close>
+ *         <Dialog.Title>Title</Dialog.Title>
+ *         <Dialog.Description>Description</Dialog.Description>
+ *         <Dialog.Close asChild><Button>Done</Button></Dialog.Close>
  *       </Dialog.Content>
  *     </Dialog.Portal>
  *   </Dialog>
  */
-export function Dialog(props: {
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-  modal?: boolean;
-  children?: VChild | VChild[];
-  [key: string]: unknown;
-}): VNode | null {
-  const { open = false, onOpenChange, modal = true, children, ...rest } = props;
-
-  return DialogFrame({
-    ...rest,
-    "data-state": open ? "open" : "closed",
-    children,
-  });
-}
-Dialog.displayName = "Dialog";
-
-const DialogFrame = styled("div", {
-  name: "DialogFrame",
-  defaultProps: {
-    display: "contents",
-  },
-});
-
-Dialog.Trigger = styled("button", {
-  name: "DialogTrigger",
-  defaultProps: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-    backgroundColor: "$background",
-    color: "$color",
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "$borderColor",
-    borderRadius: "$radius.3",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    fontSize: 14,
-    fontWeight: "500",
-    hoverStyle: {
-      backgroundColor: "$backgroundHover",
-    },
-  },
-});
-
-const DialogPortal = function DialogPortal(props: { children?: VChild | VChild[] }): VNode | null {
-  return h("div", { "data-dialog-portal": "true" }, ...(Array.isArray(props.children) ? props.children : props.children ? [props.children] : []));
-};
-DialogPortal.displayName = "DialogPortal";
-Dialog.Portal = DialogPortal;
-
-Dialog.Overlay = styled("div", {
-  name: "DialogOverlay",
-  defaultProps: {
-    position: "fixed",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    zIndex: 50,
-  },
-});
-
-Dialog.Content = styled("div", {
-  name: "DialogContent",
-  defaultProps: {
-    position: "fixed",
-    top: "50%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
-    display: "flex",
-    flexDirection: "column",
-    gap: 16,
-    padding: 24,
-    backgroundColor: "$background",
-    borderRadius: "$radius.4",
-    boxShadow: "0 16px 48px rgba(0,0,0,0.2)",
-    zIndex: 51,
-    maxWidth: "90vw",
-    maxHeight: "85vh",
-    overflow: "auto",
-  },
-});
-
-Dialog.Title = styled("h2", {
-  name: "DialogTitle",
-  defaultProps: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "$color",
-    margin: 0,
-  },
-});
-
-Dialog.Description = styled("p", {
-  name: "DialogDescription",
-  defaultProps: {
-    fontSize: 14,
-    color: "$color",
-    opacity: 0.7,
-    margin: 0,
-    lineHeight: 1.5,
-  },
-});
-
-Dialog.Close = styled("button", {
-  name: "DialogClose",
-  defaultProps: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-    backgroundColor: "transparent",
-    borderWidth: 0,
-    color: "$color",
-    padding: 4,
-    borderRadius: "$radius.2",
-    hoverStyle: {
-      backgroundColor: "$backgroundHover",
-    },
-  },
+export const Dialog = Object.assign(DialogRoot, {
+  Trigger: DialogTrigger,
+  Portal: DialogPortal,
+  Overlay: DialogOverlay,
+  Content: DialogContent,
+  Title: DialogTitle,
+  Description: DialogDescription,
+  Close: DialogClose,
 });

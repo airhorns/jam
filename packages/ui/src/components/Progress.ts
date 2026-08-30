@@ -1,69 +1,135 @@
-import { h } from "@jam/core/jsx";
+import { createContext, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
+import { injectRule } from "../css";
 import { styled } from "../styled";
+import type { StyledProps, VariantFunction } from "../styled";
+import { tokenValue } from "../variants";
+import { Stack } from "./Stacks";
 
-/**
- * Progress: progress bar indicator.
- *
- * Usage:
- *   <Progress value={60} max={100}>
- *     <Progress.Indicator />
- *   </Progress>
- */
-export function Progress(props: {
-  value?: number;
-  max?: number;
-  size?: string;
-  children?: VChild | VChild[];
-  [key: string]: unknown;
-}): VNode | null {
-  const { value = 0, max = 100, children, ...rest } = props;
-  const percent = Math.min(100, Math.max(0, (value / max) * 100));
+const SWEEP = "jam-ui-progress-sweep";
 
-  return ProgressFrame({
-    ...rest,
-    role: "progressbar",
-    "aria-valuemin": "0",
-    "aria-valuemax": String(max),
-    "aria-valuenow": String(value),
-    "data-value": String(value),
-    "data-max": String(max),
-    children,
-  });
+// An indeterminate bar has no value to position it by, so it sweeps instead.
+// The attribute selector outranks the atomic transform class.
+function injectProgressRules(): void {
+  injectRule(
+    `@keyframes ${SWEEP}`,
+    `@keyframes ${SWEEP} { from { transform: translateX(-100%) } to { transform: translateX(250%) } }`,
+  );
+  injectRule(
+    "jam-ui-progress-indeterminate",
+    `.is_ProgressIndicator[data-state="indeterminate"] { animation: ${SWEEP} 1.4s ease-in-out infinite }`,
+  );
 }
-Progress.displayName = "Progress";
 
-const ProgressFrame = styled("div", {
-  name: "ProgressFrame",
-  defaultProps: {
-    display: "flex",
-    position: "relative",
-    overflow: "hidden",
-    width: "100%",
-    height: 8,
-    borderRadius: 100000,
-    backgroundColor: "$borderColor",
-  },
+export const ProgressContext = createContext<{ value: number | null; max: number }>({ value: null, max: 100 });
+
+const progressSized: VariantFunction = (value, { tokens }) => {
+  const size = tokenValue(tokens, "size", value);
+  if (size === undefined) return null;
+  const height = Math.round(size * 0.25);
+  return { height, minWidth: height * 20, width: "100%" };
+};
+
+export type ProgressProps = StyledProps & {
+  /** Progress so far; leave unset for an indeterminate bar. */
+  value?: number | null;
+  max?: number;
+  size?: string | number;
+  unstyled?: boolean;
+};
+
+export const ProgressFrame = styled<ProgressProps>(Stack, {
+  name: "Progress",
   variants: {
+    unstyled: {
+      false: {
+        size: "$true",
+        borderRadius: 100_000,
+        overflow: "hidden",
+        backgroundColor: "$background",
+      },
+    },
+
     size: {
-      "1": { height: 4 },
-      "2": { height: 6 },
-      "3": { height: 8 },
-      "4": { height: 12 },
-      "5": { height: 16 },
+      "...size": progressSized,
+      ":number": progressSized,
     },
   },
   defaultVariants: {
-    size: "3",
+    unstyled: false,
   },
 });
 
-Progress.Indicator = styled("div", {
+export const ProgressIndicatorFrame = styled(Stack, {
   name: "ProgressIndicator",
-  defaultProps: {
-    height: "100%",
-    backgroundColor: "$color",
-    borderRadius: 100000,
-    transition: "width 0.3s ease",
+  variants: {
+    unstyled: {
+      false: {
+        height: "100%",
+        // Twice the track's width, so an overshooting animation still covers it.
+        width: "200%",
+        backgroundColor: "$background",
+      },
+    },
   },
+  defaultVariants: {
+    unstyled: false,
+  },
+});
+
+const progressState = (value: number | null, max: number): string =>
+  value == null ? "indeterminate" : value >= max ? "complete" : "loading";
+
+/** Progress.Indicator: the filled part. Its width comes from the Progress value. */
+function ProgressIndicator(props: StyledProps): VNode {
+  injectProgressRules();
+  const { value, max } = useContext(ProgressContext);
+  const ratio = value == null ? 0 : Math.min(1, Math.max(0, value / max));
+  // The sweep's keyframes take over the transform while it runs; the inline
+  // value is where the bar rests when animations are off.
+  const position = value == null ? { width: "40%", x: "75%" } : { x: `${-100 + ratio * 50}%` };
+  return h(ProgressIndicatorFrame, {
+    "data-state": progressState(value, max),
+    ...position,
+    ...(props as Record<string, unknown>),
+  });
+}
+ProgressIndicator.displayName = "ProgressIndicator";
+
+const toArray = (children: VChild | VChild[] | undefined): VChild[] =>
+  children == null ? [] : Array.isArray(children) ? children : [children];
+
+/**
+ * Progress: a track whose `Progress.Indicator` child fills to `value` out of
+ * `max`. With no `value` the indicator sweeps to show indeterminate progress.
+ */
+function ProgressComponent(props: ProgressProps): VNode {
+  const { value, max = 100, children, ...rest } = props;
+  const current = typeof value === "number" && !Number.isNaN(value) ? Math.min(max, Math.max(0, value)) : null;
+
+  const aria: Record<string, unknown> = {
+    role: "progressbar",
+    "aria-valuemin": 0,
+    "aria-valuemax": max,
+    "data-state": progressState(current, max),
+    "data-max": max,
+  };
+  if (current !== null) {
+    aria["aria-valuenow"] = current;
+    aria["aria-valuetext"] = `${Math.round((current / max) * 100)}%`;
+    aria["data-value"] = current;
+  }
+
+  return h(
+    ProgressFrame,
+    { ...aria, ...(rest as Record<string, unknown>) },
+    h(ProgressContext.Provider, { value: { value: current, max } }, ...toArray(children)),
+  );
+}
+ProgressComponent.displayName = "Progress";
+
+export const Progress = Object.assign(ProgressComponent, {
+  Indicator: ProgressIndicator,
+  Frame: ProgressFrame,
+  staticConfig: ProgressFrame.staticConfig,
 });
