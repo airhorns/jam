@@ -8,7 +8,7 @@ export default defineConfig({
     jsxFragment: "Fragment",
   },
   optimizeDeps: {
-    exclude: ["wa-sqlite"],
+    exclude: ["@electric-sql/pglite"],
   },
   worker: {
     format: "es",

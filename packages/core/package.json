@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./jsx": "./src/jsx.ts"
+    "./jsx": "./src/jsx.ts",
+    "./durability": "./src/pglite-durability.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -14,8 +15,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "mobx": "^6.13.0",
-    "wa-sqlite": "^1.0.0"
+    "@electric-sql/pglite": "0.5.8",
+    "mobx": "^6.13.0"
   },
   "devDependencies": {
     "typescript": "^5.9.0",
