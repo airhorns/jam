@@ -1,8 +1,8 @@
 import { h } from "@jam/core/jsx";
 import { _, forget, replace, transaction } from "@jam/core";
-import type { PGliteInterface } from "@electric-sql/pglite";
 import { readValue } from "../facts";
 import { createIssue } from "../mutations";
+import type { Route } from "../programs/router";
 import { closeModal, isModalOpen } from "../programs/ui";
 import type { PriorityValue, StatusValue } from "../types";
 import { CloseIcon } from "./icons";
@@ -17,18 +17,19 @@ function close() {
   });
 }
 
-export function NewIssueModal({ pg }: { pg: PGliteInterface }) {
-  if (!isModalOpen(NEW_ISSUE_MODAL)) return null;
+export function NewIssueModal({ route }: { route: Route }) {
+  const projectId = route.projectId;
+  if (!projectId || !isModalOpen(NEW_ISSUE_MODAL)) return null;
   const status = (readValue("ui", "new-issue", "status") as StatusValue | undefined) ?? "backlog";
   const priority = (readValue("ui", "new-issue", "priority") as PriorityValue | undefined) ?? "none";
 
-  const submit = async (event: Event) => {
+  const submit = (event: Event) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
     const title = (form.elements.namedItem("title") as HTMLInputElement).value.trim();
     const description = (form.elements.namedItem("description") as HTMLTextAreaElement).value.trim();
     if (!title) return;
-    await createIssue(pg, { title, description, status, priority });
+    createIssue(projectId, { title, description, status, priority });
     close();
   };
 

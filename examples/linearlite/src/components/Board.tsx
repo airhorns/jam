@@ -1,6 +1,7 @@
 import { h } from "@jam/core/jsx";
 import { queryMeta, queryRows, readEntity } from "../facts";
 import { moveIssue, updateIssue } from "../mutations";
+import { projectPath } from "../projects";
 import { StatusDisplay, StatusValues, type Issue, type StatusValue } from "../types";
 import { Avatar } from "./Avatar";
 import { StatusIcon } from "./icons";
@@ -40,10 +41,11 @@ function onDrop(status: StatusValue, ids: string[]) {
 
 function IssueCard({ issueId: id }: { issueId: string }) {
   const issue = readEntity<Issue>("issue", id);
-  if (!issue) return null;
+  if (!issue?.project) return null;
+  const href = projectPath(issue.project, `/issue/${id}`);
   return (
     <div class="issue-card" draggable="true" data-issue-id={id} onDragStart={onDragStart(id)} onDragEnd={() => (dragging = null)}>
-      <a class="issue-card-title" href={`/issue/${id}`} onClick={link(`/issue/${id}`)}>
+      <a class="issue-card-title" href={href} onClick={link(href)}>
         {issue.title}
       </a>
       <div class="issue-card-footer">

@@ -2,11 +2,11 @@ import { h } from "@jam/core/jsx";
 import { replace } from "@jam/core";
 import { formatDate, queryMeta, queryRows, readEntity, readValue } from "../facts";
 import { updateIssue } from "../mutations";
+import { projectPath } from "../projects";
 import { ROW_HEIGHT, windowFor } from "../programs/queries";
 import type { Route } from "../programs/router";
 import type { Issue } from "../types";
 import { Avatar } from "./Avatar";
-import { SyncedIcon } from "./icons";
 import { link } from "./links";
 import { PriorityMenu, StatusMenu } from "./properties";
 
@@ -18,15 +18,15 @@ function onScroll(event: Event) {
 
 function IssueRow({ issueId: id }: { issueId: string }) {
   const issue = readEntity<Issue>("issue", id);
-  if (!issue) return null;
+  if (!issue?.project) return null;
+  const href = projectPath(issue.project, `/issue/${id}`);
   return (
     <div class="issue-row" data-issue-id={id}>
       <PriorityMenu menu={`row-priority:${id}`} value={issue.priority} onChange={(priority) => updateIssue(id, { priority })} />
       <StatusMenu menu={`row-status:${id}`} value={issue.status} onChange={(status) => updateIssue(id, { status })} />
-      <a class="issue-row-title" href={`/issue/${id}`} onClick={link(`/issue/${id}`)}>
+      <a class="issue-row-title" href={href} onClick={link(href)}>
         {issue.title}
       </a>
-      <SyncedIcon synced={issue.synced} />
       <span class="issue-row-date">{formatDate(issue.created)}</span>
       <Avatar name={issue.username} />
     </div>

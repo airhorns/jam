@@ -20,7 +20,20 @@ export type Term = string | number | boolean;
 export type Fact = Term[];
 
 export type FactChange = "add" | "delete";
-export type FactListener = (type: FactChange, key: string, fact: Fact) => void;
+export interface FactChangeInfo {
+  /**
+   * True when the root owner holds the fact — it came from insert()/replace(),
+   * or a claimed fact was later remembered. Owner revocations, deleteByKey()
+   * of owner-only facts and clear() are never durable.
+   */
+  durable: boolean;
+  /** Set on the "add" emitted by replace(), so stores can replace the whole attribute. */
+  replace?: true;
+}
+export type FactListener = (type: FactChange, key: string, fact: Fact, info: FactChangeInfo) => void;
+
+/** Facts with no scope belong to the global partition. */
+export const GLOBAL_SCOPE = "";
 
 // --- Pattern types ---
 
@@ -154,6 +167,12 @@ export class FactDB {
   private ownerChildren = new Map<string, Set<string>>();
   private ownerCounters = new Map<string, number>();
 
+  /** Sync partition per fact; only non-global scopes are stored. */
+  private scopeStack: string[] = [];
+  private factScopes = new Map<string, string>();
+  /** Scope of the first non-global fact per [t0, t1] entity, with a count of its scoped facts for eviction. */
+  private entityScopes = new Map<Term, Map<Term, { scope: string; count: number }>>();
+
   /** Index of fact keys by first term, for fast querySingle when pattern has a literal first term. */
   private factsByFirstTerm = new Map<Term, Set<string>>();
 
@@ -279,6 +298,68 @@ export class FactDB {
     }
   }
 
+  /** Facts added inside fn get `scope` instead of inheriting one. */
+  withScope<T>(scope: string, fn: () => T): T {
+    this.scopeStack.push(scope);
+    try {
+      return fn();
+    } finally {
+      this.scopeStack.pop();
+    }
+  }
+
+  scopeOf(...terms: Term[]): string {
+    return this.factScopes.get(this.factKey(terms)) ?? GLOBAL_SCOPE;
+  }
+
+  /** Re-tag an existing fact without notifying listeners; used when the synced copy of a fact changes partition. */
+  setScope(key: string, scope: string): void {
+    const fact = this.factsPlain.get(key);
+    if (!fact) return;
+    const previous = this.factScopes.get(key) ?? GLOBAL_SCOPE;
+    if (previous === scope) return;
+    this.forgetScope(key, fact);
+    this.recordScope(key, fact, scope);
+  }
+
+  /**
+   * The active scope, else the one inherited from `inherited` (a replaced
+   * fact), else the entity's registered scope, else global.
+   */
+  private resolveScope(terms: Term[], inherited: string | undefined): string {
+    if (this.scopeStack.length > 0) return this.scopeStack[this.scopeStack.length - 1];
+    if (inherited !== undefined) return inherited;
+    if (terms.length >= 2 && this.entityScopes.size > 0) {
+      return this.entityScopes.get(terms[0])?.get(terms[1])?.scope ?? GLOBAL_SCOPE;
+    }
+    return GLOBAL_SCOPE;
+  }
+
+  private recordScope(key: string, fact: Fact, scope: string): void {
+    if (scope === GLOBAL_SCOPE) return;
+    this.factScopes.set(key, scope);
+    if (fact.length < 2) return;
+    let byId = this.entityScopes.get(fact[0]);
+    if (!byId) {
+      byId = new Map();
+      this.entityScopes.set(fact[0], byId);
+    }
+    const entry = byId.get(fact[1]);
+    if (entry) entry.count++;
+    else byId.set(fact[1], { scope, count: 1 });
+  }
+
+  private forgetScope(key: string, fact: Fact): void {
+    if (!this.factScopes.delete(key) || fact.length < 2) return;
+    const byId = this.entityScopes.get(fact[0]);
+    const entry = byId?.get(fact[1]);
+    if (!byId || !entry) return;
+    if (--entry.count === 0) {
+      byId.delete(fact[1]);
+      if (byId.size === 0) this.entityScopes.delete(fact[0]);
+    }
+  }
+
   private attachFactOwner(key: string, ownerId: string): void {
     let owners = this.factOwners.get(key);
     if (!owners) {
@@ -296,12 +377,13 @@ export class FactDB {
     }
   }
 
-  private deleteFactRecord(key: string, fact: Fact, invalidate = true): void {
+  private deleteFactRecord(key: string, fact: Fact, invalidate: boolean, durable: boolean): void {
     this.facts.delete(key);
     this.factsPlain.delete(key);
     this.factsByFirstTerm.get(fact[0])?.delete(key);
     if (invalidate) this.invalidatePatterns(fact);
-    this.notify("delete", key, fact);
+    this.notify("delete", key, fact, { durable });
+    this.forgetScope(key, fact);
   }
 
   /**
@@ -317,11 +399,11 @@ export class FactDB {
     };
   }
 
-  private notify(type: FactChange, key: string, fact: Fact): void {
+  private notify(type: FactChange, key: string, fact: Fact, info: FactChangeInfo): void {
     if (this.listeners.length === 0) return;
     for (const listener of this.listeners.slice()) {
       try {
-        listener(type, key, fact);
+        listener(type, key, fact, info);
       } catch (e) {
         console.error("[jam] fact listener threw", e);
       }
@@ -336,7 +418,7 @@ export class FactDB {
     if (owners.size === 0) {
       this.factOwners.delete(key);
       const fact = this.factsPlain.get(key);
-      if (fact) this.deleteFactRecord(key, fact);
+      if (fact) this.deleteFactRecord(key, fact, true, false);
     }
   }
 
@@ -392,13 +474,20 @@ export class FactDB {
     }
   }
 
-  private addFact(terms: Term[], ownerId: string): void {
+  private addFact(
+    terms: Term[],
+    ownerId: string,
+    inheritedScope?: string,
+    replace?: true,
+  ): void {
     const key = this.factKey(terms);
     this.ensureOwner(
       ownerId,
       ownerId === this.rootOwner ? null : this.currentOwner(),
     );
-    if (!this.facts.has(key)) {
+    const isNew = !this.facts.has(key);
+    const hadRoot = this.factOwners.get(key)?.has(this.rootOwner) ?? false;
+    if (isNew) {
       this.facts.set(key, terms);
       this.factsPlain.set(key, terms);
       if (this.emitCollector) this.emitCollector.add(key);
@@ -410,10 +499,14 @@ export class FactDB {
         this.factsByFirstTerm.set(first, bucket);
       }
       bucket.add(key);
+      this.recordScope(key, terms, this.resolveScope(terms, inheritedScope));
       this.invalidatePatterns(terms);
-      this.notify("add", key, terms);
     }
     this.attachFactOwner(key, ownerId);
+    const durable = ownerId === this.rootOwner;
+    if (isNew || (durable && !hadRoot)) {
+      this.notify("add", key, terms, replace ? { durable, replace } : { durable });
+    }
   }
 
   assert(...terms: Term[]): void {
@@ -425,11 +518,13 @@ export class FactDB {
   }
 
   private dropFact(key: string, fact: Fact, invalidate = true): void {
-    for (const ownerId of Array.from(this.factOwners.get(key) ?? [])) {
+    const owners = this.factOwners.get(key);
+    const durable = owners?.has(this.rootOwner) ?? false;
+    for (const ownerId of Array.from(owners ?? [])) {
       this.ownerFacts.get(ownerId)?.delete(key);
     }
     this.factOwners.delete(key);
-    this.deleteFactRecord(key, fact, invalidate);
+    this.deleteFactRecord(key, fact, invalidate, durable);
   }
 
   /** Facts matching a wildcard pattern, narrowed by the first-term index when the first term is literal. */
@@ -476,10 +571,13 @@ export class FactDB {
       | Term
       | Wildcard
     )[];
+    let inheritedScope: string | undefined;
     for (const [otherKey, fact] of this.matchingFacts(pattern)) {
-      if (otherKey !== key) this.dropFact(otherKey, fact);
+      if (otherKey === key) continue;
+      inheritedScope ??= this.factScopes.get(otherKey) ?? GLOBAL_SCOPE;
+      this.dropFact(otherKey, fact);
     }
-    this.insert(...terms);
+    this.addFact(terms, this.rootOwner, inheritedScope, true);
   }
 
   /**
@@ -712,9 +810,15 @@ export class FactDB {
     this.patternVersions.clear();
     this.patternsByFirstTerm.clear();
     this.refs.clear();
+    this.factOwners.clear();
+    this.ownerFacts.clear();
+    this.refOwners.clear();
+    this.ownerRefs.clear();
+    this.factScopes.clear();
+    this.entityScopes.clear();
     clearSelectCache();
     if (removed) {
-      for (const [key, fact] of removed) this.notify("delete", key, fact);
+      for (const [key, fact] of removed) this.notify("delete", key, fact, { durable: false });
     }
   }
 

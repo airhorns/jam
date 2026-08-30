@@ -32,6 +32,16 @@ export const replace: (...terms: Term[]) => void = action((...terms: Term[]) => 
 });
 
 /**
+ * Facts written inside fn belong to the sync partition `scope`. Outside any
+ * scoped() call a fact inherits the scope of the fact it replaces, else of the
+ * entity it describes (same first two terms), else the global partition — so
+ * wrapping an entity's creation is enough to keep all of its facts together.
+ */
+export function scoped<T>(scope: string, fn: () => T): T {
+  return db.withScope(scope, () => runInAction(fn));
+}
+
+/**
  * Batch multiple mutations into a single transaction. Reactions only
  * fire once, after the transaction completes, seeing the final state.
  * Use this when you need to forget + remember multiple related facts

@@ -1,17 +1,20 @@
-// Queries — turns the current route into syncTable bindings. Rows land as
-// ["issue", id, col, val] / ["comment", id, col, val] facts and ordering as
-// ["query", name, "row", index, id]; components only ever read facts.
+// Queries — derived views over the facts in memory. The route picks which
+// views to derive; each is a whenever() over the entity facts it needs that
+// claims ["query", name, "row", index, id] plus total/offset/limit/ready meta,
+// so components only ever read facts. Only the current project's facts are in
+// memory (see subscriptions.ts), which keeps these passes small.
 
-import { $, replace, syncTable, whenever, type JamPGlite, type SyncedTable } from "@jam/core";
-import { filterStateToSql } from "../filter-state";
-import { LOCAL_STATE_COLUMNS, StatusValues } from "../types";
+import { $, claim, compileFilter, replace, whenever } from "@jam/core";
+import { collect } from "../facts";
+import { filterIssues, sortIssues, type FilterState } from "../filter-state";
+import { projectScope } from "../projects";
+import { StatusValues, type Comment, type Issue } from "../types";
 import { parseRoute, type Route } from "./router";
 
 export const ROW_HEIGHT = 36;
 export const LIST_CHUNK = 50;
 export const LIST_WINDOW = LIST_CHUNK * 2;
 export const BOARD_PAGE = 50;
-const WRITE_DEBOUNCE = 300;
 
 /** The window of rows to keep in facts for a list scrolled to `scrollTop`: the visible chunk plus one on each side. */
 export function windowFor(scrollTop: number): { offset: number; limit: number } {
@@ -20,93 +23,100 @@ export function windowFor(scrollTop: number): { offset: number; limit: number } 
   return { offset, limit: LIST_WINDOW };
 }
 
-type IssueBindingOptions = Parameters<typeof syncTable>[1];
+const ISSUE = ["issue", $.id, $.col, $.val] as const;
+const COMMENT = ["comment", $.id, $.col, $.val] as const;
 
-function issueBinding(pg: JamPGlite, options: Omit<IssueBindingOptions, "table">): SyncedTable {
-  return syncTable(pg, { table: "issue", readonly: LOCAL_STATE_COLUMNS, writeDebounce: WRITE_DEBOUNCE, ...options });
+function emitRows(name: string, ids: string[], total: number, offset = 0, limit = ids.length): void {
+  claim("query", name, "total", total);
+  claim("query", name, "offset", offset);
+  claim("query", name, "limit", limit);
+  ids.forEach((id, index) => claim("query", name, "row", index, id));
 }
 
-function bindingsFor(pg: JamPGlite, route: Route): { list?: SyncedTable; all: SyncedTable[] } {
+function startList(projectId: string, filter: FilterState): () => void {
+  return whenever([[...ISSUE], ["ui", "list", "scrollTop", $.y]], (matches) => {
+    const issues = collect<Issue>(matches).filter((issue) => issue.project === projectId);
+    const ordered = sortIssues(filterIssues(issues, filter), filter);
+    const { offset, limit } = windowFor(Number(matches[0]?.y ?? 0));
+    const ids = ordered.slice(offset, offset + limit).map((issue) => issue.id);
+    emitRows("list", ids, ordered.length, offset, limit);
+  });
+}
+
+function startBoard(projectId: string, filter: FilterState): () => void {
+  return whenever([[...ISSUE]], (matches) => {
+    const issues = collect<Issue>(matches).filter((issue) => issue.project === projectId);
+    for (const status of StatusValues) {
+      const column = { ...filter, status: [status], orderBy: "kanbanorder", orderDirection: "asc" as const };
+      const ordered = sortIssues(filterIssues(issues, column), column);
+      emitRows(`board:${status}`, ordered.slice(0, BOARD_PAGE).map((issue) => issue.id), ordered.length, 0, BOARD_PAGE);
+    }
+  });
+}
+
+function startDetail(projectId: string, issueId: string): () => void {
+  const stopDetail = whenever([["issue", issueId, "project", $.project]], ([match]) => {
+    const present = match?.project === projectId;
+    emitRows("detail", present ? [issueId] : [], present ? 1 : 0);
+  });
+  const stopComments = whenever([[...COMMENT]], (matches) => {
+    const comments = collect<Comment>(matches)
+      .filter((comment) => comment.issue === issueId)
+      .sort((a, b) => String(a.created ?? "").localeCompare(String(b.created ?? "")) || a.id.localeCompare(b.id));
+    emitRows("comments", comments.map((comment) => comment.id), comments.length);
+  });
+  return () => {
+    stopDetail();
+    stopComments();
+  };
+}
+
+/** Every view on a page reports ready once the project's subscription has delivered its initial facts. */
+function startReadiness(projectId: string, names: string[]): () => void {
+  const shape = compileFilter({ scope: projectScope(projectId) }).id;
+  return whenever([["sync", "shape", shape, "ready", $.ready]], ([match]) => {
+    for (const name of names) claim("query", name, "ready", match?.ready === true);
+  });
+}
+
+function startStats(projectId: string): () => void {
+  return whenever([["issue", $.id, "project", projectId]], (matches) => {
+    claim("stats", "issues", "total", matches.length);
+  });
+}
+
+function startPage(route: Route): () => void {
+  const { projectId } = route;
+  if (!projectId) return () => {};
+  const stops = [startStats(projectId)];
   switch (route.page) {
     case "list":
-    case "search": {
-      const { sql, params } = filterStateToSql(route.filter);
-      const list = issueBinding(pg, { query: sql, params, offset: 0, limit: LIST_WINDOW, name: "list" });
-      return { list, all: [list] };
-    }
-    case "board": {
-      const columns = StatusValues.map((status) => {
-        const filter = { ...route.filter, status: [status], orderBy: "kanbanorder", orderDirection: "asc" as const };
-        const { sql, params } = filterStateToSql(filter);
-        return issueBinding(pg, { query: sql, params, offset: 0, limit: BOARD_PAGE, name: `board:${status}` });
-      });
-      return { all: columns };
-    }
-    case "issue": {
-      const detail = issueBinding(pg, {
-        query: `SELECT * FROM issue WHERE id = $1 AND deleted = false`,
-        params: [route.issueId],
-        name: "detail",
-      });
-      const comments = syncTable(pg, {
-        table: "comment",
-        query: `SELECT * FROM comment WHERE issue_id = $1 AND deleted = false ORDER BY created ASC, id ASC`,
-        params: [route.issueId],
-        name: "comments",
-        readonly: LOCAL_STATE_COLUMNS,
-      });
-      return { all: [detail, comments] };
-    }
+    case "search":
+      // The list container is keyed by URL, so a route change lands on a fresh, unscrolled element.
+      replace("ui", "list", "scrollTop", 0);
+      stops.push(startList(projectId, route.filter), startReadiness(projectId, ["list"]));
+      break;
+    case "board":
+      stops.push(
+        startBoard(projectId, route.filter),
+        startReadiness(projectId, StatusValues.map((status) => `board:${status}`)),
+      );
+      break;
+    case "issue":
+      stops.push(startDetail(projectId, route.issueId!), startReadiness(projectId, ["detail", "comments"]));
+      break;
   }
+  return () => stops.forEach((stop) => stop());
 }
 
-export function startQueries(pg: JamPGlite): () => Promise<void> {
-  const stats = syncTable(pg, {
-    table: "stats",
-    query: `SELECT 'issues' AS id, count(*)::int AS total FROM issue WHERE deleted = false`,
-    writable: false,
-  });
-
-  let current: SyncedTable[] = [];
-  let list: SyncedTable | undefined;
-  let listOffset = 0;
-  let generation = 0;
-
-  // New bindings become ready before the old ones are disposed, so rows shared
-  // between them never leave the fact database.
-  async function switchTo(route: Route) {
-    const gen = ++generation;
-    const next = bindingsFor(pg, route);
-    await Promise.all(next.all.map((b) => b.ready.catch(() => {})));
-    if (gen !== generation) {
-      await Promise.all(next.all.map((b) => b.dispose()));
-      return;
-    }
-    const previous = current;
-    current = next.all;
-    list = next.list;
-    listOffset = 0;
-    // The list container is keyed by URL, so a route change lands on a fresh, unscrolled element.
-    if (list) replace("ui", "list", "scrollTop", 0);
-    await Promise.all(previous.map((b) => b.dispose()));
-  }
-
+export function startQueries(): () => void {
+  let stopPage = () => {};
   const stopRoute = whenever([["route", "url", $.url]], ([match]) => {
-    if (match) void switchTo(parseRoute(String(match.url)));
+    stopPage();
+    stopPage = match ? startPage(parseRoute(String(match.url))) : () => {};
   });
-
-  const stopScroll = whenever([["ui", "list", "scrollTop", $.y]], ([match]) => {
-    if (!list) return;
-    const { offset, limit } = windowFor(Number(match?.y ?? 0));
-    if (offset === listOffset) return;
-    listOffset = offset;
-    void list.refresh({ offset, limit });
-  });
-
-  return async () => {
+  return () => {
+    stopPage();
     stopRoute();
-    stopScroll();
-    generation++;
-    await Promise.all([stats, ...current].map((b) => b.dispose()));
   };
 }

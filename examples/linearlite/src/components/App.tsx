@@ -1,6 +1,4 @@
 import { h } from "@jam/core/jsx";
-import { $, when } from "@jam/core";
-import type { LinearlitePG } from "../pglite";
 import { currentRoute, type Route } from "../programs/router";
 import { Board } from "./Board";
 import { IssueList } from "./IssueList";
@@ -27,17 +25,10 @@ function BoardPage({ route }: { route: Route }) {
   );
 }
 
-function SyncOverlay() {
-  const status = when(["sync", "status", "initial-sync"]);
-  if (status.length === 0) return null;
-  const message = when(["sync", "message", $.message])[0]?.message;
+function HomePage() {
   return (
-    <div class="sync-overlay">
-      <div class="sync-overlay-card">
-        <div class="spinner" />
-        <div class="sync-overlay-title">Syncing with Electric</div>
-        <div class="sync-overlay-message">{String(message || "")}</div>
-      </div>
+    <div class="page home-page">
+      <div class="empty-state">Loading projects…</div>
     </div>
   );
 }
@@ -45,23 +36,24 @@ function SyncOverlay() {
 // Each page is keyed so switching pages lands on fresh DOM rather than reusing another page's elements.
 function page(route: Route) {
   switch (route.page) {
+    case "home":
+      return <HomePage key="home" />;
     case "board":
       return <BoardPage key="board" route={route} />;
     case "issue":
-      return <IssuePage key={`issue:${route.issueId}`} issueId={route.issueId!} />;
+      return <IssuePage key={`issue:${route.issueId}`} route={route} />;
     default:
       return <ListPage key="list" route={route} />;
   }
 }
 
-export function App({ pg }: { pg: LinearlitePG }) {
+export function App() {
   const route = currentRoute();
   return (
     <div class="app">
       <LeftMenu route={route} />
       <div class="main">{page(route)}</div>
-      <NewIssueModal pg={pg} />
-      <SyncOverlay />
+      <NewIssueModal route={route} />
     </div>
   );
 }

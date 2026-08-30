@@ -9,8 +9,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "backend:up": "docker compose -f backend/docker-compose.yml up -d --wait && pnpm db:migrate && pnpm db:load-data",
-    "backend:down": "docker compose -f backend/docker-compose.yml down",
+    "test:e2e:electric": "VITE_ELECTRIC_URL=http://localhost:3033 playwright test e2e/electric.spec.ts",
+    "backend:up": "tsx backend/containers.ts up && pnpm db:migrate && pnpm db:load-data",
+    "backend:down": "tsx backend/containers.ts down",
+    "backend:logs": "tsx backend/containers.ts logs",
     "db:migrate": "tsx db/migrate.ts",
     "db:load-data": "tsx db/load-data.ts",
     "write-server": "tsx server.ts"
@@ -23,8 +25,7 @@
     "@jam/core": "workspace:*",
     "fractional-indexing": "^4.0.0",
     "hono": "^4.13.5",
-    "postgres": "^3.4.9",
-    "zod": "^4.5.2"
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

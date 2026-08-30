@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { filterStateFromParams, filterStateToParams, filterStateToSql } from "../filter-state";
+import { filterIssues, filterStateFromParams, filterStateToParams, sortIssues } from "../filter-state";
+import type { Issue } from "../types";
 
 describe("filterStateFromParams", () => {
   it("defaults to newest first with no filters", () => {
@@ -37,26 +38,41 @@ describe("filterStateToParams", () => {
   });
 });
 
-describe("filterStateToSql", () => {
-  it("numbers placeholders across status, priority, and search", () => {
-    const { sql, params } = filterStateToSql({
-      orderBy: "modified",
-      orderDirection: "asc",
-      status: ["todo", "done"],
-      priority: ["high"],
-      query: "login bug",
-    });
-    expect(sql).toContain("status IN ($1, $2)");
-    expect(sql).toContain("priority IN ($3)");
-    expect(sql).toContain("plainto_tsquery('simple', $4)");
-    expect(sql).toContain("deleted = false");
-    expect(sql).toMatch(/ORDER BY modified ASC, id ASC$/);
-    expect(params).toEqual(["todo", "done", "high", "login bug"]);
+const ISSUES: (Partial<Issue> & { id: string })[] = [
+  { id: "a", title: "Login bug", description: "Cannot sign in", status: "todo", priority: "high", created: "2026-01-03" },
+  { id: "b", title: "Dark mode", description: "Theme switcher", status: "done", priority: "low", created: "2026-01-01" },
+  { id: "c", title: "Crash on login", description: "", status: "todo", priority: "urgent", created: "2026-01-02" },
+];
+
+const base = { orderBy: "created", orderDirection: "desc" as const, status: [], priority: [] };
+
+describe("filterIssues", () => {
+  it("keeps everything when no filter is set", () => {
+    expect(filterIssues(ISSUES, base)).toHaveLength(3);
   });
 
-  it("filters only soft-deleted rows when no filters are set", () => {
-    const { sql, params } = filterStateToSql({ orderBy: "created", orderDirection: "desc", status: [], priority: [] });
-    expect(sql).toContain("WHERE deleted = false ORDER BY created DESC, id ASC");
-    expect(params).toEqual([]);
+  it("matches status and priority membership", () => {
+    expect(filterIssues(ISSUES, { ...base, status: ["todo"] }).map((i) => i.id)).toEqual(["a", "c"]);
+    expect(filterIssues(ISSUES, { ...base, status: ["todo"], priority: ["urgent"] }).map((i) => i.id)).toEqual(["c"]);
+  });
+
+  it("searches title and description case-insensitively", () => {
+    expect(filterIssues(ISSUES, { ...base, query: "LOGIN" }).map((i) => i.id)).toEqual(["a", "c"]);
+    expect(filterIssues(ISSUES, { ...base, query: "sign in" }).map((i) => i.id)).toEqual(["a"]);
+    expect(filterIssues(ISSUES, { ...base, query: "   " })).toHaveLength(3);
+  });
+});
+
+describe("sortIssues", () => {
+  it("orders by the chosen column in either direction", () => {
+    expect(sortIssues(ISSUES, { orderBy: "created", orderDirection: "desc" }).map((i) => i.id)).toEqual(["a", "c", "b"]);
+    expect(sortIssues(ISSUES, { orderBy: "created", orderDirection: "asc" }).map((i) => i.id)).toEqual(["b", "c", "a"]);
+    expect(sortIssues(ISSUES, { orderBy: "title", orderDirection: "asc" }).map((i) => i.id)).toEqual(["c", "b", "a"]);
+  });
+
+  it("breaks ties by id so windows stay stable", () => {
+    const same = ISSUES.map((issue) => ({ ...issue, status: "todo" as const }));
+    expect(sortIssues(same, { orderBy: "status", orderDirection: "asc" }).map((i) => i.id)).toEqual(["a", "b", "c"]);
+    expect(sortIssues(same, { orderBy: "status", orderDirection: "desc" }).map((i) => i.id)).toEqual(["a", "b", "c"]);
   });
 });

@@ -1,11 +1,11 @@
-// Mutations — plain functions that write facts. The syncTable writer turns
-// them into SQL; in Electric mode the table triggers then queue them for the
-// write server. Nothing here talks to the database directly except to look up
-// a kanban position for a brand new issue.
+// Mutations — plain functions that write facts. Core's sync() stores them and
+// ships them to the server; nothing here knows about a database. A new issue
+// or comment is created inside scoped() so it lands in its project's
+// partition; later edits inherit that scope from the entity.
 
-import { $, _, forget, replace, transaction, when } from "@jam/core";
-import type { PGliteInterface } from "@electric-sql/pglite";
+import { $, _, forget, replace, scoped, transaction, when } from "@jam/core";
 import { generateKeyBetween } from "fractional-indexing";
+import { listProjects, projectScope } from "./projects";
 import { USERNAME, type PriorityValue, type StatusValue } from "./types";
 
 export type IssuePatch = Partial<{
@@ -34,12 +34,20 @@ export interface NewIssue {
   status?: StatusValue;
 }
 
-export async function createIssue(pg: PGliteInterface, issue: NewIssue): Promise<string> {
-  const last = await pg.query<{ kanbanorder: string }>(`SELECT kanbanorder FROM issue ORDER BY kanbanorder DESC LIMIT 1`);
-  const kanbanorder = generateKeyBetween(last.rows[0]?.kanbanorder ?? null, null);
+function lastKanbanorder(projectId: string): string | null {
+  let last: string | null = null;
+  for (const { order } of when(["issue", $.id, "project", projectId], ["issue", $.id, "kanbanorder", $.order])) {
+    if (typeof order === "string" && (last === null || order > last)) last = order;
+  }
+  return last;
+}
+
+export function createIssue(projectId: string, issue: NewIssue): string {
   const id = crypto.randomUUID();
   const timestamp = now();
-  transaction(() => {
+  const kanbanorder = generateKeyBetween(lastKanbanorder(projectId), null);
+  scoped(projectScope(projectId), () => {
+    replace("issue", id, "project", projectId);
     replace("issue", id, "title", issue.title);
     replace("issue", id, "description", issue.description ?? "");
     replace("issue", id, "priority", issue.priority ?? "none");
@@ -53,7 +61,10 @@ export async function createIssue(pg: PGliteInterface, issue: NewIssue): Promise
 }
 
 export function deleteIssue(id: string): void {
-  forget("issue", id, _, _);
+  transaction(() => {
+    for (const { comment } of when(["comment", $.comment, "issue", id])) forget("comment", comment, _, _);
+    forget("issue", id, _, _);
+  });
 }
 
 function kanbanorderOf(id: string | undefined): string | null {
@@ -76,14 +87,34 @@ export function moveIssue(id: string, status: StatusValue, beforeId?: string, af
 }
 
 export function addComment(issueId: string, body: string): string {
+  const projectId = when(["issue", issueId, "project", $.project])[0]?.project;
+  if (typeof projectId !== "string") throw new Error(`addComment: issue ${issueId} is not loaded`);
   const id = crypto.randomUUID();
   const timestamp = now();
-  transaction(() => {
-    replace("comment", id, "issue_id", issueId);
+  scoped(projectScope(projectId), () => {
+    replace("comment", id, "issue", issueId);
     replace("comment", id, "body", body);
     replace("comment", id, "username", USERNAME);
     replace("comment", id, "created", timestamp);
     replace("comment", id, "modified", timestamp);
+  });
+  return id;
+}
+
+export function projectIdFor(name: string): string {
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project";
+  const taken = new Set(listProjects().map((p) => p.id));
+  let id = base;
+  for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+  return id;
+}
+
+export function createProject(name: string, key = name.slice(0, 3).toUpperCase()): string {
+  const id = projectIdFor(name);
+  transaction(() => {
+    replace("project", id, "name", name);
+    replace("project", id, "key", key);
+    replace("project", id, "created", now());
   });
   return id;
 }

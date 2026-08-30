@@ -1,3 +1,5 @@
+import type { Issue } from "./types";
+
 export interface FilterState {
   orderBy: string;
   orderDirection: "asc" | "desc";
@@ -31,30 +33,24 @@ export function filterStateToParams(state: Partial<FilterState>, base = new URLS
   return params;
 }
 
-export const LIST_COLUMNS = "id, title, priority, status, modified, created, kanbanorder, username, synced";
+/** Issues matching the filter; a search query is a case-insensitive substring match on title and description. */
+export function filterIssues<T extends Partial<Issue>>(issues: T[], state: FilterState): T[] {
+  const query = state.query?.trim().toLowerCase();
+  return issues.filter(
+    (issue) =>
+      (state.status.length === 0 || state.status.includes(issue.status ?? "")) &&
+      (state.priority.length === 0 || state.priority.includes(issue.priority ?? "")) &&
+      (!query || `${issue.title ?? ""}\n${issue.description ?? ""}`.toLowerCase().includes(query)),
+  );
+}
 
-/** Build the issue list query for a filter; the ORDER BY tie-breaks on id so windows are stable. */
-export function filterStateToSql(state: FilterState): { sql: string; params: unknown[] } {
-  const where: string[] = [];
-  const params: unknown[] = [];
-  const inList = (column: string, values: string[]) => {
-    const placeholders = values.map((_, i) => `$${params.length + i + 1}`);
-    where.push(`${column} IN (${placeholders.join(", ")})`);
-    params.push(...values);
-  };
-  if (state.status.length) inList("status", state.status);
-  if (state.priority.length) inList("priority", state.priority);
-  if (state.query) {
-    where.push(
-      `(setweight(to_tsvector('simple', coalesce(title, '')), 'A') || ` +
-        `setweight(to_tsvector('simple', coalesce(description, '')), 'B')) ` +
-        `@@ plainto_tsquery('simple', $${params.length + 1})`,
-    );
-    params.push(state.query);
-  }
-  where.push("deleted = false");
-  const sql =
-    `SELECT ${LIST_COLUMNS} FROM issue WHERE ${where.join(" AND ")} ` +
-    `ORDER BY ${state.orderBy} ${state.orderDirection.toUpperCase()}, id ASC`;
-  return { sql, params };
+/** Stable ordering: the chosen column, then id, so windows over the list never jump. */
+export function sortIssues<T extends Partial<Issue> & { id: string }>(issues: T[], state: Pick<FilterState, "orderBy" | "orderDirection">): T[] {
+  const column = state.orderBy as keyof Issue;
+  const direction = state.orderDirection === "asc" ? 1 : -1;
+  return [...issues].sort((a, b) => {
+    const av = String(a[column] ?? "");
+    const bv = String(b[column] ?? "");
+    return (av < bv ? -1 : av > bv ? 1 : 0) * direction || a.id.localeCompare(b.id);
+  });
 }

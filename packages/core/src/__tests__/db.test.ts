@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { isObservableArray, runInAction } from "mobx";
-import { FactDB, $, _, matchPattern, type Fact, type FactChange } from "../db";
+import { FactDB, $, _, matchPattern, type Fact, type FactChange, type FactChangeInfo } from "../db";
 
 describe("matchPattern", () => {
   it("matches exact facts", () => {
@@ -269,6 +269,121 @@ describe("FactDB", () => {
       expect(log).toHaveLength(1);
       expect(errors).toHaveBeenCalledOnce();
       errors.mockRestore();
+    });
+  });
+  describe("scopes", () => {
+    it("facts are global unless written inside withScope", () => {
+      db.insert("project", "p1", "name", "Core");
+      db.withScope("project:p1", () => db.insert("issue", "i1", "title", "A"));
+      expect(db.scopeOf("project", "p1", "name", "Core")).toBe("");
+      expect(db.scopeOf("issue", "i1", "title", "A")).toBe("project:p1");
+      expect(db.scopeOf("nope", 1)).toBe("");
+    });
+
+    it("later facts about a scoped entity inherit its scope", () => {
+      db.withScope("project:p1", () => db.insert("issue", "i1", "title", "A"));
+      db.insert("issue", "i1", "status", "todo");
+      db.replace("issue", "i1", "priority", "high");
+      expect(db.scopeOf("issue", "i1", "status", "todo")).toBe("project:p1");
+      expect(db.scopeOf("issue", "i1", "priority", "high")).toBe("project:p1");
+      expect(db.scopeOf("issue", "i2", "status", "todo")).toBe("");
+    });
+
+    it("replace() keeps the scope of the fact it replaces", () => {
+      db.withScope("project:p1", () => db.insert("issue", "i1", "title", "A"));
+      db.replace("issue", "i1", "title", "B");
+      expect(db.scopeOf("issue", "i1", "title", "B")).toBe("project:p1");
+      expect(db.query(["issue", "i1", "title", $.t])).toEqual([{ t: "B" }]);
+    });
+
+    it("an explicit scope wins over inheritance and the entity keeps its first scope", () => {
+      db.withScope("a", () => db.insert("issue", "i1", "title", "A"));
+      db.withScope("b", () => db.insert("issue", "i1", "label", "x"));
+      db.insert("issue", "i1", "status", "todo");
+      expect(db.scopeOf("issue", "i1", "label", "x")).toBe("b");
+      expect(db.scopeOf("issue", "i1", "status", "todo")).toBe("a");
+    });
+
+    it("forgets the entity scope once its last scoped fact is gone", () => {
+      db.withScope("project:p1", () => db.insert("issue", "i1", "title", "A"));
+      db.drop("issue", "i1", "title", "A");
+      db.insert("issue", "i1", "status", "todo");
+      expect(db.scopeOf("issue", "i1", "status", "todo")).toBe("");
+    });
+
+    it("setScope re-tags a fact without notifying and moves entity inheritance with it", () => {
+      const log: FactChange[] = [];
+      db.observe((type) => log.push(type));
+      db.withScope("a", () => db.insert("issue", "i1", "title", "A"));
+      log.length = 0;
+      db.setScope(JSON.stringify(["issue", "i1", "title", "A"]), "b");
+      expect(log).toEqual([]);
+      expect(db.scopeOf("issue", "i1", "title", "A")).toBe("b");
+      db.insert("issue", "i1", "status", "todo");
+      expect(db.scopeOf("issue", "i1", "status", "todo")).toBe("b");
+    });
+
+    it("clear() drops scopes", () => {
+      db.withScope("a", () => db.insert("issue", "i1", "title", "A"));
+      db.clear();
+      db.insert("issue", "i1", "status", "todo");
+      expect(db.scopeOf("issue", "i1", "status", "todo")).toBe("");
+    });
+  });
+
+  describe("observe durability", () => {
+    type Event = [FactChange, Fact, FactChangeInfo];
+    let log: Event[];
+    beforeEach(() => {
+      log = [];
+      db.observe((type, _key, fact, info) => log.push([type, fact, info]));
+    });
+
+    it("insert() and drop() are durable", () => {
+      db.insert("todo", 1, "title", "A");
+      db.drop("todo", 1, "title", "A");
+      expect(log.map(([t, , i]) => [t, i.durable])).toEqual([["add", true], ["delete", true]]);
+    });
+
+    it("assert() and owner revocation are not durable", () => {
+      const owner = db.createChildOwner(db.getCurrentOwnerId(), "scope");
+      db.withOwnerScope(owner, () => db.assert("todo", 1, "class", "done"));
+      db.revokeOwner(owner);
+      expect(log.map(([t, , i]) => [t, i.durable])).toEqual([["add", false], ["delete", false]]);
+    });
+
+    it("insert() of an already claimed fact emits a durable add, and revoking the claim keeps it", () => {
+      const owner = db.createChildOwner(db.getCurrentOwnerId(), "scope");
+      db.withOwnerScope(owner, () => db.assert("todo", 1, "class", "done"));
+      db.insert("todo", 1, "class", "done");
+      db.insert("todo", 1, "class", "done");
+      db.revokeOwner(owner);
+      expect(log.map(([t, , i]) => [t, i.durable])).toEqual([["add", false], ["add", true]]);
+      expect(db.query(["todo", 1, "class", $.c])).toEqual([{ c: "done" }]);
+    });
+
+    it("dropping a claimed-only fact is not durable", () => {
+      const owner = db.createChildOwner(db.getCurrentOwnerId(), "scope");
+      db.withOwnerScope(owner, () => db.assert("todo", 1, "class", "done"));
+      db.drop("todo", 1, "class", "done");
+      expect(log[1]).toEqual(["delete", ["todo", 1, "class", "done"], { durable: false }]);
+    });
+
+    it("replace() flags its add and emits plain durable deletes for the replaced facts", () => {
+      db.insert("todo", 1, "title", "A");
+      log = [];
+      db.replace("todo", 1, "title", "B");
+      expect(log).toEqual([
+        ["delete", ["todo", 1, "title", "A"], { durable: true }],
+        ["add", ["todo", 1, "title", "B"], { durable: true, replace: true }],
+      ]);
+    });
+
+    it("clear() deletes are not durable", () => {
+      db.insert("a", 1);
+      log = [];
+      db.clear();
+      expect(log).toEqual([["delete", ["a", 1], { durable: false }]]);
     });
   });
 });

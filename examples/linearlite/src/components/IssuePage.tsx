@@ -3,10 +3,11 @@ import { _, forget, replace, when } from "@jam/core";
 import { formatDate, queryMeta, queryRows, readEntity } from "../facts";
 import { addComment, deleteIssue, updateIssue } from "../mutations";
 import { forgetRecent } from "../programs/recent";
-import { navigate } from "../programs/router";
+import { navigate, type Route } from "../programs/router";
+import { projectPath } from "../projects";
 import type { Comment, Issue } from "../types";
 import { Avatar } from "./Avatar";
-import { BackIcon, SyncedIcon } from "./icons";
+import { BackIcon } from "./icons";
 import { link } from "./links";
 import { PriorityMenu, StatusMenu } from "./properties";
 
@@ -20,7 +21,6 @@ function CommentItem({ commentId: id }: { commentId: string }) {
         <div class="comment-meta">
           <span class="comment-author">{comment.username}</span>
           <span class="comment-date">{formatDate(comment.created)}</span>
-          <SyncedIcon synced={comment.synced} />
         </div>
         <div class="comment-text">{comment.body}</div>
       </div>
@@ -61,7 +61,7 @@ function Comments({ issueId }: { issueId: string }) {
   );
 }
 
-function DeleteControls({ issueId: id }: { issueId: string }) {
+function DeleteControls({ issueId: id, backHref }: { issueId: string; backHref: string }) {
   const confirming = when(["ui", "confirm", "delete", id]).length > 0;
   if (!confirming) {
     return (
@@ -80,7 +80,7 @@ function DeleteControls({ issueId: id }: { issueId: string }) {
           forget("ui", "confirm", "delete", _);
           forgetRecent(id);
           deleteIssue(id);
-          navigate("/");
+          navigate(backHref);
         }}
       >
         Delete
@@ -92,10 +92,12 @@ function DeleteControls({ issueId: id }: { issueId: string }) {
   );
 }
 
-export function IssuePage({ issueId: id }: { issueId: string }) {
+export function IssuePage({ route }: { route: Route }) {
+  const id = route.issueId!;
+  const backHref = projectPath(route.projectId!);
   const issue = readEntity<Issue>("issue", id);
   const meta = queryMeta("detail");
-  if (!issue) {
+  if (!issue || issue.project !== route.projectId) {
     return (
       <div class="issue-page">
         <div class="issue-missing">{meta.ready ? "This issue doesn't exist." : "Loading…"}</div>
@@ -105,14 +107,13 @@ export function IssuePage({ issueId: id }: { issueId: string }) {
   return (
     <div class="issue-page">
       <header class="issue-header">
-        <a class="button subtle back-link" href="/" onClick={link("/")}>
+        <a class="button subtle back-link" href={backHref} onClick={link(backHref)}>
           <BackIcon />
           Back
         </a>
         <span class="issue-header-title">Issue</span>
         <span class="issue-header-spacer" />
-        <SyncedIcon synced={issue.synced} />
-        <DeleteControls issueId={id} />
+        <DeleteControls issueId={id} backHref={backHref} />
       </header>
       <div class="issue-body">
         <main class="issue-main">

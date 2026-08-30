@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./jsx": "./src/jsx.ts",
-    "./durability": "./src/pglite-durability.ts"
+    "./durability": "./src/pglite-durability.ts",
+    "./server": "./src/server.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -16,6 +17,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite-sync": "^0.6.9",
     "mobx": "^6.13.0"
   },
   "devDependencies": {
