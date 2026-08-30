@@ -135,8 +135,8 @@ function BarChart({ bars }: { bars: { label: string; value: number }[] }) {
   );
 }
 
-function RevenueCard() {
-  const [range, setRange] = useDemoState("dashboard.revenueRange", "month");
+function RevenueCard({ stateKey }: { stateKey: string }) {
+  const [range, setRange] = useDemoState(`${stateKey}.revenueRange`, "month");
   const data = revenue[range] ?? revenue.month;
   return (
     <Card bordered flex={3} flexBasis={420} minWidth={280} padding="$space.5" backgroundColor="$color1">
@@ -218,8 +218,8 @@ function ActivityCard() {
   );
 }
 
-function TopBar({ onExport }: { onExport?: () => void }) {
-  const [range, setRange] = useDemoState("dashboard.range", "30d");
+function TopBar({ stateKey, onExport }: { stateKey: string; onExport?: () => void }) {
+  const [range, setRange] = useDemoState(`${stateKey}.range`, "30d");
   return (
     <XStack alignItems="center" justifyContent="space-between" gap="$space.3" flexWrap="wrap">
       <YStack gap={2}>
@@ -253,15 +253,15 @@ function TopBar({ onExport }: { onExport?: () => void }) {
   );
 }
 
-function Overview({ onExport }: { onExport?: () => void }) {
+function Overview({ stateKey = "dashboard", onExport }: { stateKey?: string; onExport?: () => void }) {
   return (
     <Page padding="$space.6" gap="$space.5">
-      <TopBar onExport={onExport} />
+      <TopBar stateKey={stateKey} onExport={onExport} />
       <XStack gap="$space.4" flexWrap="wrap">
         {stats.map((stat) => <StatCard key={stat.label} stat={stat} />)}
       </XStack>
       <XStack gap="$space.4" alignItems="stretch" flexWrap="wrap">
-        <RevenueCard />
+        <RevenueCard stateKey={stateKey} />
         <YStack flex={2} flexBasis={280} minWidth={260} gap="$space.4">
           <StorageCard />
           <ActivityCard />
@@ -275,7 +275,7 @@ function OverviewWithToast() {
   const toast = useToastController();
   return (
     <Toast.Provider placement="bottom-right" duration={4000}>
-      <Overview onExport={() => toast.show("Export started", { message: "We'll email you a CSV of the last 30 days when it's ready." })} />
+      <Overview stateKey="dashboard.toast" onExport={() => toast.show("Export started", { message: "We'll email you a CSV of the last 30 days when it's ready." })} />
       <Toast.Viewport />
     </Toast.Provider>
   );
