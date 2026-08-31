@@ -121,12 +121,14 @@ export function updateNoteBody(noteId: string, body: string, now = Date.now()) {
   }
 }
 
+const SEEDED_AT = Date.UTC(2024, 0, 15, 14, 30);
+
 export function ensureSeedNotes() {
   if (listNotes().length > 0) return;
 
   transaction(() => {
     createNote({
-      now: 1,
+      now: SEEDED_AT,
       title: "Welcome",
       body: [
         "# Welcome to Jam Notes",
@@ -137,7 +139,7 @@ export function ensureSeedNotes() {
     });
 
     createNote({
-      now: 2,
+      now: SEEDED_AT + 45 * 60_000,
       title: "Project ideas",
       body: [
         "- Capture thoughts quickly",

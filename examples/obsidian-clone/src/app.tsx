@@ -77,8 +77,7 @@ function Sidebar({
       tag="aside"
       width={290}
       flexShrink={0}
-      $max-lg={{ width: 240 }}
-      $max-md={{ width: "100%", flexBasis: "100%" }}
+      $max-lg={{ width: "100%", flexBasis: "100%" }}
       bordered
       borderRadius="$6"
       backgroundColor="$color1"
@@ -102,7 +101,7 @@ function Sidebar({
 
       <Separator />
 
-      <ScrollView flex={1} gap="$2" role="list" aria-label="Notes" data-testid="note-list">
+      <ScrollView tag="nav" flex={1} gap="$2" aria-label="Notes" data-testid="note-list">
         {notes.map((note) => {
           const isSelected = selectedNoteId === note.id;
           return (
@@ -149,7 +148,7 @@ function Editor({ note }: { note: ReturnType<typeof getSelectedNote> }) {
     flex: 1,
     minWidth: 0,
     flexBasis: 420,
-    "$max-md": { flexBasis: "100%" },
+    "$max-lg": { flexBasis: "100%" },
     bordered: true,
     borderRadius: "$6",
     backgroundColor: "$color1",
@@ -176,10 +175,12 @@ function Editor({ note }: { note: ReturnType<typeof getSelectedNote> }) {
         fontFamily="$heading"
         fontSize="$10"
         lineHeight="$10"
+        $max-md={{ fontSize: "$9", lineHeight: "$9" }}
         fontWeight="800"
         color="$color12"
         width="100%"
         padding={0}
+        textOverflow="ellipsis"
         onChangeText={(text) => updateNoteTitle(note.id, text)}
       />
       <Separator />
@@ -256,8 +257,7 @@ function Inspector({
       tag="aside"
       width={320}
       flexShrink={0}
-      $max-lg={{ width: 280 }}
-      $max-md={{ width: "100%", flexBasis: "100%" }}
+      $max-lg={{ width: "100%", flexBasis: "100%" }}
       gap="$3"
       minHeight={0}
       data-testid="inspector-panel"
@@ -300,7 +300,7 @@ function Inspector({
 
       <InspectorCard label="Backlinks" testId="backlinks-panel">
         {backlinks.length > 0 ? (
-          <YStack role="list" gap="$2">
+          <YStack gap="$2">
             {backlinks.map((backlink) => (
               <ListItem
                 key={backlink.id}
@@ -352,7 +352,7 @@ export function ObsidianCloneApp() {
   return (
     <XStack
       height="100vh"
-      $max-md={{ height: "auto", minHeight: "100vh", flexWrap: "wrap" }}
+      $max-lg={{ height: "auto", minHeight: "100vh", flexWrap: "wrap" }}
       padding="$4"
       gap="$4"
       alignItems="stretch"
