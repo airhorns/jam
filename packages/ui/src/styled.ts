@@ -433,10 +433,15 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
         }
         addLayer(acc, plain);
       };
-      for (const name of variantNames) {
-        const value = variantValue(name);
-        if (value === undefined) continue;
-        applyVariant(name, value, new Set([name]));
+      // Defaulted variants apply before ones the caller set, so `pressTheme` beats `unstyled.false`.
+      const explicit = (name: string): boolean => props[name] !== undefined || contextValues?.[name] !== undefined;
+      for (const pass of [false, true]) {
+        for (const name of variantNames) {
+          if (explicit(name) !== pass) continue;
+          const value = variantValue(name);
+          if (value === undefined) continue;
+          applyVariant(name, value, new Set([name]));
+        }
       }
     }
 

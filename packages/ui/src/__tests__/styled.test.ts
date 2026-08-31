@@ -308,6 +308,13 @@ describe("variants", () => {
     expect(css(render(h(Ext, null)).root)).toMatchObject({ padding: "4px", color: "blue", margin: "1px" });
   });
 
+  it("variants the caller sets win over defaulted ones declared later", () => {
+    const Base = styled("div", { variants: { pointy: { true: { cursor: "pointer" } } } });
+    const Ext = styled(Base, { variants: { unstyled: { false: { cursor: "default", padding: 4 } } }, defaultVariants: { unstyled: false } });
+    expect(css(render(h(Ext, null)).root).cursor).toBe("default");
+    expect(css(render(h(Ext, { pointy: true })).root)).toMatchObject({ cursor: "pointer", padding: "4px" });
+  });
+
   it("deep-merges pseudo objects in defaultProps when extending", () => {
     const Base = styled("div", { defaultProps: { hoverStyle: { color: "red", padding: 1 } } });
     const Ext = styled(Base, { defaultProps: { hoverStyle: { color: "blue" } } });

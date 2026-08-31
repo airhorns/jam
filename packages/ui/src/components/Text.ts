@@ -35,6 +35,7 @@ export const Text = styled("span", {
               WebkitBoxOrient: "vertical",
               display: "-webkit-box",
               overflow: "hidden",
+              whiteSpace: "normal",
             }
           : null,
     },

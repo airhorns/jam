@@ -65,6 +65,25 @@ describe("ListItem", () => {
     expect(css(r.root, ":active")["background-color"]).toBe("var(--backgroundPress)");
   });
 
+  it("a button or link row keeps its native role instead of listitem", () => {
+    expect(render(h(ListItem, { title: "Star" })).root.getAttribute("role")).toBe("listitem");
+    expect(render(h(ListItem, { tag: "button", title: "Star" })).root.hasAttribute("role")).toBe(false);
+    expect(render(h(ListItem.Frame, { tag: "a", href: "#" }, "Star")).root.hasAttribute("role")).toBe(false);
+    expect(render(h(ListItem.Frame, { tag: "button", role: "option" }, "Star")).root.getAttribute("role")).toBe("option");
+  });
+
+  it("a subtitle clamped to several lines wraps instead of truncating", () => {
+    const r = render(h(ListItem, { title: "Star", subTitle: "A long\n\nbody" }));
+    expect(css(r.get(".is_ListItemSubtitle"))).toMatchObject({ "white-space": "nowrap", "text-overflow": "ellipsis" });
+    const clamped = render(h(ListItem, { title: "Star" }, h(ListItem.Subtitle, { numberOfLines: 2 }, "A long\n\nbody")));
+    expect(css(clamped.get(".is_ListItemSubtitle"))).toMatchObject({ "white-space": "normal", "-webkit-line-clamp": "2" });
+  });
+
+  it("pressTheme makes the row a pointer target", () => {
+    expect(css(render(h(ListItem, { title: "Star" })).root).cursor).toBe("default");
+    expect(css(render(h(ListItem, { title: "Star", pressTheme: true })).root).cursor).toBe("pointer");
+  });
+
   it("active and disabled states", () => {
     expect(css(render(h(ListItem, { active: true })).root)["background-color"]).toBe("var(--backgroundPress)");
     const disabled = render(h(ListItem, { disabled: true }));

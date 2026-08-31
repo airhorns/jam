@@ -25,7 +25,7 @@ describe("Text", () => {
     const one = render(h(Text, { numberOfLines: 1 }, "x"));
     expect(css(one.root)).toMatchObject({ "text-overflow": "ellipsis", "white-space": "nowrap", overflow: "hidden" });
     const three = render(h(Text, { numberOfLines: 3 }, "x"));
-    expect(css(three.root)).toMatchObject({ "-webkit-line-clamp": "3", "-webkit-box-orient": "vertical", overflow: "hidden" });
+    expect(css(three.root)).toMatchObject({ "-webkit-line-clamp": "3", "-webkit-box-orient": "vertical", overflow: "hidden", "white-space": "normal" });
     const ellipsis = render(h(Text, { ellipsis: true }, "x"));
     expect(css(ellipsis.root)["text-overflow"]).toBe("ellipsis");
   });

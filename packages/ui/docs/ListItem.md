@@ -62,8 +62,8 @@ text node.
 
 ## Parts
 
-`ListItem.Frame` — the row itself (`role="listitem"`), with
-`justify-content: space-between` and `overflow: hidden`.
+`ListItem.Frame` — the row itself (`role="listitem"` unless `tag` is
+`button` or `a`), with `justify-content: space-between` and `overflow: hidden`.
 
 `ListItem.Text` — the default wrapper for children: `$color`, grows and
 shrinks, `ellipsis`, `cursor: inherit`.
@@ -104,8 +104,14 @@ surface, its border and all of its text together.
   `tag="li"` inside a real `ul` works too, but remember to zero the `ul`'s
   browser `padding-inline-start`.
 - A ListItem is not a button. For a tappable row, put a `Button` or an anchor
-  inside it, or use `tag="button"` on the frame — a click handler on a bare
-  `div` is not keyboard reachable.
+  inside it, or use `tag="button"` / `tag="a"` on the frame — a click handler
+  on a bare `div` is not keyboard reachable. A button or anchor row keeps its
+  native role rather than `listitem`, so announce the container with an
+  `aria-label` instead of `role="list"` when every row is a button.
+- `active` is the pressed shade (`$backgroundPress`), which in the dark scheme
+  is the same colour as a `$color1` panel. To mark the *selected* row in a
+  list, use `backgroundColor="$color3"` or a colour theme
+  (`theme={selected ? "blue" : undefined}`) rather than `active`.
 - `disabled` sets `pointer-events: none`, which hides clicks but does not
   remove the row from the accessibility tree; add `aria-disabled="true"` when
   the row represents a real disabled action.

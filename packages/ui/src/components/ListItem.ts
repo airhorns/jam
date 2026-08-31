@@ -36,21 +36,20 @@ const listItemSized: VariantFunction = (value, { tokens }) => {
  * inside a container with `role="list"` (or pass `tag="li"` and use a real
  * `ul`, zeroing its browser padding).
  */
-export const ListItemFrame = styled<
-  StyledProps & {
-    size?: string | number;
-    variant?: ListItemVariant;
-    active?: boolean;
-    disabled?: boolean;
-    hoverTheme?: boolean;
-    pressTheme?: boolean;
-    unstyled?: boolean;
-  }
->(ThemeableStack, {
+export type ListItemFrameProps = StyledProps & {
+  size?: string | number;
+  variant?: ListItemVariant;
+  active?: boolean;
+  disabled?: boolean;
+  hoverTheme?: boolean;
+  pressTheme?: boolean;
+  unstyled?: boolean;
+};
+
+export const ListItemFrame = styled<ListItemFrameProps>(ThemeableStack, {
   name: "ListItem",
   context: ListItemContext,
   defaultProps: {
-    role: "listitem",
     // A `tag="button"` row must not keep the browser's outset border or centred text.
     borderWidth: 0,
     borderStyle: "solid",
@@ -247,12 +246,19 @@ function ListItemComponent(props: ListItemProps): VNode {
 
   if (iconAfter != null) parts.push(h(ListItemIcon, { size, placement: "after" }, iconAfter));
 
-  return h(ListItemFrame, frameProps as Record<string, unknown>, ...parts);
+  return h(ListItemFrameComponent, frameProps as Record<string, unknown>, ...parts);
 }
 ListItemComponent.displayName = "ListItem";
 
+/** Announced as a list item unless the row is itself a button or link, which keeps its native role. */
+function ListItemFrameComponent(props: ListItemFrameProps): VNode {
+  const role = props.tag === "button" || props.tag === "a" ? undefined : "listitem";
+  return h(ListItemFrame, { role, ...props });
+}
+ListItemFrameComponent.displayName = "ListItemFrame";
+
 export const ListItem = Object.assign(ListItemComponent, {
-  Frame: ListItemFrame,
+  Frame: ListItemFrameComponent,
   Text: ListItemText,
   Title: ListItemTitle,
   Subtitle: ListItemSubtitle,
