@@ -11,7 +11,8 @@
 import { db, type Term } from "./db";
 import { Effect, transaction, untracked } from "./reactive";
 import { vdom } from "./select";
-import { type VChild, type ElementRef, type Cleanup, expandTree, emitExpanded } from "./jsx";
+import { type VChild, type ElementRef, type Cleanup, type ComponentInfo, expandTree, emitExpanded } from "./jsx";
+import { registerMount } from "./mounts";
 
 // Props applied as element properties (so form state updates live).
 const DOM_PROPERTIES = new Set([
@@ -84,6 +85,12 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
 
   // Cleanups registered by the components in the latest render, by component id.
   let cleanups = new Map<string, Cleanup[]>();
+  const structure = {
+    components: new Map<string, ComponentInfo>(),
+    owners: new Map<string, string>(),
+    nodes: new Map<string, Element | Text>(),
+  };
+  const unregisterMount = registerMount(structure);
   function runCleanups(fns: Cleanup[]) {
     for (const fn of fns) {
       try {
@@ -106,11 +113,13 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
         if (!expansion.cleanups.has(id)) runCleanups(fns);
       }
       cleanups = expansion.cleanups;
+      structure.components = expansion.components;
+      structure.owners = expansion.owners;
     });
   });
 
   // --- Phase 2: Patch DOM from all VDOM claims ---
-  const managed = new Map<string, Element | Text>();
+  const managed = structure.nodes;
   const pendingFocus: HTMLElement[] = [];
   const mountedRefs = new Map<string, { element: Element; refKey: string; callback: ElementRef }>();
 
@@ -307,5 +316,6 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
     });
     patchEffect.dispose();
     for (const id of Array.from(mountedRefs.keys())) releaseElementRef(id);
+    unregisterMount();
   };
 }

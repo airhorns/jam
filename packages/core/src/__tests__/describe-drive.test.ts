@@ -300,19 +300,18 @@ describe("drive", () => {
     expect(Array.from(db.facts.values()).some((f) => f[0] === "drive")).toBe(false);
   });
 
-  it("records the intent as a non-durable fact for the duration of the action", () => {
-    const seen: Array<[string, boolean]> = [];
-    const stop = db.observe((type, _key, fact, info) => {
-      if (fact[0] === "drive") seen.push([type, info.durable]);
-    });
-    const App = () => h(Disclosure, { label: "Log" });
+  it("records the intent as a claimed fact for the duration of the action, so it is never stored", () => {
+    const stored: string[] = [];
+    const stop = db.observe((_type, key) => stored.push(key));
+    let during: boolean | undefined;
+    const App = () => h(Disclosure, { label: "Log", onOpenChange: () => (during = db.has("drive", id, "open", true)) });
     dispose = mount(h(App, null), container);
-    drive(find(describeUI(), "button", "Log")!.id!, "open", true);
+    const id = find(describeUI(), "button", "Log")!.id!;
+    drive(id, "open", true);
     stop();
-    expect(seen).toEqual([
-      ["add", false],
-      ["delete", false],
-    ]);
+    expect(during).toBe(true);
+    expect(db.has("drive", id, "open", true)).toBe(false);
+    expect(stored.filter((key) => key.startsWith('["drive"'))).toEqual([]);
   });
 
   it("forgets a component's drivers when it leaves the tree", () => {
