@@ -6,6 +6,7 @@ The package gives apps:
 
 - a Jam-backed in-browser file system for editable extension programs,
 - tools for inspecting Jam facts, VDOM, registered programs, and program files,
+- `describeUI`, `drive` and `press` tools, so an agent reads the page as an accessibility outline and operates it through the components' own state,
 - a pluggable agent loop that can be backed by a browser-capable model adapter,
 - a reusable `@jam/ui` panel that writes its state back into the Jam fact database.
 

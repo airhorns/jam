@@ -3,10 +3,13 @@ export { createMemoryJamFileSystem, createLocalStorageJamFileSystem } from "./fi
 export {
   createAppSummaryTool,
   createDefaultMetaAgentTools,
+  createDescribeUITool,
+  createDriveTool,
   createInspectFactsTool,
   createInspectVdomTool,
   createListProgramsTool,
   createLoadProgramTool,
+  createPressTool,
   createReadFileTool,
   createWriteFileTool,
 } from "./tools";

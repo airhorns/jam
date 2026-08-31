@@ -1,4 +1,4 @@
-import { db, listPrograms, programIdFromPath, select } from "@jam/core";
+import { db, describeUI, drive, listPrograms, outlineUI, press, programIdFromPath, select, type Term } from "@jam/core";
 import type { MetaAgentTool, MetaAgentToolContext, MetaAgentToolResult } from "./types";
 
 interface InspectFactsInput {
@@ -9,6 +9,25 @@ interface InspectFactsInput {
 interface InspectVdomInput {
   selector?: string;
   limit?: number;
+}
+
+interface DescribeUIInput {
+  /** Entity id to describe from; the whole page when omitted. */
+  root?: string;
+  /** Only interactive and drivable nodes, with the headings and structure around them. */
+  interactive?: boolean;
+}
+
+interface DriveInput {
+  /** Entity id from `describeUI`. */
+  id: string;
+  key: string;
+  value: Term;
+}
+
+interface PressInput {
+  /** Entity id from `describeUI`. */
+  id: string;
 }
 
 interface FilePathInput {
@@ -65,6 +84,42 @@ export function createInspectVdomTool(): MetaAgentTool<InspectVdomInput> {
         returned: elements.length,
         elements,
       });
+    },
+  };
+}
+
+export function createDescribeUITool(): MetaAgentTool<DescribeUIInput> {
+  return {
+    name: "describeUI",
+    description:
+      "Read the rendered UI as an accessibility outline: one node per line as `role \"name\" #id state… <Component> (DrivableComponent key=value…)`. Use the #id with drive/press.",
+    run(input = {}) {
+      const options = { root: input.root, interactive: input.interactive };
+      const nodes = describeUI(options);
+      return { title: "Jam UI outline", content: outlineUI(options), data: nodes };
+    },
+  };
+}
+
+export function createDriveTool(): MetaAgentTool<DriveInput> {
+  return {
+    name: "drive",
+    description:
+      "Set `key` on the component that owns entity `id` as its user would (its onChange runs; native inputs get the value with input/change events). Keys and current values appear in describeUI's parentheses.",
+    run(input) {
+      drive(input.id, input.key, input.value);
+      return summarizeResult("Drove UI", { id: input.id, key: input.key, value: input.value, now: describeUI({ root: input.id }) });
+    },
+  };
+}
+
+export function createPressTool(): MetaAgentTool<PressInput> {
+  return {
+    name: "press",
+    description: "Press the element with entity `id` from describeUI (pointerdown, pointerup and click on its DOM node).",
+    run(input) {
+      press(input.id);
+      return summarizeResult("Pressed", { id: input.id });
     },
   };
 }
@@ -168,6 +223,9 @@ export function createDefaultMetaAgentTools(): MetaAgentTool[] {
     createAppSummaryTool(),
     createInspectFactsTool(),
     createInspectVdomTool(),
+    createDescribeUITool(),
+    createDriveTool(),
+    createPressTool(),
     createListProgramsTool(),
     createReadFileTool(),
     createWriteFileTool(),

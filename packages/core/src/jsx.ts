@@ -144,10 +144,12 @@ let currentCleanups: Map<string, Cleanup[]> | null = null;
 // ---- Component tree ----
 
 export type ComponentInfo = {
-  /** The component function's name, for describing the tree. */
+  /** The component function's name(s), for describing the tree; presentational names are left out when a semantic one shares the id. */
   name: string;
   /** Id of the component that rendered this one, or null at the root. */
   parent: string | null;
+  /** True when every component under this id is a styling wrapper (`Component.presentational = true`), so `describeUI()` reports its element by role alone. */
+  presentational: boolean;
 };
 
 /** Which component each element and component belongs to, recorded during the current `expandTree`. */
@@ -337,11 +339,15 @@ export function expandVdom(
     const componentId = computeEntityId(parentId, childIndex, { key: vnode.props.key }, inheritId);
     if (currentStructure) {
       const name = (tag as { displayName?: string }).displayName ?? tag.name ?? "Anonymous";
+      const presentational = (tag as { presentational?: boolean }).presentational === true;
       const parent = vnode.owner ?? expandingComponent;
       // A component whose whole output is another component shares its id with it; record both names under that id.
       const shared = parent === componentId ? currentStructure.components.get(componentId) : undefined;
-      if (shared) shared.name = `${shared.name}/${name}`;
-      else currentStructure.components.set(componentId, { name, parent });
+      if (!shared) currentStructure.components.set(componentId, { name, parent, presentational });
+      else if (shared.presentational) {
+        shared.name = presentational ? `${shared.name}/${name}` : name;
+        shared.presentational = presentational;
+      } else if (!presentational && !shared.name.endsWith(name)) shared.name = `${shared.name}/${name}`;
     }
     const prevComponentId = currentComponentId;
     currentComponentId = componentId;

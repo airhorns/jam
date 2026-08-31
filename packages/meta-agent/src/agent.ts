@@ -58,6 +58,7 @@ export function createHeuristicMetaAgentDriver(): MetaAgentDriver {
       }
 
       if (prompt.includes("ui") || prompt.includes("dom") || prompt.includes("screen")) {
+        toolCalls.push({ toolName: "describeUI", input: { interactive: true } });
         toolCalls.push({ toolName: "inspectVdom", input: { selector: "div", limit: 20 } });
       }
 

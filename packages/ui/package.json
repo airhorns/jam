@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./playwright": "./src/playwright.ts"
   },
   "scripts": {
     "test": "vitest run",

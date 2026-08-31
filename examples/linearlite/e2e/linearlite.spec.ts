@@ -1,7 +1,12 @@
 // Standalone mode: PGlite seeds itself from `?seed=` and core's sync() keeps
 // jam_facts in the browser. Assertions read facts, so they hold in Electric mode too.
+//
+// Ceremonies are performed the way an agent performs them: by reading the
+// accessibility outline from `describeUI()` and pressing or driving what it
+// names. Selectors stay only where the DOM itself is what is under test.
 
 import { test, expect, type Page } from "@playwright/test";
+import { describe, drive, driveNode, find, findAll, flatten, pressNode } from "@jam/ui/playwright";
 import { byTitle, expectCount, factKey, flushToDisk, issuesInMemory, newestFirst, query, sql, watchErrors } from "./helpers";
 
 test.skip(!!process.env.VITE_SYNC_URL, "standalone-only: the database is seeded by the page");
@@ -60,18 +65,36 @@ test.describe("LinearLite", () => {
     expect(await icon.locator("circle").first().evaluate((el) => el.namespaceURI)).toBe("http://www.w3.org/2000/svg");
   });
 
+  test("describes itself to an agent and can be driven from the outline", async ({ page }) => {
+    await open(page);
+    const nodes = flatten(await describe(page, { interactive: true }));
+    const controls = nodes.filter((n) => ["button", "link", "textbox", "menuitem", "menuitemradio", "menuitemcheckbox"].includes(n.role));
+    expect(controls.length).toBeGreaterThan(PER_PROJECT * 2);
+    expect(controls.filter((n) => !n.name)).toEqual([]);
+    expect(nodes.filter((n) => n.role === "menu")).toEqual([]);
+
+    const modal = await find(page, { role: "hidden", component: "NewIssueModal/Dialog/DialogPortal" });
+    expect(modal.drive?.keys).toEqual({ open: false });
+    await drive(page, modal.drive!.id, "open", true);
+    await find(page, { role: "dialog", name: "New issue" });
+    await expect(page.getByTestId("new-issue-modal")).toBeVisible();
+    await drive(page, modal.drive!.id, "open", false);
+    await expect(page.getByTestId("new-issue-modal")).toHaveCount(0);
+  });
+
   test("filters by status from the filter menu and shows chips", async ({ page }) => {
     await open(page);
     const todo = (await issuesInMemory(page, WEB)).filter((i) => i.status === "todo").length;
 
-    await page.getByTestId("filter-menu-trigger").click();
-    await page.getByTestId("menu-item").filter({ hasText: "To Do" }).click();
+    await pressNode(page, { role: "button", name: "Filter", state: { expanded: false } });
+    await pressNode(page, { role: "menuitemcheckbox", name: "To Do", state: { checked: false } });
     await expect(page).toHaveURL(/status=todo/);
     await expectCount(page, todo, PER_PROJECT);
     await expect(page.getByTestId("issue-row")).toHaveCount(todo);
-    await expect(page.locator("[data-testid='filter-chip'][data-filter='status'][data-value='todo']")).toBeVisible();
+    const chip = page.locator("[data-testid='filter-chip'][data-filter='status'][data-value='todo']");
+    await expect(chip).toBeVisible();
 
-    await page.locator("[data-testid='filter-chip'][data-filter='status'][data-value='todo']").click();
+    await pressNode(page, { role: "button", name: "Remove To Do filter" });
     await expect(page).not.toHaveURL(/status=/);
     await expect(page.getByTestId("issue-row")).toHaveCount(PER_PROJECT);
   });
@@ -88,12 +111,13 @@ test.describe("LinearLite", () => {
 
   test("sorts by title from the sort menu", async ({ page }) => {
     await open(page);
-    await page.getByTestId("sort-menu-trigger").click();
-    await page.getByTestId("menu-item").filter({ hasText: "Title" }).click();
+    await pressNode(page, { role: "button", name: "Sort" });
+    await pressNode(page, { role: "menuitemradio", name: "Title" });
     await expect(page).toHaveURL(/orderBy=title/);
-    await page.getByTestId("sort-menu-trigger").click();
-    await page.getByTestId("menu-item").filter({ hasText: "Ascending" }).click();
+    await pressNode(page, { role: "button", name: "Sort", state: { expanded: false } });
+    await pressNode(page, { role: "menuitemradio", name: "Ascending" });
     await expect(page).toHaveURL(/orderDirection=asc/);
+    expect(await findAll(page, { role: "menu" })).toEqual([]);
 
     const expected = (await issuesInMemory(page, WEB)).sort(byTitle).slice(0, 5);
     await expect(page.getByTestId("issue-row-title").first()).toHaveText(expected[0].title!);
@@ -139,14 +163,17 @@ test.describe("LinearLite", () => {
     await open(page);
     const row = page.getByTestId("issue-row").first();
     const id = await row.getAttribute("data-issue-id");
+    const [first] = await findAll(page, { role: "listitem" });
 
-    await row.getByTestId("status-menu-trigger").click();
-    await page.getByTestId("menu-item").filter({ hasText: "Done" }).click();
+    await pressNode(page, { role: "button", name: /^status:/, within: first.id });
+    await pressNode(page, { role: "menuitemradio", name: "Done" });
+    await find(page, { role: "button", name: "status: Done", within: first.id });
     await expect(row.locator("svg[data-status='done']")).toBeVisible();
-    await expect(page.getByTestId("menu-content")).toHaveCount(0);
+    expect(await findAll(page, { role: "menu" })).toEqual([]);
 
-    await row.getByTestId("priority-menu-trigger").click();
-    await page.getByTestId("menu-item").filter({ hasText: "Urgent" }).click();
+    await pressNode(page, { role: "button", name: /^priority:/, within: first.id });
+    await pressNode(page, { role: "menuitemradio", name: "Urgent" });
+    await find(page, { role: "button", name: "priority: Urgent", within: first.id });
     await expect(row.locator("svg[data-priority='urgent']")).toBeVisible();
 
     await expect
@@ -156,16 +183,16 @@ test.describe("LinearLite", () => {
 
   test("creates an issue from the modal and shows it at the top of the list", async ({ page }) => {
     await open(page);
-    await page.getByTestId("new-issue-button").click();
-    const modal = page.getByTestId("new-issue-modal");
-    await expect(modal).toBeVisible();
-    await modal.getByTestId("new-issue-title").fill("Brand new issue");
-    await modal.getByTestId("new-issue-description").fill("Created by Playwright");
-    await modal.getByTestId("priority-menu-trigger").click();
-    await page.getByTestId("menu-item").filter({ hasText: "High" }).click();
-    await modal.getByTestId("save-issue-button").click();
+    await pressNode(page, { role: "button", name: "New issue" });
+    const dialog = await find(page, { role: "dialog", name: "New issue" });
+    await driveNode(page, { role: "textbox", name: "Issue title", within: dialog.id }, "value", "Brand new issue");
+    await driveNode(page, { role: "textbox", name: "Description", within: dialog.id }, "value", "Created by Playwright");
+    await pressNode(page, { role: "button", name: /^priority:/, within: dialog.id });
+    await pressNode(page, { role: "menuitemradio", name: "High" });
+    await find(page, { role: "button", name: "priority: High", within: dialog.id });
+    await pressNode(page, { role: "button", name: "Save issue", within: dialog.id });
 
-    await expect(modal).toHaveCount(0);
+    await expect(page.getByTestId("new-issue-modal")).toHaveCount(0);
     await expect(page.getByTestId("issue-row-title").first()).toHaveText("Brand new issue");
     await expect(page.getByTestId("issue-row").first().locator("svg[data-priority='high']")).toBeVisible();
     await expectCount(page, PER_PROJECT + 1, PER_PROJECT + 1);
@@ -200,8 +227,10 @@ test.describe("LinearLite", () => {
     await visit(page, `/${WEB}/issue/${id}`);
     await expect(page.getByTestId("issue-title")).not.toHaveValue("", { timeout: 15000 });
 
-    await page.getByTestId("delete-button").click();
-    await page.getByTestId("confirm-delete-button").click();
+    await pressNode(page, { role: "button", name: "Delete", state: { haspopup: "dialog" } });
+    const confirm = await find(page, { role: "alertdialog", name: "Delete this issue?" });
+    expect(confirm.description).toContain("Its comments go with it");
+    await pressNode(page, { role: "button", name: "Delete", within: confirm.id });
     await expect(page).toHaveURL(`/${WEB}`);
     await expectCount(page, PER_PROJECT - 1, PER_PROJECT - 1);
     await expect(page.locator(`[data-testid='issue-row'][data-issue-id='${id}']`)).toHaveCount(0);
@@ -215,8 +244,8 @@ test.describe("LinearLite", () => {
     await expect(page.getByTestId("comments-heading")).toBeVisible({ timeout: 15000 });
     const before = await page.getByTestId("comment").count();
 
-    await page.getByTestId("comment-input").fill("Looks good to me");
-    await page.getByTestId("comment-submit").click();
+    await driveNode(page, { role: "textbox", name: "Comment" }, "value", "Looks good to me");
+    await pressNode(page, { role: "button", name: "Comment" });
     await expect(page.getByTestId("comment")).toHaveCount(before + 1);
     await expect(page.getByTestId("comment").last().getByTestId("comment-text")).toHaveText("Looks good to me");
     await expect(page.getByTestId("comment").last().getByTestId("comment-author")).toHaveText("you");

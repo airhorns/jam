@@ -59,11 +59,11 @@ export const RadioGroupDemos: ComponentDemos = {
       render: () => (
         <XStack gap="$space.5" alignItems="center">
           {["$2", "$3", "$4", "$5", "$6"].map((size) => (
-            <RadioGroup key={size} defaultValue="on" size={size} orientation="horizontal">
-              <RadioGroup.Item value="on">
+            <RadioGroup key={size} defaultValue="on" size={size} orientation="horizontal" aria-label={`Size ${size}`}>
+              <RadioGroup.Item value="on" aria-label="On">
                 <RadioGroup.Indicator />
               </RadioGroup.Item>
-              <RadioGroup.Item value="off">
+              <RadioGroup.Item value="off" aria-label="Off">
                 <RadioGroup.Indicator />
               </RadioGroup.Item>
             </RadioGroup>
@@ -79,20 +79,20 @@ export const RadioGroupDemos: ComponentDemos = {
           <RadioGroup defaultValue="sm" orientation="horizontal" disabled>
             {options.map((o) => (
               <XStack key={o.value} gap="$space.2" alignItems="center">
-                <RadioGroup.Item value={o.value}>
+                <RadioGroup.Item value={o.value} id={`dradio-${o.value}`}>
                   <RadioGroup.Indicator />
                 </RadioGroup.Item>
-                <Text>{o.label}</Text>
+                <Label htmlFor={`dradio-${o.value}`}>{o.label}</Label>
               </XStack>
             ))}
           </RadioGroup>
           <RadioGroup defaultValue="sm" orientation="horizontal">
             {options.map((o) => (
               <XStack key={o.value} gap="$space.2" alignItems="center">
-                <RadioGroup.Item value={o.value} disabled={o.value === "lg"}>
+                <RadioGroup.Item value={o.value} id={`iradio-${o.value}`} disabled={o.value === "lg"}>
                   <RadioGroup.Indicator />
                 </RadioGroup.Item>
-                <Text>{o.label}</Text>
+                <Label htmlFor={`iradio-${o.value}`}>{o.label}</Label>
               </XStack>
             ))}
           </RadioGroup>

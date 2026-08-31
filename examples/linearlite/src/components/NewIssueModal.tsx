@@ -4,7 +4,7 @@ import { Button, Dialog, Form, Input, TextArea, XStack } from "@jam/ui";
 import { readValue } from "../facts";
 import { createIssue } from "../mutations";
 import type { Route } from "../programs/router";
-import { closeModal, isModalOpen } from "../programs/ui";
+import { closeModal, isModalOpen, openModal } from "../programs/ui";
 import type { PriorityValue, StatusValue } from "../types";
 import { CloseIcon } from "./icons";
 import { PriorityMenu, StatusMenu } from "./properties";
@@ -34,7 +34,7 @@ export function NewIssueModal({ route }: { route: Route }) {
   };
 
   return (
-    <Dialog open={isModalOpen(NEW_ISSUE_MODAL)} onOpenChange={(open) => open || close()}>
+    <Dialog open={isModalOpen(NEW_ISSUE_MODAL)} onOpenChange={(open) => (open ? openModal(NEW_ISSUE_MODAL) : close())}>
       <Dialog.Portal>
         <Dialog.Overlay />
         <Dialog.Content width={560} maxWidth="calc(100vw - 32px)" padding={0} gap={0} data-testid="new-issue-modal">

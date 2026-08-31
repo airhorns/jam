@@ -94,6 +94,8 @@ export type StyledComponent<P = {}> = {
   /** `P` wins over `StyledProps`, so a component can narrow or repurpose a style prop such as `position`. */
   (props: Omit<StyledProps, keyof P> & P): VNode;
   displayName?: string;
+  /** Styled frames add no semantics of their own, so `describeUI()` names their elements by role and leaves them out of component chains. */
+  presentational?: boolean;
   /** The merged configuration, so `styled(Component, …)` can extend it. */
   staticConfig: ResolvedStyledConfig;
 };
@@ -576,6 +578,7 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
   }) as StyledComponent<P>;
 
   component.staticConfig = staticConfig;
+  component.presentational = true;
   component.displayName =
     config.name ??
     (typeof base === "string"

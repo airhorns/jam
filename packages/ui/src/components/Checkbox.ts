@@ -136,7 +136,7 @@ function CheckboxIndicatorComponent(props: CheckboxIndicatorProps): VNode | null
   const content: VChild[] = children != null ? ([] as VChild[]).concat(children) : [];
   return h(
     CheckboxIndicatorFrame,
-    { ...(rest as Record<string, unknown>), indeterminate: indeterminate || undefined },
+    { "aria-hidden": "true", ...(rest as Record<string, unknown>), indeterminate: indeterminate || undefined },
     ...(indeterminate ? [] : content.length > 0 ? content : ["✓"]),
   );
 }

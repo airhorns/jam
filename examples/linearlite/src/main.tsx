@@ -1,5 +1,5 @@
 import { h } from "@jam/core/jsx";
-import { $, _, db, mount, persist } from "@jam/core";
+import { $, _, db, describeUI, drive, mount, outlineUI, persist, press } from "@jam/core";
 import { createJamUI, defaultConfig } from "@jam/ui";
 import { App } from "./components/App";
 import { SYNC_URL, openLinearliteDatabase, seedCountFromLocation } from "./pglite";
@@ -25,7 +25,7 @@ async function start() {
 
   mount(<App />, document.getElementById("app")!);
 
-  Object.assign(window as object, { __jam: { $, _ }, __db: db, __pg: pg, __sync: sync, __persist: persistence });
+  Object.assign(window as object, { __jam: { $, _, describeUI, outlineUI, drive, press }, __db: db, __pg: pg, __sync: sync, __persist: persistence });
 }
 
 void start();

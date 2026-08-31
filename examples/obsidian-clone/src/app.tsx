@@ -110,6 +110,7 @@ function Sidebar({
               id={`note-list-item-${note.id}`}
               data-testid="note-list-item"
               data-note-id={note.id}
+              aria-label={note.title}
               aria-current={isSelected ? "true" : undefined}
               theme={isSelected ? "blue" : undefined}
               variant="outlined"

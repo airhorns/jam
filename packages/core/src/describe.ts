@@ -60,6 +60,12 @@ const NAME_FROM_CONTENT = new Set([
   "cell", "columnheader", "rowheader", "gridcell", "checkbox", "radio", "switch", "tooltip", "summary",
 ]);
 
+/** Roles whose descendants ARIA hides from assistive technology; only misplaced controls inside them are still reported. */
+const CHILDREN_PRESENTATIONAL = new Set([
+  "button", "checkbox", "img", "math", "menuitemcheckbox", "menuitemradio", "meter", "option", "progressbar",
+  "radio", "scrollbar", "separator", "slider", "switch", "tab",
+]);
+
 const INTERACTIVE = new Set([
   "button", "link", "textbox", "searchbox", "checkbox", "radio", "switch", "slider", "spinbutton", "combobox",
   "listbox", "option", "menuitem", "menuitemcheckbox", "menuitemradio", "tab", "treeitem", "scrollbar",
@@ -136,7 +142,7 @@ class Describer {
     if (this.hidden(el)) return "";
     const label = this.prop(el, "aria-label") ?? this.prop(el, "alt");
     if (label !== undefined && String(label)) return String(label);
-    return (this.idx.children.get(el) ?? []).map((child) => this.textContent(child)).join("");
+    return (this.idx.children.get(el) ?? []).map((child) => this.textContent(child)).join(" ");
   }
 
   private referencedText(refs: Term | undefined): string | undefined {
@@ -209,8 +215,6 @@ class Describer {
       if (props.get("aria-disabled") === "true" || isTruthyAttribute(props.get("disabled"))) state.disabled = true;
       if (props.get("aria-required") === "true" || isTruthyAttribute(props.get("required"))) state.required = true;
       if (props.get("aria-readonly") === "true" || isTruthyAttribute(props.get("readonly") ?? props.get("readOnly"))) state.readonly = true;
-      const dataState = props.get("data-state");
-      if (dataState !== undefined) state.state = dataState;
       if (role === "link" && props.get("href") !== undefined) state.href = props.get("href")!;
       if (role === "textbox" || role === "searchbox" || role === "spinbutton") {
         const placeholder = props.get("placeholder");
@@ -218,6 +222,10 @@ class Describer {
       }
     }
     if (role === "heading" && state.level === undefined && /^h[1-6]$/.test(tag)) state.level = Number(tag[1]);
+    if (role === "combobox" && tag !== "input" && tag !== "select") {
+      const shown = whitespace(this.textContent(el));
+      if (shown) state.value = shown;
+    }
     const node = nodeFor(el) as (Element & { value?: string; checked?: boolean }) | undefined;
     if (tag === "input" || tag === "textarea" || tag === "select") {
       const type = props?.get("type");
@@ -271,7 +279,8 @@ class Describer {
     const description = this.referencedText(this.prop(el, "aria-describedby"));
     if (description) node.description = description;
     if (this.idx.handlers.get(el)?.has("click") && !INTERACTIVE.has(role)) node.state.clickable = true;
-    if (fresh.length) node.component = componentInfo(fresh[fresh.length - 1])?.name;
+    const semantic = fresh.map((id) => componentInfo(id)).filter((info) => info && !info.presentational);
+    if (semantic.length) node.component = semantic[semantic.length - 1]!.name;
     for (const componentId of fresh) {
       const found = driversFor(componentId);
       if (found && found.id === componentId) {
@@ -281,10 +290,11 @@ class Describer {
     }
 
     for (const child of this.idx.children.get(el) ?? []) node.children.push(...this.describe(child));
-    if ((NAME_FROM_CONTENT.has(role) && node.name !== undefined) || (tag === "label" && this.labelsControl(el))) {
-      node.children = node.children.filter((child) => child.role !== "text");
+    if (CHILDREN_PRESENTATIONAL.has(role)) node.children = controlsWithin(node.children);
+    else if ((NAME_FROM_CONTENT.has(role) && node.name !== undefined) || (tag === "label" && this.labelsControl(el))) {
+      node.children = withoutText(node.children);
     }
-    if (role === "generic" && node.name === undefined && !node.component && !node.state.clickable) return node.children;
+    if (role === "generic" && node.name === undefined && !node.component && !node.drive && !node.state.clickable) return node.children;
     return [node];
   }
 
@@ -300,6 +310,23 @@ class Describer {
     }
     return nodes;
   }
+}
+
+/** Interactive or drivable nodes anywhere under `nodes`, lifted out of the presentational structure around them. */
+function controlsWithin(nodes: UINode[]): UINode[] {
+  return nodes.flatMap((node) => (INTERACTIVE.has(node.role) || node.drive ? [node] : controlsWithin(node.children)));
+}
+
+/** `nodes` without the text runs (and the unnamed containers that only held text) an element's name already spells out. */
+function withoutText(nodes: UINode[]): UINode[] {
+  const kept: UINode[] = [];
+  for (const node of nodes) {
+    if (node.role === "text") continue;
+    const children = withoutText(node.children);
+    if (node.role === "generic" && node.name === undefined && !node.drive && !node.state.clickable && children.length === 0) continue;
+    kept.push({ ...node, children });
+  }
+  return kept;
 }
 
 function onlyInteractive(nodes: UINode[]): UINode[] {
