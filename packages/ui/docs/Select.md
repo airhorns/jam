@@ -141,4 +141,5 @@ recolours the trigger and the portalled list together.
   arrow keys and typeahead.
 - A `name` renders a hidden input so the value submits with a surrounding
   `Form`; `Label htmlFor` should point at the `id` given to `Select`. The
-  hidden input reverts to `defaultValue` when the form resets.
+  hidden input reverts to `defaultValue` (or the placeholder when there was
+  none) when the form resets.

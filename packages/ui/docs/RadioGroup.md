@@ -102,5 +102,6 @@ component theme, so `theme="…"` anywhere above recolours the whole group —
   both Tab and the arrow keys.
 - A `name` renders a visually-hidden `<input type="radio">` inside each item
   so the group contributes to `FormData`. Resetting the owning form restores
-  `defaultValue`, with or without `name` set.
+  `defaultValue`, or clears the selection when there was none, with or without
+  `name` set.
 - Pair each item with a `Label htmlFor` pointing at the item's `id`.

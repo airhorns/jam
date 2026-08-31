@@ -120,18 +120,20 @@ test.describe("modal dialogs", () => {
     await page.mouse.move(550, 200);
     await page.mouse.wheel(0, 200);
     await expect.poll(scrollY).toBeGreaterThan(0);
-    const before = await scrollY();
 
+    // Clicking the trigger may itself nudge it into view, so measure once the dialog is open.
     await page.getByTestId("open-dialog").click();
     await expect(page.getByTestId("dialog-content")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+    const locked = await scrollY();
     await page.mouse.wheel(0, 300);
     await page.waitForTimeout(150);
-    expect(await scrollY()).toBe(before);
+    expect(await scrollY()).toBe(locked);
 
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("dialog-content")).toHaveCount(0);
     await page.mouse.wheel(0, 300);
-    await expect.poll(scrollY).toBeGreaterThan(before);
+    await expect.poll(scrollY).toBeGreaterThan(locked);
   });
 });
 

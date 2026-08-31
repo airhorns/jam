@@ -6,7 +6,9 @@
 // Components register while rendering (`useDismissableLayer`) and mark
 // their DOM with `data-layer={id}` (content), `data-layer-trigger={id}` and
 // optionally `data-layer-anchor={id}` so the program can tell inside from
-// outside and floating.ts knows what to position against.
+// outside and floating.ts knows what to position against. An element that
+// handles Escape itself without being a layer (a focused toast) carries
+// `data-handles-escape` so the key doesn't also dismiss the topmost layer.
 
 import { $, _, db, forget, replace, useCleanup, when } from "@jam/core";
 
@@ -38,7 +40,8 @@ type Layer = LayerOptions & {
 
 const layers = new Map<string, Layer>();
 let listenersInstalled = false;
-let scrollLocked: string | null = null;
+/** The body's inline overflow and padding-right from before the scroll lock, restored when the last modal closes. */
+let scrollLocked: { overflow: string; paddingRight: string } | null = null;
 
 function contentElement(id: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[data-layer="${id}"]`);
@@ -81,6 +84,7 @@ function onKeyDown(event: KeyboardEvent): void {
   const layer = topmost();
   if (!layer) return;
   if (event.key === "Escape" && layer.dismissOnEscape !== false) {
+    if (event.target instanceof Element && event.target.closest("[data-handles-escape]")) return;
     event.preventDefault();
     layer.onDismiss();
     return;
@@ -145,12 +149,29 @@ function updateScrollLock(): void {
   let modal: Layer | undefined;
   for (const layer of layers.values()) if (layer.modal) modal = layer;
   if (modal && scrollLocked == null) {
-    scrollLocked = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    lockScroll();
   } else if (!modal && scrollLocked != null) {
-    document.body.style.overflow = scrollLocked;
-    scrollLocked = null;
+    unlockScroll();
   }
+}
+
+/** Hides the page scrollbar and keeps its width as padding so the layout doesn't shift under the modal. */
+function lockScroll(): void {
+  const body = document.body;
+  scrollLocked = { overflow: body.style.overflow, paddingRight: body.style.paddingRight };
+  const gutter = window.innerWidth - document.documentElement.clientWidth;
+  if (gutter > 0) {
+    const current = parseFloat(getComputedStyle(body).paddingRight) || 0;
+    body.style.paddingRight = `${current + gutter}px`;
+  }
+  body.style.overflow = "hidden";
+}
+
+function unlockScroll(): void {
+  if (scrollLocked == null) return;
+  document.body.style.overflow = scrollLocked.overflow;
+  document.body.style.paddingRight = scrollLocked.paddingRight;
+  scrollLocked = null;
 }
 
 function startLayer(layer: Layer): void {
@@ -221,10 +242,7 @@ export function isTopmostLayer(id: string): boolean {
 /** Forget every layer and release the scroll lock (for tests and hot reload). */
 export function resetLayers(): void {
   layers.clear();
-  if (typeof document !== "undefined" && scrollLocked != null) {
-    document.body.style.overflow = scrollLocked;
-    scrollLocked = null;
-  }
+  if (typeof document !== "undefined") unlockScroll();
 }
 
 // ---- Floating position facts ----

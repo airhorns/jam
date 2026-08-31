@@ -4,6 +4,7 @@ import { h } from "@jam/core/jsx";
 import { render, setupDefaultUI, focus, blur, keydown, pointerEnter, pointerLeave } from "../../testing";
 import { Toast, toastController } from "../../components/Toast";
 import type { ToastProps } from "../../components/Toast";
+import { Dialog } from "../../components/Dialog";
 
 beforeEach(() => {
   setupDefaultUI();
@@ -241,6 +242,30 @@ describe("Toast conformance", () => {
     it("does not lock body scroll while open", () => {
       render(h(Example, { defaultOpen: true, duration: Infinity }));
       expect(document.body.style.overflow).not.toBe("hidden");
+    });
+
+    // radix toast.tsx handles Escape on the toast itself; its DismissableLayer only closes the layer
+    // whose content contains the event target
+    it("Escape on a focused toast closes only the toast, not a dialog open underneath it", () => {
+      const onDialogOpenChange = vi.fn();
+      const { get, all } = render(
+        h(
+          "div",
+          null,
+          h(
+            Dialog,
+            { defaultOpen: true, onOpenChange: onDialogOpenChange },
+            h(Dialog.Portal, null, h(Dialog.Content, { "data-testid": "dialog" }, h(Dialog.Title, null, "Title"), h("input", null))),
+          ),
+          h(Example, { defaultOpen: true, duration: Infinity }),
+        ),
+      );
+      const toast = get("[data-testid=toast]");
+      focus(toast);
+      keydown(toast, "Escape");
+      expect(all("[data-testid=toast]")).toHaveLength(0);
+      expect(all("[data-testid=dialog]")).toHaveLength(1);
+      expect(onDialogOpenChange).not.toHaveBeenCalled();
     });
   });
 });

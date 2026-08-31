@@ -189,6 +189,18 @@ describe("Select conformance", () => {
       expect(group.getAttribute("aria-labelledby")).toBe(label.id);
     });
 
+    it("a Select.Group without a Select.Label has no aria-labelledby rather than a dangling one", () => {
+      const { get } = render(
+        h(
+          Select,
+          { defaultOpen: true },
+          h(Select.Trigger, null, h(Select.Value, null)),
+          h(Select.Content, null, h(Select.Viewport, null, h(Select.Group, { "data-testid": "bare-group" }, h(Select.Item, { value: "a" }, h(Select.ItemText, null, "A"))))),
+        ),
+      );
+      expect(get("[data-testid=bare-group]").hasAttribute("aria-labelledby")).toBe(false);
+    });
+
     // Radix's SelectTrigger sets aria-required from a `required` root prop.
     it("Select's `required` prop is wired to aria-required on the trigger", () => {
       const { get } = render(h(Example, { ...({ required: true } as Record<string, unknown>) }));
@@ -221,6 +233,16 @@ describe("Select conformance", () => {
       const form = container.querySelector("form")!;
       form.reset();
       expect(get("[data-testid=value]").textContent).toBe("Apple");
+    });
+
+    it("resetting the form clears a Select that started with no value back to its placeholder", () => {
+      const { get, container } = render(h("form", null, h(Example, { name: "fruit" })));
+      click(get("[data-testid=trigger]"));
+      click(get("[data-testid=item-cherry]"));
+      expect(get("[data-testid=value]").textContent).toBe("Cherry");
+      container.querySelector("form")!.reset();
+      expect(get("[data-testid=value]").textContent).toBe("Pick a fruit");
+      expect(new FormData(container.querySelector("form")!).get("fruit")).toBe("");
     });
   });
 });

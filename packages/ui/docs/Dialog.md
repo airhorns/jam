@@ -100,6 +100,7 @@ makes a filled, inverted dialog.
   focusable element, else the content; closing returns focus to the element
   that was focused before, typically the trigger.
 - While modal, Tab and Shift+Tab cycle inside the content and body scroll is
-  locked.
+  locked; the scrollbar's width is kept as body padding so the page doesn't
+  shift when it disappears.
 - Escape closes the topmost open layer only, so nested overlays close one at a
   time.

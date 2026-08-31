@@ -27,8 +27,9 @@ Read `STYLE-SYSTEM.md` first.
   parts carry `data-disabled=""` (the empty string, as Radix does) next to the
   real attribute; `rovingFocus` skips items that have it.
 - Form controls with a `name` mirror their value into a visually hidden
-  `<input>` and spread `useFormReset(() => set(initial))` from `../form` onto
-  it so a `<form>` reset restores the initial value.
+  `<input>` and spread `useFormReset(reset)` from `../form` onto it, where
+  `reset` is the third element of `useControllableState`, so a `<form>` reset
+  returns to `defaultValue` even when that is "nothing selected".
 - Composite widgets take `dir?: "ltr" | "rtl"`, render it as the `dir`
   attribute and pass it to `rovingFocus` so ArrowLeft/ArrowRight follow the
   reading direction. `rovingFocus`/`rovingItems` are also exported from
@@ -36,7 +37,9 @@ Read `STYLE-SYSTEM.md` first.
 - Anything rendered but not currently selected (a `forceMount` panel, an
   inactive page) gets `tabIndex={-1}` so only the active part is a Tab stop.
 - Overlays register with `useDismissableLayer` (`../layers`) and position with
-  `../floating`; content goes through `Portal` from `@jam/core`.
+  `../floating`; content goes through `Portal` from `@jam/core`. Something that
+  handles Escape itself without being a layer (a toast) marks its element
+  `data-handles-escape` so the key doesn't also dismiss the topmost layer.
 
 ## Styling rules
 

@@ -271,15 +271,13 @@ function RadioGroupComponent(props: RadioGroupProps): VNode {
     onKeyDown,
     ...frameProps
   } = props;
-  const [value, setValue] = useControllableState<string>("value", {
+  const [value, setValue, resetValue] = useControllableState<string>("value", {
     value: props.value,
     defaultValue,
     onChange: onValueChange,
   });
   const disabled = props.disabled === true;
-  const resetProps = useFormReset(() => {
-    if (defaultValue != null) setValue(defaultValue);
-  });
+  const resetProps = useFormReset(resetValue);
 
   const state: RadioGroupState = {
     value: value ?? undefined,

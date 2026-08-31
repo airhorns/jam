@@ -16,12 +16,14 @@ const mounted = new Set<string>();
  * uncontrolled value lives in the fact DB under the component's id, so it
  * survives re-renders and can be inspected or driven by other programs; it is
  * forgotten when the component leaves the tree, so a later component at the
- * same position starts from its default.
+ * same position starts from its default. The third element returns to
+ * `defaultValue`, including an undefined one (no selection), which the setter
+ * cannot express.
  */
 export function useControllableState<T extends Term>(
   key: string,
   options: ControllableStateOptions<T>,
-): [T | undefined, (value: T) => void] {
+): [T | undefined, (value: T) => void, () => void] {
   const id = useComponentId();
   const controlled = options.value !== undefined;
   mounted.add(id);
@@ -39,7 +41,11 @@ export function useControllableState<T extends Term>(
     options.onChange?.(next);
     if (!controlled) replace(id, key, next);
   };
-  return [read(), update];
+  const reset = () => {
+    if (options.defaultValue !== undefined) update(options.defaultValue);
+    else if (!controlled && mounted.has(id)) forget(id, key, _);
+  };
+  return [read(), update, reset];
 }
 
 /** Like `useControllableState` for string arrays, stored as one JSON fact. */

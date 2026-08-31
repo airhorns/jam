@@ -187,6 +187,18 @@ describe("RadioGroup", () => {
     expect(new FormData(form).get("plan")).toBe("a");
   });
 
+  it("resets to no selection when it started without a default", () => {
+    const r = render(
+      h("form", null, h(RadioGroup, { name: "plan" }, h(RadioGroup.Item, { value: "a" }), h(RadioGroup.Item, { value: "b" }))),
+    );
+    const form = r.get<HTMLFormElement>("form");
+    click(r.all("[role=radio]")[1]);
+    expect(new FormData(form).get("plan")).toBe("b");
+    form.dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
+    expect(r.all("[role=radio]").map((el) => el.getAttribute("aria-checked"))).toEqual(["false", "false"]);
+    expect(new FormData(form).get("plan")).toBeNull();
+  });
+
   it("strips the default look when unstyled", () => {
     const r = render(h(RadioGroup, { unstyled: true }, h(RadioGroup.Item, { value: "a", unstyled: true })));
     expect(css(r.root).gap).toBeUndefined();

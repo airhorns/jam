@@ -6,7 +6,7 @@ import type { StyledProps } from "../styled";
 import { getFontSized, themeableVariants } from "../variants";
 import { useControllableState, useStableId } from "../state";
 import { useFormReset } from "../form";
-import { isVNode } from "./vnode";
+import { containsTag, isVNode } from "./vnode";
 import { useDismissableLayer } from "../layers";
 import { repositionLayer } from "../floating";
 import type { Placement } from "../floating";
@@ -103,12 +103,12 @@ function SelectRoot(props: SelectProps): VNode {
   const id = useStableId("select");
   const disabled = props.disabled === true;
   const placement = props.placement ?? "bottom-start";
-  const [value, setValue] = useControllableState<string>("value", {
+  const [value, setValue, resetValue] = useControllableState<string>("value", {
     value: props.value,
     defaultValue: props.defaultValue,
     onChange: props.onValueChange,
   });
-  const resetProps = useFormReset(() => setValue(props.defaultValue as string));
+  const resetProps = useFormReset(resetValue);
   const [openState, setOpenState] = useControllableState<boolean>("open", {
     value: props.open,
     defaultValue: props.defaultOpen ?? false,
@@ -415,7 +415,8 @@ export type SelectGroupProps = StyledProps;
 function SelectGroupComponent(props: SelectGroupProps): VNode {
   const labelId = useStableId("select-group-label");
   const { children, ...rest } = props;
-  return h(SelectGroupContext.Provider, { value: labelId }, h(SelectGroupFrame, { "aria-labelledby": labelId, ...rest }, children));
+  const labelled = containsTag(children, [SelectLabelComponent]);
+  return h(SelectGroupContext.Provider, { value: labelId }, h(SelectGroupFrame, { "aria-labelledby": labelled ? labelId : undefined, ...rest }, children));
 }
 SelectGroupComponent.displayName = "SelectGroup";
 

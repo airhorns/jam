@@ -444,6 +444,7 @@ function ToastRoot(props: ToastProps): VNode | null {
           (rest.onBlur as ((e: FocusEvent) => void) | undefined)?.(event);
           resumeDismiss(id, () => setOpen(false));
         },
+        "data-handles-escape": "",
         onKeyDown: (event: KeyboardEvent) => {
           (rest.onKeyDown as ((e: KeyboardEvent) => void) | undefined)?.(event);
           if (event.key === "Escape") setOpen(false);
