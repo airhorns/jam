@@ -76,7 +76,6 @@ function Sidebar({
     <YStack
       tag="aside"
       width={290}
-      flexShrink={0}
       $max-lg={{ width: "100%", flexBasis: "100%" }}
       bordered
       borderRadius="$6"
@@ -122,7 +121,6 @@ function Sidebar({
               paddingVertical="$3"
               paddingHorizontal="$3.5"
               alignItems="stretch"
-              flexShrink={0}
               onClick={() => selectNote(note.id)}
             >
               <YStack flexGrow={1} flexShrink={1} minWidth={0} gap="$1" alignItems="stretch">
@@ -211,7 +209,7 @@ function Editor({ note }: { note: ReturnType<typeof getSelectedNote> }) {
 
 function InspectorCard({ label, testId, children }: { label: string; testId: string; children?: VChild }) {
   return (
-    <Card bordered padding="$4" gap="$3" backgroundColor="$color1" flexShrink={0} data-testid={testId}>
+    <Card bordered padding="$4" gap="$3" backgroundColor="$color1" data-testid={testId}>
       <Eyebrow>{label}</Eyebrow>
       {children}
     </Card>
