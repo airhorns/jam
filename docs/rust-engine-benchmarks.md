@@ -116,6 +116,10 @@ release build with `CARGO_PROFILE_RELEASE_STRIP=false CARGO_PROFILE_RELEASE_DEBU
 - One-shot `query/join-3` at 1M facts produces 200k rows and its per-row cost roughly doubles
   from 100k to 1M as the joins leave cache; the runtime keeps queries registered and reads
   `rows`, which is the `register/rows/join-4` case.
+- Term reference counting costs `load/no-queries` at 1M facts about 7% (50 ms → 54 ms): every
+  asserted term is validated against the interner's reference word and retained, and every
+  removed one released. `churn/replace-title` at 1M stays under 250 ns and the term table stops
+  growing under value churn, which is what the accounting buys.
 
 ## Profiling
 

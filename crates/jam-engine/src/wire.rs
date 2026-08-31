@@ -20,6 +20,9 @@ pub const EV_FACT: u32 = 1;
 /// `QUERY qid nvars nrows (rowid flag [vals… order_hi order_lo])…` — `flag` 1 means the row
 /// appeared (its values and 64-bit result-order key follow), 0 that it left.
 pub const EV_QUERY: u32 = 2;
+/// `FREE n id…` — term ids no fact or query uses any more; they may be reused from here on.
+/// Always the first event of a drain.
+pub const EV_FREE: u32 = 3;
 
 pub const FACT_ADDED: u32 = 1;
 pub const FACT_DURABLE: u32 = 2;

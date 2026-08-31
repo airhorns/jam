@@ -16,6 +16,19 @@ fn var(i: u32) -> u32 {
     VAR_BASE + i
 }
 
+/// Intern and hold a reference, so ids the benchmarks keep survive `clear` and drains.
+fn held(interner: &mut Interner, s: &str) -> TermId {
+    let id = interner.intern_str(s);
+    interner.retain(id);
+    id
+}
+
+fn held_num(interner: &mut Interner, n: f64) -> TermId {
+    let id = interner.intern_num(n);
+    interner.retain(id);
+    id
+}
+
 struct Vocab {
     issue: TermId,
     project: TermId,
@@ -34,18 +47,18 @@ struct Vocab {
 impl Vocab {
     fn new(interner: &mut Interner) -> Vocab {
         Vocab {
-            issue: interner.intern_str("issue"),
-            project: interner.intern_str("project"),
-            title: interner.intern_str("title"),
-            status: interner.intern_str("status"),
-            priority: interner.intern_str("priority"),
-            created: interner.intern_str("created"),
-            name: interner.intern_str("name"),
-            open: interner.intern_str("open"),
-            closed: interner.intern_str("closed"),
-            renamed: interner.intern_str("renamed"),
-            projects: (0..PROJECTS).map(|i| interner.intern_str(&format!("p{i}"))).collect(),
-            scopes: (0..PROJECTS).map(|i| interner.intern_str(&format!("project:p{i}"))).collect(),
+            issue: held(interner, "issue"),
+            project: held(interner, "project"),
+            title: held(interner, "title"),
+            status: held(interner, "status"),
+            priority: held(interner, "priority"),
+            created: held(interner, "created"),
+            name: held(interner, "name"),
+            open: held(interner, "open"),
+            closed: held(interner, "closed"),
+            renamed: held(interner, "renamed"),
+            projects: (0..PROJECTS).map(|i| held(interner, &format!("p{i}"))).collect(),
+            scopes: (0..PROJECTS).map(|i| held(interner, &format!("project:p{i}"))).collect(),
         }
     }
 }
@@ -65,18 +78,18 @@ impl World {
         let mut engine = Engine::new();
         let v = Vocab::new(&mut engine.interner);
         let issues = facts / FACTS_PER_ISSUE;
-        let ids: Vec<TermId> = (0..issues).map(|i| engine.interner.intern_str(&format!("i{i}"))).collect();
-        let titles: Vec<TermId> = (0..issues).map(|i| engine.interner.intern_str(&format!("Issue {i}"))).collect();
+        let ids: Vec<TermId> = (0..issues).map(|i| held(&mut engine.interner, &format!("i{i}"))).collect();
+        let titles: Vec<TermId> = (0..issues).map(|i| held(&mut engine.interner, &format!("Issue {i}"))).collect();
         let mut load_ops = Vec::with_capacity(facts * 8);
         for (i, &p) in v.projects.iter().enumerate() {
-            let n = engine.interner.intern_str(&format!("Project {i}"));
+            let n = held(&mut engine.interner, &format!("Project {i}"));
             load_ops.extend([OP_ASSERT, ROOT_OWNER, NONE, 4, v.project, p, v.name, n]);
         }
         for (i, &id) in ids.iter().enumerate() {
             let p = i % PROJECTS;
             let status = if i.is_multiple_of(2) { v.open } else { v.closed };
-            let priority = engine.interner.intern_num((i % 5) as f64);
-            let created = engine.interner.intern_num(i as f64);
+            let priority = held_num(&mut engine.interner, (i % 5) as f64);
+            let created = held_num(&mut engine.interner, i as f64);
             load_ops.extend([OP_ASSERT, ROOT_OWNER, v.scopes[p], 4, v.issue, id, v.project, v.projects[p]]);
             load_ops.extend([OP_ASSERT, ROOT_OWNER, NONE, 4, v.issue, id, v.title, titles[i]]);
             load_ops.extend([OP_ASSERT, ROOT_OWNER, NONE, 4, v.issue, id, v.status, status]);
@@ -357,8 +370,8 @@ fn churn(c: &mut Criterion) {
                 black_box(world.apply(&ops))
             });
         });
-        let fresh = world.engine.interner.intern_str("fresh-issue");
-        let fresh_title = world.engine.interner.intern_str("A fresh issue");
+        let fresh = held(&mut world.engine.interner, "fresh-issue");
+        let fresh_title = held(&mut world.engine.interner, "A fresh issue");
         group.throughput(Throughput::Elements(FACTS_PER_ISSUE as u64 * 2));
         group.bench_function(BenchmarkId::new("create+delete-issue", facts), |b| {
             b.iter(|| {
@@ -389,7 +402,7 @@ fn churn(c: &mut Criterion) {
                 black_box(world.apply(&ops))
             });
         });
-        let three = world.engine.interner.intern_num(3.0);
+        let three = held_num(&mut world.engine.interner, 3.0);
         let mut reassert = Vec::with_capacity(n / 5 * 8);
         for &id in world.ids.iter().skip(3).step_by(5) {
             reassert.extend([OP_ASSERT, ROOT_OWNER, NONE, 4, world.v.issue, id, world.v.priority, three]);
@@ -411,10 +424,10 @@ fn revoke(c: &mut Criterion) {
     let mut group = c.benchmark_group("revoke");
     let mut world = World::loaded(100_000);
     world.register_standard_queries();
-    let dom = world.engine.interner.intern_str("dom");
-    let tag = world.engine.interner.intern_str("tag");
-    let div = world.engine.interner.intern_str("div");
-    let nodes: Vec<TermId> = (0..1000).map(|i| world.engine.interner.intern_str(&format!("n{i}"))).collect();
+    let dom = held(&mut world.engine.interner, "dom");
+    let tag = held(&mut world.engine.interner, "tag");
+    let div = held(&mut world.engine.interner, "div");
+    let nodes: Vec<TermId> = (0..1000).map(|i| held(&mut world.engine.interner, &format!("n{i}"))).collect();
     world.engine.register(vec![vec![dom, var(0), tag, var(1)]]);
     world.engine.drain();
 

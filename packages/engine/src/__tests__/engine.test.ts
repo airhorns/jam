@@ -152,4 +152,74 @@ describe("Engine", () => {
     expect(() => e.register([])).not.toThrow();
     expect(() => e.raw.register(new Uint32Array([1, 5, WILD]))).toThrow();
   });
+
+  it("forgets freed terms so reused ids resolve to their new value", () => {
+    const e = new Engine();
+    e.setFactEvents(FACT_EVENTS_ALL);
+    const base = e.termCount;
+    e.assert(ROOT_OWNER, NONE, ["k", "old"]);
+    e.flush();
+    const old = e.id("old");
+    const seen: string[] = [];
+    e.onFact((event) => seen.push(`${event.type}:${event.terms[1]}`));
+    e.replace(ROOT_OWNER, NONE, ["k", "new"]);
+    e.flush();
+    expect(seen).toEqual(["delete:old", "add:new"]);
+    expect(e.term(old)).toBe("old");
+    e.flush();
+    expect(e.termCount).toBe(base + 2);
+    expect(() => e.term(old)).toThrow(/unknown term id/);
+    expect(e.id("other")).toBe(old);
+    expect(e.term(old)).toBe("other");
+    expect(e.id("old")).not.toBe(old);
+    expect(e.termCapacity).toBe(base + 4);
+  });
+
+  it("keeps the term table flat under value churn", () => {
+    const e = new Engine();
+    const q = e.register([[e.id("pos"), e.id("y"), v(0)]]);
+    let peak = 0;
+    for (let i = 0; i < 2000; i++) {
+      e.replace(ROOT_OWNER, NONE, ["pos", "y", i * 0.5]);
+      e.flush();
+      peak = Math.max(peak, e.termCount);
+    }
+    expect(peak).toBeLessThanOrEqual(e.termCount + 3);
+    expect(e.termCapacity).toBeLessThan(20);
+    expect(decodeRows(e, q)).toEqual([[1999 * 0.5]]);
+  });
+
+  it("lets fact listeners intern terms while freed ids are being reported", () => {
+    const e = new Engine();
+    e.setFactEvents(FACT_EVENTS_ALL);
+    e.assert(ROOT_OWNER, NONE, ["k", "gone"]);
+    e.flush();
+    const gone = e.id("gone");
+    e.drop(["k", "gone"]);
+    e.flush();
+    let fresh = -1;
+    e.onFact(() => {
+      fresh = e.id("fresh");
+    });
+    e.assert(ROOT_OWNER, NONE, ["k", "trigger"]);
+    e.flush();
+    expect(fresh).toBe(gone);
+    expect(e.term(gone)).toBe("fresh");
+    expect(e.id("gone")).not.toBe(gone);
+    expect(e.id("fresh")).toBe(gone);
+  });
+
+  it("holds the literals of registered queries", () => {
+    const e = new Engine();
+    const q = e.register([[e.id("only-in-query"), v(0)]]);
+    const id = e.id("only-in-query");
+    e.flush();
+    e.flush();
+    e.flush();
+    expect(e.term(id)).toBe("only-in-query");
+    q.release();
+    e.flush();
+    e.flush();
+    expect(() => e.term(id)).toThrow(/unknown term id/);
+  });
 });

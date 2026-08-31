@@ -27,7 +27,7 @@ fn terms_round_trip_through_the_interner() {
     let s = e.intern_str("todo");
     let n = e.intern_num(2.5);
     assert_eq!(e.intern_str("todo"), s);
-    assert_eq!(e.term_count(), base + 2);
+    assert_eq!((e.term_count(), e.term_capacity()), (base + 2, base + 2));
     assert_eq!((e.term_kind(s), e.term_kind(n)), (0, 1));
     assert_eq!(e.term_kind(1), 2, "the true term is preinterned");
     assert_eq!(e.term_kind(u32::MAX - 5), 3);
@@ -37,6 +37,10 @@ fn terms_round_trip_through_the_interner() {
     assert_eq!(e.term_num(1), 1.0);
     assert_eq!(e.term_num(0), 0.0);
     assert!(e.term_num(s).is_nan());
+    assert_eq!(e.drain(), vec![]);
+    assert_eq!(e.drain(), vec![EV_FREE, 2, s, n], "unused terms are freed by the second drain");
+    assert_eq!((e.term_count(), e.term_capacity()), (base, base + 2));
+    assert_eq!(e.term_kind(s), 3);
 }
 
 #[test]

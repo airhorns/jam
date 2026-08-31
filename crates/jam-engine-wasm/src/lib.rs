@@ -82,8 +82,14 @@ impl JamEngine {
         }
     }
 
+    /// Live terms.
     pub fn term_count(&self) -> u32 {
         self.inner.interner.len() as u32
+    }
+
+    /// Ids handed out so far, including freed ones awaiting reuse.
+    pub fn term_capacity(&self) -> u32 {
+        self.inner.interner.capacity() as u32
     }
 
     // --- transactions ---

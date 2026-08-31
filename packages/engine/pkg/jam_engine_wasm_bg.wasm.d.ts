@@ -20,6 +20,7 @@ export const jamengine_release: (a: number, b: number) => number;
 export const jamengine_rows: (a: number, b: number, c: number) => void;
 export const jamengine_scope_of: (a: number, b: number, c: number) => number;
 export const jamengine_set_fact_events: (a: number, b: number) => void;
+export const jamengine_term_capacity: (a: number) => number;
 export const jamengine_term_count: (a: number) => number;
 export const jamengine_term_kind: (a: number, b: number) => number;
 export const jamengine_term_num: (a: number, b: number) => number;

@@ -78,18 +78,18 @@ impl Engine {
             match r.u32()? {
                 OP_ASSERT => {
                     let owner = r.u32()?;
-                    let scope = r.u32()?;
-                    let terms = r.terms()?;
+                    let scope = self.check_scope(r.u32()?)?;
+                    let terms = self.check_terms(r.terms()?)?;
                     self.assert(owner, scope, terms, None, false);
                 }
                 OP_REPLACE => {
                     let owner = r.u32()?;
-                    let scope = r.u32()?;
-                    let terms = r.terms()?;
+                    let scope = self.check_scope(r.u32()?)?;
+                    let terms = self.check_terms(r.terms()?)?;
                     self.replace(owner, scope, terms);
                 }
                 OP_DROP => {
-                    let terms = r.terms()?;
+                    let terms = self.check_terms(r.terms()?)?;
                     self.drop(terms);
                 }
                 OP_REVOKE => {
@@ -97,8 +97,8 @@ impl Engine {
                     self.revoke(owner);
                 }
                 OP_SET_SCOPE => {
-                    let scope = r.u32()?;
-                    let terms = r.terms()?;
+                    let scope = self.check_scope(r.u32()?)?;
+                    let terms = self.check_terms(r.terms()?)?;
                     self.set_scope(scope, terms);
                 }
                 OP_CLEAR => self.clear(),
@@ -108,9 +108,21 @@ impl Engine {
         Ok(())
     }
 
-    /// Fact events since the last drain followed by the delta of every query that changed.
+    /// The term ids freed since the previous drain, then the fact events since the last drain and
+    /// the delta of every query that changed. Freed ids come first because a listener handling a
+    /// later event may intern a term and be handed one of them back.
     pub fn drain(&mut self) -> Vec<u32> {
-        let mut out = std::mem::take(&mut self.events);
+        let freed = self.interner.collect();
+        let mut out = if freed.is_empty() {
+            std::mem::take(&mut self.events)
+        } else {
+            let mut out = Vec::with_capacity(freed.len() + 2 + self.events.len());
+            out.push(EV_FREE);
+            out.push(freed.len() as u32);
+            out.extend_from_slice(&freed);
+            out.append(&mut self.events);
+            out
+        };
         let store = &self.store;
         for qid in self.queries.take_dirty() {
             let Some(query) = self.queries.get_mut(qid) else {
@@ -175,6 +187,7 @@ impl Engine {
             return;
         }
         self.owners.attach(owner, fid);
+        self.retain_terms(terms, scope);
         self.record_entity_scope(terms, scope);
         self.queries.propagate(&self.store, fid, terms, 1);
         let durable = if owner == ROOT_OWNER { FACT_DURABLE } else { 0 };
@@ -187,6 +200,7 @@ impl Engine {
         for &owner in &record.owners {
             self.owners.detach(owner, fid);
         }
+        self.release_terms(&record.terms, record.scope);
         self.forget_entity_scope(&record.terms, record.scope);
         let flag = if record.owners.contains(&ROOT_OWNER) { FACT_DURABLE } else { 0 };
         self.emit_fact(flag, record.scope, &record.terms);
@@ -263,6 +277,8 @@ impl Engine {
         }
         self.forget_entity_scope(terms, previous);
         self.store.get_mut(fid).scope = scope;
+        self.interner.retain(scope);
+        self.interner.release(previous);
         self.record_entity_scope(terms, scope);
     }
 
@@ -273,10 +289,48 @@ impl Engine {
                 self.emit_fact(0, scope, &terms);
             }
         }
+        for (_, record) in self.store.iter() {
+            for &t in &record.terms {
+                self.interner.release(t);
+            }
+            self.interner.release(record.scope);
+        }
         self.store.clear();
         self.owners.reset();
         self.entity_scopes.clear();
         self.queries.clear_results();
+    }
+
+    // --- terms ---
+
+    /// Every literal position must name a live term; variables and `WILD` pass through.
+    fn check_terms<'t>(&self, terms: &'t [u32]) -> Result<&'t [u32], String> {
+        match terms.iter().find(|&&t| t < VAR_BASE && !self.interner.is_live(t)) {
+            Some(t) => Err(format!("unknown term id {t}")),
+            None => Ok(terms),
+        }
+    }
+
+    fn check_scope(&self, scope: u32) -> Result<TermId, String> {
+        if scope == NONE || self.interner.is_live(scope) {
+            Ok(scope)
+        } else {
+            Err(format!("unknown scope id {scope}"))
+        }
+    }
+
+    fn retain_terms(&mut self, terms: &[TermId], scope: TermId) {
+        for &t in terms {
+            self.interner.retain(t);
+        }
+        self.interner.retain(scope);
+    }
+
+    fn release_terms(&mut self, terms: &[TermId], scope: TermId) {
+        for &t in terms {
+            self.interner.release(t);
+        }
+        self.interner.release(scope);
     }
 
     // --- scopes ---
@@ -339,12 +393,30 @@ impl Engine {
 
     // --- queries ---
 
+    /// Register (or share) a maintained query; its literal terms stay interned while it lives.
     pub fn register(&mut self, clauses: Vec<Clause>) -> QueryId {
-        self.queries.register(&mut self.store, clauses)
+        let (id, created) = self.queries.register(&mut self.store, clauses);
+        if created {
+            for t in self.queries.get(id).expect("just registered").clauses.iter().flatten() {
+                if *t < VAR_BASE {
+                    self.interner.retain(*t);
+                }
+            }
+        }
+        id
     }
 
+    /// Drop one reference to a query; true when that removed it.
     pub fn release(&mut self, id: QueryId) -> bool {
-        self.queries.release(id)
+        let Some(clauses) = self.queries.release(id) else {
+            return false;
+        };
+        for t in clauses.iter().flatten() {
+            if *t < VAR_BASE {
+                self.interner.release(*t);
+            }
+        }
+        true
     }
 
     /// Current rows of a registered query: `nvars nrows (rowid vals… order_hi order_lo)…`.

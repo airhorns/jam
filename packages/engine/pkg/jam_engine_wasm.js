@@ -223,6 +223,15 @@ export class JamEngine {
         wasm.jamengine_set_fact_events(this.__wbg_ptr, level);
     }
     /**
+     * Ids handed out so far, including freed ones awaiting reuse.
+     * @returns {number}
+     */
+    term_capacity() {
+        const ret = wasm.jamengine_term_capacity(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Live terms.
      * @returns {number}
      */
     term_count() {

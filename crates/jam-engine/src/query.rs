@@ -515,11 +515,12 @@ impl Queries {
         self.slots.get_mut(id as usize).and_then(Option::as_mut)
     }
 
-    /// Register (or re-reference) a query, evaluating it against the store when new.
-    pub fn register(&mut self, store: &mut Store, clauses: Vec<Clause>) -> QueryId {
+    /// Register (or re-reference) a query, evaluating it against the store when new;
+    /// the flag says whether it was.
+    pub fn register(&mut self, store: &mut Store, clauses: Vec<Clause>) -> (QueryId, bool) {
         if let Some(&id) = self.by_pattern.get(&clauses) {
             self.get_mut(id).unwrap().refcount += 1;
-            return id;
+            return (id, false);
         }
         let query = Query::new(clauses.clone());
         for (len, mask) in query.index_needs() {
@@ -544,7 +545,7 @@ impl Queries {
         self.by_pattern.insert(clauses, id);
         self.slots[id as usize] = Some(query);
         self.reevaluate(store, id);
-        id
+        (id, true)
     }
 
     /// Evaluate from scratch; the initial rows are not reported as a delta.
@@ -555,14 +556,12 @@ impl Queries {
         results.settle();
     }
 
-    /// Drop one reference; the query is removed when the last one goes.
-    pub fn release(&mut self, id: QueryId) -> bool {
-        let Some(query) = self.get_mut(id) else {
-            return false;
-        };
+    /// Drop one reference; when the last one goes the query is removed and its clauses returned.
+    pub fn release(&mut self, id: QueryId) -> Option<Vec<Clause>> {
+        let query = self.get_mut(id)?;
         query.refcount -= 1;
         if query.refcount > 0 {
-            return false;
+            return None;
         }
         let query = self.slots[id as usize].take().unwrap();
         self.by_pattern.remove(&query.clauses);
@@ -582,7 +581,7 @@ impl Queries {
             }
         }
         self.free.push(id);
-        true
+        Some(query.clauses)
     }
 
     /// Propagate a fact change. For additions the store must already contain
@@ -790,15 +789,22 @@ mod tests {
         let mut store = Store::new();
         let mut queries = Queries::new();
         assert!(queries.is_empty());
-        let a = queries.register(&mut store, vec![vec![10, v(0)]]);
-        let b = queries.register(&mut store, vec![vec![v(0), 11]]);
+        let (a, created) = queries.register(&mut store, vec![vec![10, v(0)]]);
+        assert!(created);
+        let (b, _) = queries.register(&mut store, vec![vec![v(0), 11]]);
+        assert_eq!(
+            queries.register(&mut store, vec![vec![10, v(0)]]),
+            (a, false),
+            "identical queries are shared"
+        );
         assert_eq!(queries.len(), 2);
         assert!(queries.get(a).is_some() && queries.get(b).is_some());
         assert!(queries.get(7).is_none());
-        assert!(!queries.release(7), "unknown ids are not released");
-        assert!(queries.release(a));
+        assert_eq!(queries.release(7), None, "unknown ids are not released");
+        assert_eq!(queries.release(a), None, "one reference remains");
+        assert_eq!(queries.release(a), Some(vec![vec![10, v(0)]]));
         assert!(queries.get(a).is_none());
-        let c = queries.register(&mut store, vec![vec![10, v(0), v(1)]]);
+        let (c, _) = queries.register(&mut store, vec![vec![10, v(0), v(1)]]);
         assert_eq!(c, a, "freed ids are reused");
         assert!(queries.routes.contains_key(&route_of(&[10, v(0), v(1)]).0));
         assert!(
@@ -807,7 +813,7 @@ mod tests {
         );
         assert!(queries.routes.contains_key(&route_of(&[v(0), 11]).0));
         assert_eq!(queries.shapes.len(), 2, "one shape per length and literal layout");
-        assert!(queries.release(b) && queries.release(c));
+        assert!(queries.release(b).is_some() && queries.release(c).is_some());
         assert!(queries.routes.is_empty() && queries.shapes.is_empty());
         assert!(queries.is_empty());
     }
@@ -817,7 +823,7 @@ mod tests {
         let mut store = Store::new();
         let mut queries = Queries::new();
         let f = store.insert(&[10, 1], 2, ROOT_OWNER);
-        let q = queries.register(&mut store, vec![vec![10, v(0)]]);
+        let (q, _) = queries.register(&mut store, vec![vec![10, v(0)]]);
         assert_eq!(queries.get(q).unwrap().results.len(), 1, "registration sees existing facts");
         assert!(queries.take_dirty().is_empty(), "without reporting them");
         let g = store.insert(&[11, 1], 2, ROOT_OWNER);

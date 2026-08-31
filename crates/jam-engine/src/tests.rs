@@ -163,6 +163,7 @@ impl Harness {
 enum Event {
     Fact { flags: u32, scope: TermId, terms: Vec<TermId> },
     Query { qid: QueryId, added: Vec<(u32, Vec<TermId>)>, removed: Vec<u32> },
+    Free(Vec<TermId>),
 }
 
 fn decode(events: &[u32]) -> Vec<Event> {
@@ -196,6 +197,11 @@ fn decode(events: &[u32]) -> Vec<Event> {
                     }
                 }
                 out.push(Event::Query { qid, added, removed });
+            }
+            EV_FREE => {
+                let n = events[i + 1] as usize;
+                out.push(Event::Free(events[i + 2..i + 2 + n].to_vec()));
+                i += 2 + n;
             }
             other => panic!("bad event code {other} at {i}"),
         }
@@ -351,7 +357,7 @@ fn durable_flags_follow_root_ownership() {
     let b = h.e.create_owner(ROOT_OWNER).unwrap();
     h.assert(b, &["k", "4"]);
     h.revoke(b);
-    assert!(h.e.drain().is_empty());
+    assert!(decode(&h.e.drain()).iter().all(|e| matches!(e, Event::Free(_))));
 }
 
 #[test]
@@ -740,17 +746,34 @@ fn has_fact_and_unknown_query_rows() {
 #[test]
 fn malformed_ops_stop_the_transaction_where_they_are() {
     let mut e = Engine::new();
-    let ok = [OP_ASSERT, ROOT_OWNER, NONE, 2, 5, 6];
+    let (five, six) = (e.interner.intern_num(5.0), e.interner.intern_num(6.0));
+    let ok = [OP_ASSERT, ROOT_OWNER, NONE, 2, five, six];
     let mut ops = ok.to_vec();
-    ops.extend([OP_ASSERT, ROOT_OWNER, NONE, 3, 7, 8]);
+    ops.extend([OP_ASSERT, ROOT_OWNER, NONE, 3, five, six]);
     assert_eq!(e.apply(&ops), Err("truncated slice at 10 (len 3)".to_string()));
-    assert!(e.has_fact(&[5, 6]), "ops before the bad one have been applied");
-    assert!(e.apply(&[OP_DROP, 2, 5]).is_err());
+    assert!(e.has_fact(&[five, six]), "ops before the bad one have been applied");
+    assert!(e.apply(&[OP_DROP, 2, five]).is_err());
     assert!(e.apply(&[OP_REVOKE]).is_err());
     assert!(e.apply(&[OP_SET_SCOPE, 2]).is_err());
     assert!(e.apply(&[OP_REPLACE, ROOT_OWNER]).is_err());
     assert_eq!(e.apply(&[OP_ASSERT, ROOT_OWNER, NONE, 0]), Err("bad fact length 0".to_string()));
-    assert_eq!(e.fact_count(), 1);
+    assert_eq!(
+        e.apply(&[OP_ASSERT, ROOT_OWNER, NONE, 2, five, 99]),
+        Err("unknown term id 99".to_string())
+    );
+    assert_eq!(
+        e.apply(&[OP_ASSERT, ROOT_OWNER, 99, 2, five, six]),
+        Err("unknown scope id 99".to_string())
+    );
+    assert_eq!(
+        e.apply(&[OP_REPLACE, ROOT_OWNER, NONE, 2, five, 99]),
+        Err("unknown term id 99".to_string())
+    );
+    assert_eq!(e.apply(&[OP_DROP, 2, 99, WILD]), Err("unknown term id 99".to_string()));
+    assert_eq!(e.apply(&[OP_SET_SCOPE, 99, 2, five, six]), Err("unknown scope id 99".to_string()));
+    assert_eq!(e.apply(&[OP_SET_SCOPE, EMPTY, 2, five, 99]), Err("unknown term id 99".to_string()));
+    assert!(e.apply(&[OP_DROP, 2, five, WILD]).is_ok(), "wildcards and variables are not term ids");
+    assert_eq!(e.fact_count(), 0);
 }
 
 #[test]
@@ -823,7 +846,7 @@ fn numbers_and_booleans_are_terms_too() {
     assert_eq!(e.interner.resolve(packed[4]), &Term::Num(2.0));
     assert_eq!(
         e.interner.intern_str("1"),
-        e.interner.len() as u32 - 1,
+        e.interner.capacity() as u32 - 1,
         "the string \"1\" is a different term"
     );
 }
@@ -1111,4 +1134,137 @@ fn default_engine_matches_new() {
         vec![EV_FACT, FACT_ADDED | FACT_DURABLE, EMPTY, 1, EMPTY],
         "durable events are on by default"
     );
+}
+
+fn freed(events: &[u32]) -> Vec<TermId> {
+    decode(events)
+        .into_iter()
+        .filter_map(|e| match e {
+            Event::Free(ids) => Some(ids),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+#[test]
+fn terms_are_freed_by_the_second_drain_after_their_last_use() {
+    let mut h = Harness::new();
+    let base = h.e.interner.len();
+    h.assert(ROOT_OWNER, &["k", "v1"]);
+    let (k, v1) = (h.lit("k"), h.lit("v1"));
+    assert_eq!(freed(&h.e.drain()), vec![]);
+    h.replace(&["k", "v2"]);
+    let v2 = h.lit("v2");
+    let events = h.e.drain();
+    assert!(
+        decode(&events).contains(&Event::Fact { flags: FACT_DURABLE, scope: EMPTY, terms: vec![k, v1] }),
+        "the removal still names the old value"
+    );
+    assert_eq!(freed(&events), vec![], "which stays resolvable through this drain");
+    assert_eq!(h.e.interner.get(v1), Some(&Term::Str("v1".into())));
+    assert_eq!(freed(&h.e.drain()), vec![v1]);
+    assert_eq!(h.e.interner.get(v1), None);
+    assert_eq!((h.e.interner.refcount(k), h.e.interner.refcount(v2)), (1, 1));
+    assert_eq!(h.e.interner.len(), base + 2);
+    assert_eq!(h.lit("v3"), v1, "freed ids are reused");
+    assert_eq!(freed(&h.e.drain()), vec![], "a fresh id is not freed by the drain that first sees it");
+    assert_eq!(freed(&h.e.drain()), vec![v1], "but by the next one when nothing used it");
+}
+
+#[test]
+fn free_events_are_reported_at_every_fact_event_level() {
+    let mut h = Harness::new();
+    h.e.set_fact_events(FACT_EVENTS_NONE);
+    h.assert(ROOT_OWNER, &["k", "v"]);
+    let (k, v) = (h.lit("k"), h.lit("v"));
+    h.e.drain();
+    h.drop(&["k", "v"]);
+    h.e.drain();
+    assert_eq!(h.e.drain(), vec![EV_FREE, 2, k, v]);
+}
+
+#[test]
+fn registered_queries_keep_their_literals_alive() {
+    let mut h = Harness::new();
+    let q = h.register(&[&["todo", "$id", "done", "yes"]]);
+    let (todo, done, yes) = (h.lit("todo"), h.lit("done"), h.lit("yes"));
+    h.e.drain();
+    assert_eq!(freed(&h.e.drain()), vec![], "literals of a live query are held");
+    assert_eq!((h.e.interner.refcount(todo), h.e.interner.refcount(done)), (1, 1));
+    let again = h.register(&[&["todo", "$id", "done", "yes"]]);
+    assert_eq!(again, q);
+    assert_eq!(h.e.interner.refcount(todo), 1, "sharing a query does not count twice");
+    assert!(!h.e.release(q));
+    h.e.drain();
+    assert_eq!(freed(&h.e.drain()), vec![], "one registration remains");
+    assert!(h.e.release(q));
+    assert_eq!((h.e.interner.refcount(todo), h.e.interner.refcount(done)), (0, 0));
+    h.e.drain();
+    assert_eq!(freed(&h.e.drain()), vec![todo, done, yes]);
+}
+
+#[test]
+fn scope_changes_move_the_reference() {
+    let mut h = Harness::new();
+    h.assert_scoped(ROOT_OWNER, "p1", &["issue", "1", "title", "a"]);
+    let (p1, p2) = (h.lit("p1"), h.lit("p2"));
+    let terms = h.terms(&["issue", "1", "title", "a"]);
+    let mut ops = vec![OP_SET_SCOPE, p2, 4];
+    ops.extend(&terms);
+    h.e.apply(&ops).unwrap();
+    assert_eq!((h.e.interner.refcount(p1), h.e.interner.refcount(p2)), (0, 1));
+    h.e.drain();
+    assert_eq!(freed(&h.e.drain()), vec![p1]);
+    assert_eq!(h.e.scope_of(&terms), Some(p2));
+    h.drop(&["issue", "1", "title", "a"]);
+    assert_eq!(h.e.interner.refcount(p2), 0);
+    assert_eq!(h.e.interner.refcount(EMPTY), 1, "the global scope is pinned");
+}
+
+#[test]
+fn clear_releases_every_term() {
+    let mut h = Harness::new();
+    let base = h.e.interner.len();
+    h.assert_scoped(ROOT_OWNER, "p1", &["issue", "1", "title", "a"]);
+    h.assert(ROOT_OWNER, &["issue", "2", "title", "b"]);
+    let q = h.register(&[&["issue", "$id", "title", "$t"]]);
+    h.e.drain();
+    let mut expected = h.terms(&["p1", "1", "a", "2", "b"]);
+    expected.sort_unstable();
+    h.e.apply(&[OP_CLEAR]).unwrap();
+    h.e.drain();
+    let mut gone = freed(&h.e.drain());
+    gone.sort_unstable();
+    assert_eq!(gone, expected, "everything but the query's literals and the pinned terms");
+    assert_eq!(h.e.interner.len(), base + 2);
+    assert!(h.e.release(q));
+    h.e.drain();
+    assert_eq!(freed(&h.e.drain()).len(), 2);
+    assert_eq!(h.e.interner.len(), base);
+}
+
+#[test]
+fn churning_values_do_not_grow_the_term_table() {
+    let mut e = Engine::new();
+    e.set_fact_events(FACT_EVENTS_NONE);
+    let (pos, y) = (e.interner.intern_str("pos"), e.interner.intern_str("y"));
+    e.register(vec![vec![pos, y, VAR_BASE]]);
+    let mut peak = 0;
+    for i in 0..10_000 {
+        let value = e.interner.intern_num(f64::from(i) * 0.5);
+        e.apply(&[OP_REPLACE, ROOT_OWNER, NONE, 3, pos, y, value]).unwrap();
+        e.drain();
+        peak = peak.max(e.interner.len());
+    }
+    assert!(
+        peak <= Interner::new().len() + 5,
+        "at most the live value and two drains of garbage: {peak}"
+    );
+    assert!(
+        e.interner.capacity() <= Interner::new().len() + 5,
+        "ids are recycled: {}",
+        e.interner.capacity()
+    );
+    assert_eq!(e.rows(0)[1], 1);
 }

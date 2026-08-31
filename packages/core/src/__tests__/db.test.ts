@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { FactDB, $, _, matchPattern, type Fact, type FactChange, type FactChangeInfo } from "../db";
-import { transaction } from "../reactive";
+import { autorun, transaction } from "../reactive";
 
 describe("matchPattern", () => {
   it("matches exact facts", () => {
@@ -340,6 +340,48 @@ describe("FactDB", () => {
       db.clear();
       db.insert("issue", "i1", "status", "todo");
       expect(db.scopeOf("issue", "i1", "status", "todo")).toBe("");
+    });
+
+    it("a scope survives flushes that free unused terms before its first fact", () => {
+      db.withScope("fresh-scope", () => {
+        db.drop("nothing", 1);
+        db.drop("nothing", 2);
+        db.drop("nothing", 3);
+        db.insert("issue", "i1", "title", "A");
+      });
+      expect(db.scopeOf("issue", "i1", "title", "A")).toBe("fresh-scope");
+    });
+  });
+
+  describe("term lifetimes", () => {
+    it("re-interns an idle index's literals before reading it again", () => {
+      const idx = db.index(["rare", $.v]);
+      autorun(() => idx.get())();
+      const rare = db.engine.id("rare");
+      db.drop("nothing", 1);
+      db.drop("nothing", 2);
+      db.drop("nothing", 3);
+      expect(() => db.engine.term(rare)).toThrow(/unknown term id/);
+      db.insert("rare", 1);
+      expect(idx.get()).toEqual([{ v: 1 }]);
+      const seen: number[] = [];
+      const stop = autorun(() => seen.push(idx.get().length));
+      db.insert("rare", 2);
+      expect(seen).toEqual([1, 2]);
+      stop();
+    });
+
+    it("frees the terms of dropped facts and reuses their ids", () => {
+      db.insert("k", "old");
+      const old = db.engine.id("old");
+      db.replace("k", "new");
+      db.drop("nothing", 1);
+      expect(() => db.engine.term(old)).toThrow(/unknown term id/);
+      expect(db.engine.termCount).toBe(3 + ["k", "new", "nothing", 1].length);
+      db.insert("k2", "other");
+      expect(db.engine.id("k2")).toBe(old);
+      expect(db.query(["k", $.v])).toEqual([{ v: "new" }]);
+      expect(db.query(["k2", $.v])).toEqual([{ v: "other" }]);
     });
   });
 

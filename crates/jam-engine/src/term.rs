@@ -1,6 +1,10 @@
 //! Terms are the atoms facts are made of. Every distinct term gets one dense
 //! `TermId`, so facts, index keys and query rows are plain `u32` slices and the
 //! JS side can mirror the table and never ship strings across the boundary twice.
+//!
+//! Ids are reference counted by the facts and registered queries that use them.
+//! An id that nothing holds is freed by the second `collect` after it was last
+//! used, so it stays resolvable through the drain that reports its last fact.
 
 use hashbrown::HashMap;
 
@@ -18,6 +22,12 @@ pub const WILD: u32 = u32::MAX - 1;
 /// Passed as a scope to mean "inherit".
 pub const NONE: u32 = u32::MAX;
 
+/// The id is in `dead`: it reached zero references since the last `collect`.
+const DEAD: u32 = 1 << 31;
+/// The id is in `condemned`: it was unreferenced at the last `collect`.
+const CONDEMNED: u32 = 1 << 30;
+const COUNT: u32 = CONDEMNED - 1;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Term {
     Str(Box<str>),
@@ -27,40 +37,51 @@ pub enum Term {
 
 #[derive(Default)]
 pub struct Interner {
-    terms: Vec<Term>,
+    terms: Vec<Option<Term>>,
+    /// Reference count in the low bits plus the `DEAD` and `CONDEMNED` flags.
+    refs: Vec<u32>,
     strings: HashMap<Box<str>, TermId>,
     numbers: HashMap<u64, TermId>,
+    free: Vec<TermId>,
+    dead: Vec<TermId>,
+    condemned: Vec<TermId>,
 }
 
 impl Interner {
     pub fn new() -> Self {
         let mut interner = Interner::default();
-        interner.terms.push(Term::Bool(false));
-        interner.terms.push(Term::Bool(true));
-        let empty = interner.intern_str("");
+        interner.pin(Term::Bool(false));
+        interner.pin(Term::Bool(true));
+        let empty = interner.pin(Term::Str("".into()));
+        interner.strings.insert("".into(), empty);
         debug_assert_eq!(empty, EMPTY);
         interner
+    }
+
+    /// Add a term that is never freed.
+    fn pin(&mut self, term: Term) -> TermId {
+        let id = self.terms.len() as TermId;
+        self.terms.push(Some(term));
+        self.refs.push(1);
+        id
     }
 
     pub fn intern_str(&mut self, s: &str) -> TermId {
         if let Some(&id) = self.strings.get(s) {
             return id;
         }
-        let id = self.next_id();
         let boxed: Box<str> = s.into();
-        self.strings.insert(boxed.clone(), id);
-        self.terms.push(Term::Str(boxed));
+        let id = self.add(Term::Str(boxed.clone()));
+        self.strings.insert(boxed, id);
         id
     }
 
     pub fn intern_num(&mut self, n: f64) -> TermId {
-        let bits = if n == 0.0 { 0 } else { n.to_bits() };
-        if let Some(&id) = self.numbers.get(&bits) {
+        if let Some(&id) = self.numbers.get(&num_key(n)) {
             return id;
         }
-        let id = self.next_id();
-        self.numbers.insert(bits, id);
-        self.terms.push(Term::Num(n));
+        let id = self.add(Term::Num(n));
+        self.numbers.insert(num_key(n), id);
         id
     }
 
@@ -76,27 +97,107 @@ impl Interner {
         }
     }
 
+    /// A new term starts unreferenced, so it is collected unless something holds it.
+    fn add(&mut self, term: Term) -> TermId {
+        let id = match self.free.pop() {
+            Some(id) => {
+                self.terms[id as usize] = Some(term);
+                id
+            }
+            None => {
+                let id = self.terms.len() as u32;
+                assert!(id < VAR_BASE, "term table exhausted");
+                self.terms.push(Some(term));
+                self.refs.push(0);
+                id
+            }
+        };
+        self.refs[id as usize] = DEAD;
+        self.dead.push(id);
+        id
+    }
+
+    #[inline]
+    pub fn retain(&mut self, id: TermId) {
+        self.refs[id as usize] += 1;
+    }
+
+    #[inline]
+    pub fn release(&mut self, id: TermId) {
+        let refs = &mut self.refs[id as usize];
+        debug_assert!(*refs & COUNT > 0, "term {id} released below zero");
+        *refs -= 1;
+        if *refs & (COUNT | DEAD) == 0 {
+            *refs |= DEAD;
+            self.dead.push(id);
+        }
+    }
+
+    /// Free the ids that were unreferenced at the previous `collect` and still are, and
+    /// line up the ids that reached zero since for the next one. Returns what was freed.
+    pub fn collect(&mut self) -> Vec<TermId> {
+        let mut freed = Vec::new();
+        for id in std::mem::take(&mut self.condemned) {
+            let refs = &mut self.refs[id as usize];
+            *refs &= !CONDEMNED;
+            if *refs != 0 {
+                continue;
+            }
+            match self.terms[id as usize].take() {
+                Some(Term::Str(s)) => {
+                    self.strings.remove(&s);
+                }
+                Some(Term::Num(n)) => {
+                    self.numbers.remove(&num_key(n));
+                }
+                _ => {}
+            }
+            self.free.push(id);
+            freed.push(id);
+        }
+        self.condemned = std::mem::take(&mut self.dead);
+        for &id in &self.condemned {
+            self.refs[id as usize] = (self.refs[id as usize] & !DEAD) | CONDEMNED;
+        }
+        freed
+    }
+
     pub fn get(&self, id: TermId) -> Option<&Term> {
-        self.terms.get(id as usize)
+        self.terms.get(id as usize).and_then(Option::as_ref)
+    }
+
+    /// Whether `id` names a term; only the reference word is touched, not the term itself.
+    #[inline]
+    pub fn is_live(&self, id: TermId) -> bool {
+        self.refs.get(id as usize).is_some_and(|&refs| refs != 0)
     }
 
     pub fn resolve(&self, id: TermId) -> &Term {
-        &self.terms[id as usize]
+        self.terms[id as usize].as_ref().expect("live term")
     }
 
+    pub fn refcount(&self, id: TermId) -> u32 {
+        self.refs[id as usize] & COUNT
+    }
+
+    /// Live terms.
     pub fn len(&self) -> usize {
-        self.terms.len()
+        self.terms.len() - self.free.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.terms.is_empty()
+        self.len() == 0
     }
 
-    fn next_id(&self) -> TermId {
-        let id = self.terms.len() as u32;
-        assert!(id < VAR_BASE, "term table exhausted");
-        id
+    /// Ids handed out so far, including freed ones awaiting reuse.
+    pub fn capacity(&self) -> usize {
+        self.terms.len()
     }
+}
+
+/// Hash key for a number: both zeros share one term, and NaN is one term.
+fn num_key(n: f64) -> u64 {
+    if n == 0.0 { 0 } else { n.to_bits() }
 }
 
 impl std::fmt::Display for Term {
@@ -153,8 +254,89 @@ mod tests {
         assert_eq!(i.get(3), None);
         let n = i.intern_num(-2.5);
         assert_eq!(i.get(n), Some(&Term::Num(-2.5)));
-        assert_eq!(i.len(), 4);
+        assert_eq!((i.len(), i.capacity()), (4, 4));
         assert!(Interner::default().is_empty(), "the bare default has no preinterned terms");
+    }
+
+    #[test]
+    fn unreferenced_terms_are_freed_by_the_second_collect() {
+        let mut i = Interner::new();
+        let a = i.intern_str("a");
+        let n = i.intern_num(7.0);
+        assert_eq!(i.collect(), vec![], "a fresh term survives the collect that first sees it");
+        assert_eq!((i.get(a).is_some(), i.get(n).is_some()), (true, true));
+        assert!(i.is_live(a) && i.is_live(n), "a condemned term is still live");
+        assert_eq!(i.collect(), vec![a, n]);
+        assert_eq!((i.get(a), i.get(n)), (None, None));
+        assert!(!i.is_live(a) && !i.is_live(n) && !i.is_live(99));
+        assert!(i.is_live(EMPTY));
+        assert_eq!((i.len(), i.capacity()), (3, 5));
+        assert_eq!(i.collect(), vec![], "nothing is freed twice");
+        let b = i.intern_str("b");
+        assert_eq!(b, n, "freed ids are reused, most recent first");
+        assert_eq!(i.intern_str("a"), a, "and the old string gets a fresh id");
+        assert_eq!(i.capacity(), 5);
+    }
+
+    #[test]
+    fn retained_terms_survive_until_released() {
+        let mut i = Interner::new();
+        let a = i.intern_str("a");
+        i.retain(a);
+        i.retain(a);
+        assert_eq!(i.refcount(a), 2);
+        i.collect();
+        i.collect();
+        assert_eq!(i.get(a), Some(&Term::Str("a".into())));
+        i.release(a);
+        i.collect();
+        i.collect();
+        assert!(i.get(a).is_some(), "one reference remains");
+        i.release(a);
+        assert_eq!(i.refcount(a), 0);
+        assert_eq!(i.collect(), vec![], "released this period: reported next time");
+        assert_eq!(i.collect(), vec![a]);
+    }
+
+    #[test]
+    fn a_term_released_and_reused_in_the_same_period_is_not_freed_early() {
+        let mut i = Interner::new();
+        let a = i.intern_str("a");
+        i.retain(a);
+        i.collect();
+        i.release(a);
+        i.collect();
+        assert!(i.get(a).is_some(), "condemned but still resolvable for this drain");
+        i.retain(a);
+        i.release(a);
+        assert_eq!(i.collect(), vec![], "it reached zero again this period, so it lives on");
+        assert_eq!(i.collect(), vec![a]);
+    }
+
+    #[test]
+    fn a_condemned_term_that_gets_referenced_is_spared() {
+        let mut i = Interner::new();
+        let a = i.intern_str("a");
+        i.collect();
+        i.retain(a);
+        assert_eq!(i.collect(), vec![]);
+        assert_eq!(i.collect(), vec![]);
+        assert_eq!(i.refcount(a), 1);
+        i.release(a);
+        i.collect();
+        assert_eq!(i.collect(), vec![a]);
+    }
+
+    #[test]
+    fn pinned_terms_are_never_collected() {
+        let mut i = Interner::new();
+        i.retain(EMPTY);
+        i.release(EMPTY);
+        i.collect();
+        i.collect();
+        assert_eq!(i.intern_str(""), EMPTY);
+        assert_eq!(i.get(TRUE), Some(&Term::Bool(true)));
+        assert_eq!(i.len(), 3);
     }
 
     #[test]

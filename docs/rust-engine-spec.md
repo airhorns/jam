@@ -155,6 +155,20 @@ ids; `0 = false`, `1 = true`, `2 = ""` (the global scope). Two values above
 mirrors the table (`id → term`, `term → id`) so a term is converted exactly
 once in each direction; ids are the only thing that crosses the boundary.
 
+Ids are reference counted by the facts (each term occurrence plus the scope)
+and registered queries (each literal clause position) that use them, so a
+store that churns through values does not grow its term table without bound.
+An id nobody holds is not freed immediately: `drain` collects in two phases,
+so an id that reached zero is freed by the second drain after its last use and
+stays resolvable through the drain that reports its last fact. Freed ids are
+reported as the first event of that drain (`FREE n id…`) and go on a free list
+for reuse. The JS mirror forgets a freed id before it processes the rest of the
+drain, because a listener handling a later event may intern a term and be handed
+that id back. The rule for callers: a term id is stable while a fact or a
+registered query uses the term; otherwise it is only good until the next flush,
+so interned ids are consumed right away rather than cached. `apply` rejects an
+op naming an id that is not live (`unknown term id`) instead of panicking.
+
 ### 4.2 Facts and indexes (`store.rs`)
 
 A fact is `terms: SmallVec<[TermId; 4]>`, `scope: TermId`, `owners:
@@ -281,6 +295,7 @@ The JS side packs a transaction into one `Uint32Array` of ops:
 `Engine::apply(ops)` executes them in order, propagating every fact change,
 then `drain()` returns one `Uint32Array` of events:
 
+    FREE  n id…                     (term ids freed since the previous drain; always first)
     QUERY qid nvars nrows (rowid flag [values… order_hi order_lo])…
     FACT  flags scope len t…        (flags: added/removed, durable, replace)
 

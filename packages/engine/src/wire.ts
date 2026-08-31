@@ -9,6 +9,7 @@ export const OP_CLEAR = 6;
 
 export const EV_FACT = 1;
 export const EV_QUERY = 2;
+export const EV_FREE = 3;
 
 export const FACT_ADDED = 1;
 export const FACT_DURABLE = 2;

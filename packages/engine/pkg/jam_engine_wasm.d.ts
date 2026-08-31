@@ -22,6 +22,13 @@ export class JamEngine {
     rows(id: number): Uint32Array;
     scope_of(terms: Uint32Array): number;
     set_fact_events(level: number): void;
+    /**
+     * Ids handed out so far, including freed ones awaiting reuse.
+     */
+    term_capacity(): number;
+    /**
+     * Live terms.
+     */
     term_count(): number;
     /**
      * 0 string, 1 number, 2 boolean, 3 unknown id.
@@ -54,6 +61,7 @@ export interface InitOutput {
     readonly jamengine_rows: (a: number, b: number, c: number) => void;
     readonly jamengine_scope_of: (a: number, b: number, c: number) => number;
     readonly jamengine_set_fact_events: (a: number, b: number) => void;
+    readonly jamengine_term_capacity: (a: number) => number;
     readonly jamengine_term_count: (a: number) => number;
     readonly jamengine_term_kind: (a: number, b: number) => number;
     readonly jamengine_term_num: (a: number, b: number) => number;

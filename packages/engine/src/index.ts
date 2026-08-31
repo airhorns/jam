@@ -1,10 +1,17 @@
 // @jam/engine — the typed surface over the wasm fact engine. Terms are interned
 // once here and only ids cross the boundary; ops are batched into one packed
 // array per flush and the engine answers with one packed array of events.
+//
+// A term id is stable while a fact or registered query uses the term. Otherwise
+// it is only good until the next flush: the engine frees unused terms and
+// reports them, and the mirror here forgets them so a reused id never resolves
+// to a stale value. Interned ids should therefore be consumed right away, not
+// cached across flushes.
 
 import { JamEngine } from "./wasm";
 import {
   EV_FACT,
+  EV_FREE,
   EV_QUERY,
   FACT_ADDED,
   FACT_DURABLE,
@@ -141,7 +148,7 @@ export class Engine {
     [true, 1],
     ["", GLOBAL_SCOPE_ID],
   ]);
-  private terms: Term[] = [false, true, ""];
+  private terms: (Term | undefined)[] = [false, true, ""];
   private ops = new Uint32Array(4096);
   private opLen = 0;
   private readonly handles = new Map<number, { handle: QueryHandle; refs: number }>();
@@ -176,6 +183,13 @@ export class Engine {
       default:
         throw new Error(`unknown term id ${id}`);
     }
+  }
+
+  private forget(id: number): void {
+    const term = this.terms[id];
+    if (term === undefined) return;
+    this.terms[id] = undefined;
+    this.ids.delete(term);
   }
 
   termIds(terms: readonly Term[]): number[] {
@@ -341,6 +355,11 @@ export class Engine {
           handle.version++;
           changed.push(handle);
         }
+      } else if (code === EV_FREE) {
+        const n = events[i + 1];
+        i += 2;
+        for (let k = 0; k < n; k++) this.forget(events[i + k]);
+        i += n;
       } else {
         throw new Error(`bad event code ${code} at ${i}`);
       }
@@ -459,6 +478,16 @@ export class Engine {
   get factCount(): number {
     this.applyPending();
     return this.raw.fact_count();
+  }
+
+  /** Terms some fact or query uses, plus any interned since the last two flushes. */
+  get termCount(): number {
+    return this.raw.term_count();
+  }
+
+  /** Term ids handed out so far, including freed ones awaiting reuse. */
+  get termCapacity(): number {
+    return this.raw.term_capacity();
   }
 
   get indexCount(): number {

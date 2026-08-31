@@ -88,11 +88,13 @@ class Index implements Dependency, IndexHandle {
   handle: QueryHandle | null = null;
   private version = -1;
   private cached: Bindings[] = [];
+  /** Valid while `handle` is registered; literal ids are re-interned on each attach. */
+  private compiled: CompiledPatterns | null = null;
 
   constructor(
     private readonly db: FactDB,
     readonly key: string,
-    readonly compiled: CompiledPatterns,
+    private readonly patterns: Pattern[],
   ) {}
 
   get(): Bindings[] {
@@ -100,7 +102,7 @@ class Index implements Dependency, IndexHandle {
       recordRead(this);
       this.ensureHandle();
     }
-    if (!this.handle) return this.db.evaluate(this.compiled);
+    if (!this.handle || !this.compiled) return this.db.evaluate(this.db.compile(this.patterns));
     this.db.drain();
     if (this.version !== this.handle.version) {
       this.version = this.handle.version;
@@ -111,6 +113,7 @@ class Index implements Dependency, IndexHandle {
 
   private ensureHandle(): void {
     if (this.handle) return;
+    this.compiled = this.db.compile(this.patterns);
     this.handle = this.db.attach(this, this.compiled.clauses);
     this.version = -1;
   }
@@ -119,6 +122,7 @@ class Index implements Dependency, IndexHandle {
     if (!this.handle) return;
     this.db.detach(this, this.handle);
     this.handle = null;
+    this.compiled = null;
     this.version = -1;
     this.cached = [];
   }
@@ -139,7 +143,8 @@ export class FactDB {
   private readonly refOwners = new Map<string, Set<number>>();
   private readonly ownerCounters = new Map<string, number>();
   private ownerStack: number[] = [ROOT_OWNER];
-  private scopeStack: number[] = [NONE];
+  /** Scope names, interned when a write happens so a flush in between cannot free the id. */
+  private scopeStack: (string | null)[] = [null];
 
   private readonly indexes = new Map<string, Index>();
   private readonly unregisterDrainer: () => void;
@@ -238,12 +243,13 @@ export class FactDB {
   // --- scopes ---
 
   private currentScope(): number {
-    return this.scopeStack[this.scopeStack.length - 1];
+    const scope = this.scopeStack[this.scopeStack.length - 1];
+    return scope === null ? NONE : this.engine.id(scope);
   }
 
   /** Facts written inside `fn` belong to the sync partition `scope`. */
   withScope<T>(scope: string, fn: () => T): T {
-    this.scopeStack.push(this.engine.id(scope));
+    this.scopeStack.push(scope);
     try {
       return fn();
     } finally {
@@ -295,7 +301,7 @@ export class FactDB {
     this.refOwners.clear();
     this.ownerRefs.clear();
     this.ownerStack = [ROOT_OWNER];
-    this.scopeStack = [NONE];
+    this.scopeStack = [null];
     this.engine.clear();
     this.changed();
   }
@@ -335,7 +341,7 @@ export class FactDB {
     const key = patternsKey(patterns);
     let index = this.indexes.get(key);
     if (!index) {
-      index = new Index(this, key, this.compile(patterns));
+      index = new Index(this, key, patterns);
       this.indexes.set(key, index);
     }
     return index;
@@ -367,7 +373,8 @@ export class FactDB {
     };
   }
 
-  private compile(patterns: Pattern[]): CompiledPatterns {
+  /** @internal literal ids are only good until the next flush unless a registered query holds them */
+  compile(patterns: Pattern[]): CompiledPatterns {
     const names: string[] = [];
     const clauses = patterns.map((pattern) =>
       pattern.map((t) => {
