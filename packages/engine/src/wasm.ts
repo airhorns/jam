@@ -5,13 +5,14 @@
 import init, { JamEngine } from "../pkg/jam_engine_wasm.js";
 
 const wasmUrl = new URL("../pkg/jam_engine_wasm_bg.wasm", import.meta.url);
-const isNode = typeof process !== "undefined" && typeof process.versions?.node === "string";
+const nodeProcess = (globalThis as { process?: { versions?: { node?: string } } }).process;
+const isNode = typeof nodeProcess?.versions?.node === "string";
 
 if (isNode) {
   const fsModule = "node:fs/promises";
   const urlModule = "node:url";
-  const { readFile } = (await import(/* @vite-ignore */ fsModule)) as typeof import("node:fs/promises");
-  const { fileURLToPath } = (await import(/* @vite-ignore */ urlModule)) as typeof import("node:url");
+  const { readFile } = (await import(/* @vite-ignore */ fsModule)) as { readFile(path: string): Promise<Uint8Array> };
+  const { fileURLToPath } = (await import(/* @vite-ignore */ urlModule)) as { fileURLToPath(url: URL): string };
   // Vitest's DOM environments serve modules from `http://localhost/@fs/<absolute path>`.
   const path = wasmUrl.protocol === "file:" ? fileURLToPath(wasmUrl) : decodeURIComponent(wasmUrl.pathname.replace(/^\/@fs/, ""));
   await init({ module_or_path: await readFile(path) });

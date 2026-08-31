@@ -181,8 +181,10 @@ function SyncBadge() {
   );
   if (error) return badge(`Sync error: ${String(error)}`, "red");
   if (status === "standalone") return badge("Local database · no sync configured");
-  if (status === "live") return badge(pending > 0 ? `Syncing ${pending} change${pending === 1 ? "" : "s"}…` : "Synced with Electric", "green");
-  if (status === "syncing") return badge("Loading from Electric…", "blue");
+  if (status === "live") return badge(pending > 0 ? `Syncing ${pending} change${pending === 1 ? "" : "s"}…` : "Synced", "green");
+  if (status === "syncing") return badge("Loading from the server…", "blue");
+  if (status === "connecting") return badge("Connecting…", "blue");
+  if (status === "offline") return badge(pending > 0 ? `Offline · ${pending} change${pending === 1 ? "" : "s"} waiting` : "Offline", "orange");
   return null;
 }
 

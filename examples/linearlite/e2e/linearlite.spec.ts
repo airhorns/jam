@@ -1,5 +1,6 @@
-// Standalone mode: PGlite seeds itself from `?seed=` and core's sync() keeps
-// jam_facts in the browser. Assertions read facts, so they hold in Electric mode too.
+// Standalone mode: the page seeds its own IndexedDB database from `?seed=` and
+// core's sync() keeps every durable fact in it. Assertions read facts, so they
+// hold in synced mode too.
 //
 // Ceremonies are performed the way an agent performs them: by reading the
 // accessibility outline from `describeUI()` and pressing or driving what it
@@ -7,9 +8,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { describe, drive, driveNode, find, findAll, flatten, pressNode } from "@jam/ui/playwright";
-import { byTitle, expectCount, factKey, flushToDisk, issuesInMemory, newestFirst, query, sql, watchErrors } from "./helpers";
-
-test.skip(!!process.env.VITE_SYNC_URL, "standalone-only: the database is seeded by the page");
+import { byTitle, expectCount, factKey, flushToDisk, issuesInMemory, newestFirst, query, storedFacts, storedScope, watchErrors } from "./helpers";
 
 const SEED = 100;
 const PROJECTS = ["web", "mobile", "api", "design"];
@@ -147,9 +146,7 @@ test.describe("LinearLite", () => {
 
     await page.getByTestId("issue-title").fill("Renamed from the e2e suite");
     await page.getByTestId("issue-description").fill("A new description.");
-    await expect
-      .poll(async () => (await sql<{ scope: string }>(page, `SELECT scope FROM jam_facts WHERE key = $1`, [factKey(["issue", id, "title", "Renamed from the e2e suite"])]))[0]?.scope)
-      .toBe(`project:${WEB}`);
+    await expect.poll(() => storedScope(page, factKey(["issue", id, "title", "Renamed from the e2e suite"]))).toBe(`project:${WEB}`);
     await flushToDisk(page);
 
     await page.reload();
@@ -176,9 +173,8 @@ test.describe("LinearLite", () => {
     await find(page, { role: "button", name: "priority: Urgent", within: first.id });
     await expect(row.locator("svg[data-priority='urgent']")).toBeVisible();
 
-    await expect
-      .poll(async () => (await sql<{ key: string }>(page, `SELECT key FROM jam_facts WHERE key IN ($1, $2) ORDER BY key`, [factKey(["issue", id, "status", "done"]), factKey(["issue", id, "priority", "urgent"])])).length)
-      .toBe(2);
+    const keys = new Set([factKey(["issue", id, "status", "done"]), factKey(["issue", id, "priority", "urgent"])]);
+    await expect.poll(async () => (await storedFacts(page)).filter(([key]) => keys.has(key)).length).toBe(2);
   });
 
   test("creates an issue from the modal and shows it at the top of the list", async ({ page }) => {
@@ -234,7 +230,7 @@ test.describe("LinearLite", () => {
     await expect(page).toHaveURL(`/${WEB}`);
     await expectCount(page, PER_PROJECT - 1, PER_PROJECT - 1);
     await expect(page.locator(`[data-testid='issue-row'][data-issue-id='${id}']`)).toHaveCount(0);
-    await expect.poll(async () => (await sql(page, `SELECT 1 FROM jam_facts WHERE key LIKE $1`, [`["issue","${id}",%`])).length).toBe(0);
+    await expect.poll(async () => (await storedFacts(page)).filter(([key]) => key.startsWith(`["issue","${id}",`)).length).toBe(0);
   });
 
   test("adds a comment", async ({ page }) => {
@@ -252,9 +248,7 @@ test.describe("LinearLite", () => {
     await expect(page.getByTestId("comment-input")).toHaveValue("");
     const mine = await query(page, ["comment", "?id", "issue", id!], ["comment", "?id", "username", "you"]);
     expect(mine).toHaveLength(1);
-    await expect
-      .poll(async () => (await sql<{ scope: string }>(page, `SELECT scope FROM jam_facts WHERE key = $1`, [factKey(["comment", mine[0].id, "body", "Looks good to me"])]))[0]?.scope)
-      .toBe(`project:${WEB}`);
+    await expect.poll(() => storedScope(page, factKey(["comment", mine[0].id, "body", "Looks good to me"]))).toBe(`project:${WEB}`);
   });
 
   test("board shows every status column and drag-and-drop moves an issue", async ({ page }) => {
@@ -289,30 +283,6 @@ test.describe("LinearLite", () => {
     await find(page, { role: "link", name: title, within: columns[3]!.id });
     expect(await findAll(page, { role: "link", name: title, within: backlog.id })).toEqual([]);
     expect(await findAll(page, { role: "menu" })).toEqual([]);
-  });
-
-  test("a write straight into jam_facts shows up in the UI", async ({ page }) => {
-    await open(page);
-    const row = page.getByTestId("issue-row").first();
-    const id = await row.getAttribute("data-issue-id");
-    const [{ title }] = await query(page, ["issue", id!, "title", "?title"]);
-
-    await sql(page, `DELETE FROM jam_facts WHERE key = $1`, [factKey(["issue", id, "title", title])]);
-    await sql(page, `INSERT INTO jam_facts (key, scope) VALUES ($1, $2)`, [factKey(["issue", id, "title", "Changed behind jam's back"]), `project:${WEB}`]);
-    await expect(row.getByTestId("issue-row-title")).toHaveText("Changed behind jam's back");
-
-    const remote = "00000000-0000-4000-8000-000000000001";
-    const facts = { project: WEB, title: "Arrived from elsewhere", description: "", priority: "low", status: "todo", created: "2026-08-01T00:00:00.000Z", modified: "2026-08-01T00:00:00.000Z", kanbanorder: "a0", username: "remote" };
-    await sql(page, `INSERT INTO jam_facts (key, scope) SELECT key, $2 FROM json_to_recordset($1) AS t(key TEXT)`, [
-      JSON.stringify(Object.entries(facts).map(([col, val]) => ({ key: factKey(["issue", remote, col, val]) }))),
-      `project:${WEB}`,
-    ]);
-    await expect(page.getByTestId("issue-row-title").first()).toHaveText("Arrived from elsewhere");
-    await expectCount(page, PER_PROJECT + 1, PER_PROJECT + 1);
-
-    await sql(page, `INSERT INTO jam_facts (key, scope) VALUES ($1, $2)`, [factKey(["issue", "elsewhere", "project", "mobile"]), "project:mobile"]);
-    await page.waitForTimeout(300);
-    expect(await issuesInMemory(page, "mobile")).toEqual([]);
   });
 
   test("keeps only a window of rows in the DOM while scrolling a long list", async ({ page }) => {

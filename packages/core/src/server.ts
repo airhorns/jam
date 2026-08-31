@@ -15,6 +15,9 @@ import { compileFilter, parseChanges, parseFilter, type ClientMessage, type Comp
 
 export type { SyncChange, SyncOp, FactFilter, ClientMessage, ServerMessage } from "./filter";
 export { compileFilter, parseChanges, parseFilter } from "./filter";
+export { memoryStorage } from "@jam/engine/storage";
+export type { FactStorage, StoredFact, LogEntry } from "@jam/engine/storage";
+export { sqliteStorage } from "@jam/engine/storage/sqlite";
 
 /** The subset of `ws`'s WebSocket the server uses. */
 export interface SyncSocket {

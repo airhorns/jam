@@ -19,6 +19,9 @@ export type { PersistOptions, PersistHandle } from "./persist";
 export { sync, compileFilter, SYNC_STATUS_FACT } from "./sync";
 export type { SyncOptions, SyncHandle, SyncStatus, SyncWebSocket, FactFilter, FactSubscription, CompiledFilter, SyncChange, SyncOp } from "./sync";
 export { applyFacts, isApplying } from "./applying";
+export { memoryStorage } from "@jam/engine/storage";
+export type { FactStorage, StoredFact, LogEntry, StorageWrite } from "@jam/engine/storage";
+export { indexedDBStorage } from "@jam/engine/storage/indexeddb";
 export { createProgramAPI, listPrograms, loadProgramSource, program, registerProgram, removeProgram } from "./programs";
 export type { ProgramAPI, ProgramRunner } from "./programs";
 export {
