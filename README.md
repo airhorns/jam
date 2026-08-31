@@ -347,15 +347,16 @@ import { WebSocketServer } from "ws";
 
 const server = await createSyncServer({
   storage: sqliteStorage("./data/facts.db"),
-  allow: (scope, user) => scope === "" || scope === `user:${user.id}`,   // optional write authorization
+  allow: ({ scope }, user) => scope === "" || scope === `user:${user.id}`,   // optional write authorization, per change
+  allowRead: (filter, user) => filter.scope === "" || filter.scope === `user:${user.id}`,   // optional read authorization, per subscription
 });
 new WebSocketServer({ port: 3001 }).on("connection", (socket, request) => server.handle(socket, authenticate(request)));
 await server.apply([{ op: "upsert", terms: ["project", "p1", "name", "Web"], scope: "" }]);   // seeds, admin tools
 ```
 
-`replace` on the server removes every other fact sharing all but the last term, so two clients replacing the same attribute converge on the last write. A batch touching a scope `allow` refuses is rejected whole and surfaces on the client as `["sync", "error", message]`.
+`replace` on the server removes every other fact sharing all but the last term, so two clients replacing the same attribute converge on the last write. A push with a change `allow` refuses is rejected whole and surfaces on the client as `["sync", "error", message]`. A subscription `allowRead` refuses is denied: it becomes ready holding no facts and reports why as `["sync", "shape", id, "error", message]`.
 
-The handle publishes its state as facts: `["sync", "status", "standalone" | "connecting" | "syncing" | "live" | "offline"]`, `["sync", "pending", n]` unpushed changes, `["sync", "shape", id, "ready", bool]` per subscription (`compileFilter(filter).id`), and `["sync", "error", message]` when the server rejects a batch. `handle.flush()` waits for every queued write to be acknowledged; `handle.dispose()` stops.
+The handle publishes its state as facts: `["sync", "status", "standalone" | "connecting" | "syncing" | "live" | "offline"]`, `["sync", "pending", n]` unpushed changes, `["sync", "shape", id, "ready", bool]` per subscription (`compileFilter(filter).id`) plus `["sync", "shape", id, "error", message]` when the server denied it, and `["sync", "error", message]` when the server rejects a batch. `handle.flush()` waits for every queued write to be acknowledged; `handle.dispose()` stops.
 
 Browser tabs that share a `name` share one connection. The tabs elect a leader through a Web Lock; it holds the WebSocket, subscribes to the union of every tab's filters, mirrors what the server sends into IndexedDB and pushes the shared outbox, broadcasting what it applied over a `BroadcastChannel` so the other tabs stay current. Any tab's write lands in the shared outbox and shows up in every tab at once, connected or not. When the leader tab closes, the lock passes to another tab, which reconnects and resumes from the seqs recorded in storage; `handle.leading` says whether this tab holds the connection. Pass `tabs: soloTabs()` to opt a tab out of the coordination, or your own `TabCoordinator` to replace it.
 

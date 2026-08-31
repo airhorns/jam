@@ -125,7 +125,7 @@ describe("sync (server)", () => {
   beforeEach(async () => {
     server = await createSyncServer({
       storage: memoryStorage(),
-      allow: (scope) => scope !== "forbidden",
+      allow: ({ scope }) => scope !== "forbidden",
     });
     net = fakeNetwork((socket) => server.handle(socket));
     received = [];
@@ -298,6 +298,39 @@ describe("sync (server)", () => {
     await second.subscribe().ready;
     expect(received.map((m) => m.type)).toEqual(["hello", "snapshot"]);
     expect(facts("n")).toEqual([["n", 2], ["n", 3], ["n", 4], ["n", 5]]);
+  });
+
+  it("settles a denied subscription as ready with an error fact and loads nothing for it", async () => {
+    server = await createSyncServer({ storage: memoryStorage(), allowRead: (filter) => filter.scope !== "private" });
+    await server.apply([
+      { op: "upsert", terms: ["secret", 1], scope: "private" },
+      { op: "upsert", terms: ["note", 1], scope: "" },
+    ]);
+    const s = await start();
+    const denied = s.subscribe({ scope: "private" });
+    const allowed = s.subscribe({ scope: "" });
+    await Promise.all([denied.ready, allowed.ready]);
+    expect(facts("secret")).toEqual([]);
+    expect(facts("note")).toEqual([["note", 1]]);
+    expect(db.has("sync", "shape", denied.id, "ready", true)).toBe(true);
+    expect(db.query(["sync", "shape", denied.id, "error", $.e]).map((b) => String(b.e))).toEqual([expect.stringContaining("private")]);
+    expect(db.query(["sync", "shape", allowed.id, "error", $.e])).toEqual([]);
+    expect(statusFact("status")).toBe("live");
+
+    await server.apply([{ op: "upsert", terms: ["secret", 2], scope: "private" }]);
+    await settle();
+    expect(facts("secret")).toEqual([]);
+    expect(await stored()).toEqual([{ terms: ["note", 1], scope: "" }]);
+
+    net.sockets[0].drop();
+    await settle();
+    expect(s.connected).toBe(true);
+    expect(statusFact("status")).toBe("live");
+    expect(received.filter((m) => m.type === "denied")).toHaveLength(1);
+
+    await denied.dispose();
+    expect(db.query(["sync", "shape", denied.id, $.k, $.v])).toEqual([]);
+    expect(db.has("sync", "shape", allowed.id, "ready", true)).toBe(true);
   });
 
   it("converges with a concurrent replace from another writer", async () => {
@@ -596,6 +629,52 @@ describe("sync (tabs)", () => {
     expect(a.facts("n")).toEqual([["n", 1], ["n", 2]]);
     expect(b.facts("n")).toEqual([["n", 1], ["n", 2]]);
     expect(pushes.length).toBeLessThanOrEqual(2);
+  });
+
+  it("settles a follower's denied subscription through the leader", async () => {
+    server = await createSyncServer({ storage: memoryStorage(), allowRead: (filter) => filter.scope !== "private" });
+    await server.apply([{ op: "upsert", terms: ["secret", 1], scope: "private" }]);
+    const a = await openTab();
+    const b = await openTab();
+    await settle();
+    expect(b.s.leading).toBe(false);
+
+    const sub = b.s.subscribe({ scope: "private" });
+    await sub.ready;
+    expect(b.facts("secret")).toEqual([]);
+    expect(b.db.has("sync", "shape", sub.id, "ready", true)).toBe(true);
+    expect(b.db.query(["sync", "shape", sub.id, "error", $.e])).toHaveLength(1);
+    expect(b.status("status")).toBe("live");
+    expect(a.status("status")).toBe("live");
+
+    await server.apply([{ op: "upsert", terms: ["secret", 2], scope: "private" }]);
+    await settle();
+    expect(b.facts("secret")).toEqual([]);
+    expect(await stored()).toEqual([]);
+    await sub.dispose();
+    expect(b.db.query(["sync", "shape", sub.id, $.k, $.v])).toEqual([]);
+  });
+
+  it("clears a denial when the subscription is asked for again and allowed", async () => {
+    let open = false;
+    server = await createSyncServer({ storage: memoryStorage(), allowRead: (filter) => open || filter.scope !== "private" });
+    await server.apply([{ op: "upsert", terms: ["secret", 1], scope: "private" }]);
+    const a = await openTab();
+    const b = await openTab();
+    await settle();
+    const sub = b.s.subscribe({ scope: "private" });
+    await sub.ready;
+    expect(b.db.query(["sync", "shape", sub.id, "error", $.e])).toHaveLength(1);
+
+    open = true;
+    await a.s.dispose();
+    handles.splice(handles.indexOf(a.s), 1);
+    await settle();
+    expect(b.s.leading).toBe(true);
+    expect(b.facts("secret")).toEqual([["secret", 1]]);
+    expect(b.db.query(["sync", "shape", sub.id, "error", $.e])).toEqual([]);
+    expect(b.db.has("sync", "shape", sub.id, "ready", true)).toBe(true);
+    expect(b.status("status")).toBe("live");
   });
 
   it("shares standalone writes between tabs without any connection", async () => {
