@@ -23,6 +23,7 @@
     "@faker-js/faker": "^10.6.0",
     "@hono/node-server": "^1.13.0",
     "@jam/core": "workspace:*",
+    "@jam/ui": "workspace:*",
     "fractional-indexing": "^4.0.0",
     "hono": "^4.13.5",
     "postgres": "^3.4.9"

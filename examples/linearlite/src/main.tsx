@@ -1,5 +1,6 @@
 import { h } from "@jam/core/jsx";
 import { $, _, db, mount, persist } from "@jam/core";
+import { createJamUI, defaultConfig } from "@jam/ui";
 import { App } from "./components/App";
 import { SYNC_URL, openLinearliteDatabase, seedCountFromLocation } from "./pglite";
 import { startQueries } from "./programs/queries";
@@ -8,7 +9,8 @@ import { startRouter } from "./programs/router";
 import { startSubscriptions } from "./programs/subscriptions";
 import { startUi } from "./programs/ui";
 import { startSync } from "./sync";
-import "./styles.css";
+
+createJamUI(defaultConfig);
 
 async function start() {
   const pg = await openLinearliteDatabase({ seed: seedCountFromLocation(location) });
