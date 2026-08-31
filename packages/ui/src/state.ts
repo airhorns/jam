@@ -17,13 +17,14 @@ const mounted = new Set<string>();
  * survives re-renders and can be inspected or driven by other programs; it is
  * forgotten when the component leaves the tree, so a later component at the
  * same position starts from its default. The third element returns to
- * `defaultValue`, including an undefined one (no selection), which the setter
- * cannot express.
+ * `defaultValue`; when there is none it clears the stored value, which the
+ * setter cannot express, and reports the given `empty` value (`""` for a
+ * radio group or select, as the DOM does) to `onChange`.
  */
 export function useControllableState<T extends Term>(
   key: string,
   options: ControllableStateOptions<T>,
-): [T | undefined, (value: T) => void, () => void] {
+): [T | undefined, (value: T) => void, (empty: T) => void] {
   const id = useComponentId();
   const controlled = options.value !== undefined;
   mounted.add(id);
@@ -41,9 +42,11 @@ export function useControllableState<T extends Term>(
     options.onChange?.(next);
     if (!controlled) replace(id, key, next);
   };
-  const reset = () => {
-    if (options.defaultValue !== undefined) update(options.defaultValue);
-    else if (!controlled && mounted.has(id)) forget(id, key, _);
+  const reset = (empty: T) => {
+    if (options.defaultValue !== undefined) return update(options.defaultValue);
+    if (!mounted.has(id) || read() === undefined) return;
+    options.onChange?.(empty);
+    if (!controlled) forget(id, key, _);
   };
   return [read(), update, reset];
 }

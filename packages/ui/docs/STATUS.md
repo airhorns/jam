@@ -233,7 +233,7 @@ popovers without arrow keys) and are fixed in the examples. The examples'
 menus are `Popover`s with menu roles and roving focus; there is still no
 `Menu` primitive. Review of that round added a third `reset` element to
 `useControllableState` so `RadioGroup` and `Select` form-reset back to "no
-selection", a `data-handles-escape` marker so Escape on a focused `Toast` no
+selection" (reported as `""`), a `data-handles-escape` marker so Escape on a focused `Toast` no
 longer also closes the dialog under it, `aria-labelledby` on `Select.Group`
 only when it has a `Select.Label`, and scrollbar-width compensation in the
 body scroll lock so opening a modal doesn't shift the page.

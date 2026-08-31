@@ -37,7 +37,7 @@ const [value, setValue] = useControllableState<string>("plan", { defaultValue: "
 | --- | --- | --- | --- |
 | `value` | `string` | — | Controlled selection. |
 | `defaultValue` | `string` | — | Initial selection when uncontrolled; omit for none. |
-| `onValueChange` | `(value: string) => void` | — | Called with the newly selected item's value. |
+| `onValueChange` | `(value: string) => void` | — | Called with the newly selected item's value, or `""` when a form reset clears a group that had no `defaultValue`. |
 | `orientation` | `"horizontal" \| "vertical"` | `"vertical"` | Layout direction, `aria-orientation`, and which arrow keys navigate. |
 | `dir` | `"ltr" \| "rtl"` | `"ltr"` | Rendered as the `dir` attribute; `"rtl"` swaps which arrow key moves to the previous item. |
 | `loop` | `boolean` | `true` | Whether arrow-key navigation wraps from the last item back to the first. |
@@ -102,6 +102,7 @@ component theme, so `theme="…"` anywhere above recolours the whole group —
   both Tab and the arrow keys.
 - A `name` renders a visually-hidden `<input type="radio">` inside each item
   so the group contributes to `FormData`. Resetting the owning form restores
-  `defaultValue`, or clears the selection when there was none, with or without
-  `name` set.
+  `defaultValue`, or clears the selection and reports `""` through
+  `onValueChange` when there was none, with or without `name` set. A
+  controlled `value=""` likewise means nothing is selected.
 - Pair each item with a `Label htmlFor` pointing at the item's `id`.

@@ -277,13 +277,13 @@ function RadioGroupComponent(props: RadioGroupProps): VNode {
     onChange: onValueChange,
   });
   const disabled = props.disabled === true;
-  const resetProps = useFormReset(resetValue);
+  const resetProps = useFormReset(() => resetValue(""));
 
   const state: RadioGroupState = {
     value: value ?? undefined,
     select: (next) => setValue(next),
     disabled,
-    anySelected: value != null,
+    anySelected: value != null && value !== "",
     name,
     required: required === true,
   };

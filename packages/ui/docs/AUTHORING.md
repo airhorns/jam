@@ -27,9 +27,11 @@ Read `STYLE-SYSTEM.md` first.
   parts carry `data-disabled=""` (the empty string, as Radix does) next to the
   real attribute; `rovingFocus` skips items that have it.
 - Form controls with a `name` mirror their value into a visually hidden
-  `<input>` and spread `useFormReset(reset)` from `../form` onto it, where
-  `reset` is the third element of `useControllableState`, so a `<form>` reset
-  returns to `defaultValue` even when that is "nothing selected".
+  `<input>` and spread `useFormReset(() => reset(""))` from `../form` onto
+  it, where `reset` is the third element of `useControllableState`, so a
+  `<form>` reset returns to `defaultValue`; with no default it clears the
+  value and reports `""` to `onChange`, as the DOM does for an unselected
+  radio group or select.
 - Composite widgets take `dir?: "ltr" | "rtl"`, render it as the `dir`
   attribute and pass it to `rovingFocus` so ArrowLeft/ArrowRight follow the
   reading direction. `rovingFocus`/`rovingItems` are also exported from

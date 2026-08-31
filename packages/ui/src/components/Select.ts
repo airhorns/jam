@@ -108,7 +108,7 @@ function SelectRoot(props: SelectProps): VNode {
     defaultValue: props.defaultValue,
     onChange: props.onValueChange,
   });
-  const resetProps = useFormReset(resetValue);
+  const resetProps = useFormReset(() => resetValue(""));
   const [openState, setOpenState] = useControllableState<boolean>("open", {
     value: props.open,
     defaultValue: props.defaultOpen ?? false,

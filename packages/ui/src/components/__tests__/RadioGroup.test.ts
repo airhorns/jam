@@ -187,9 +187,10 @@ describe("RadioGroup", () => {
     expect(new FormData(form).get("plan")).toBe("a");
   });
 
-  it("resets to no selection when it started without a default", () => {
+  it("resets to no selection when it started without a default, reporting it as an empty value", () => {
+    const onValueChange = vi.fn();
     const r = render(
-      h("form", null, h(RadioGroup, { name: "plan" }, h(RadioGroup.Item, { value: "a" }), h(RadioGroup.Item, { value: "b" }))),
+      h("form", null, h(RadioGroup, { name: "plan", onValueChange }, h(RadioGroup.Item, { value: "a" }), h(RadioGroup.Item, { value: "b" }))),
     );
     const form = r.get<HTMLFormElement>("form");
     click(r.all("[role=radio]")[1]);
@@ -197,6 +198,15 @@ describe("RadioGroup", () => {
     form.dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
     expect(r.all("[role=radio]").map((el) => el.getAttribute("aria-checked"))).toEqual(["false", "false"]);
     expect(new FormData(form).get("plan")).toBeNull();
+    expect(onValueChange).toHaveBeenLastCalledWith("");
+    form.dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
+    expect(onValueChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats a controlled empty value as no selection, so every item stays a Tab stop", () => {
+    const r = render(h(RadioGroup, { value: "" }, h(RadioGroup.Item, { value: "a" }), h(RadioGroup.Item, { value: "b" })));
+    expect(r.all("[role=radio]").map((el) => el.getAttribute("aria-checked"))).toEqual(["false", "false"]);
+    expect(r.all<HTMLElement>("[role=radio]").map((el) => el.tabIndex)).toEqual([0, 0]);
   });
 
   it("strips the default look when unstyled", () => {

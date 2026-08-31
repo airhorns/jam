@@ -235,14 +235,16 @@ describe("Select conformance", () => {
       expect(get("[data-testid=value]").textContent).toBe("Apple");
     });
 
-    it("resetting the form clears a Select that started with no value back to its placeholder", () => {
-      const { get, container } = render(h("form", null, h(Example, { name: "fruit" })));
+    it("resetting the form clears a Select that started with no value back to its placeholder and reports an empty value", () => {
+      const onValueChange = vi.fn();
+      const { get, container } = render(h("form", null, h(Example, { name: "fruit", onValueChange })));
       click(get("[data-testid=trigger]"));
       click(get("[data-testid=item-cherry]"));
       expect(get("[data-testid=value]").textContent).toBe("Cherry");
       container.querySelector("form")!.reset();
       expect(get("[data-testid=value]").textContent).toBe("Pick a fruit");
       expect(new FormData(container.querySelector("form")!).get("fruit")).toBe("");
+      expect(onValueChange).toHaveBeenLastCalledWith("");
     });
   });
 });

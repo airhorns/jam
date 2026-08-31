@@ -59,7 +59,7 @@ explicit `label` when its content is not plain text.
 | --- | --- | --- | --- |
 | `value` | `string` | — | Controlled selected value. |
 | `defaultValue` | `string` | — | Initial value when uncontrolled. |
-| `onValueChange` | `(value: string) => void` | — | Called when an option is chosen. |
+| `onValueChange` | `(value: string) => void` | — | Called when an option is chosen, or with `""` when a form reset clears a select that had no `defaultValue`. |
 | `open` | `boolean` | — | Controlled open state. |
 | `defaultOpen` | `boolean` | `false` | Initial open state when uncontrolled. |
 | `onOpenChange` | `(open: boolean) => void` | — | Called for every open/close, including dismissals. |
@@ -141,5 +141,5 @@ recolours the trigger and the portalled list together.
   arrow keys and typeahead.
 - A `name` renders a hidden input so the value submits with a surrounding
   `Form`; `Label htmlFor` should point at the `id` given to `Select`. The
-  hidden input reverts to `defaultValue` (or the placeholder when there was
-  none) when the form resets.
+  hidden input reverts to `defaultValue` when the form resets, or to the
+  placeholder with `""` reported through `onValueChange` when there was none.
