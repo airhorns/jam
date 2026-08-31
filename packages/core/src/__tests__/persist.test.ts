@@ -1,43 +1,33 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { PGlite } from "@electric-sql/pglite";
-import { live } from "@electric-sql/pglite/live";
+import { describe, it, expect, beforeEach } from "vitest";
+import { memoryStorage, type FactStorage } from "@jam/engine/storage";
 import { db, $, _ } from "../db";
-import { whenever, replace, claim, remember } from "../primitives";
+import { whenever, replace, claim, remember, scoped } from "../primitives";
 import { persist } from "../persist";
-import type { JamPGlite } from "../pglite";
 
-let pg: JamPGlite;
+let storage: FactStorage;
 const disposers: Array<() => Promise<void>> = [];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function rows(): Promise<Array<[string, unknown[]]>> {
-  const res = await pg.query<{ terms: unknown[] }>(`SELECT terms FROM jam_local_facts ORDER BY terms::text`);
-  return res.rows.map((r) => [JSON.stringify(r.terms), r.terms]);
+  const facts = await storage.load();
+  return facts.map((f) => [JSON.stringify(f.terms), f.terms] as [string, unknown[]]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
 }
 
 async function start(opts: Parameters<typeof persist>[0] = {}) {
-  const dispose = await persist({ pg, debounce: 10, ...opts });
+  const dispose = await persist({ storage, debounce: 10, ...opts });
   disposers.push(dispose);
   return dispose;
 }
 
-beforeAll(async () => {
-  pg = await PGlite.create({ dataDir: "memory://", extensions: { live } });
-});
-
-afterAll(async () => {
-  await pg.close();
-});
-
 beforeEach(async () => {
   while (disposers.length) await disposers.pop()!();
-  await pg.exec(`DROP TABLE IF EXISTS jam_local_facts`);
+  storage = memoryStorage();
   db.clear();
 });
 
 describe("persist", () => {
-  it("creates the table and flushes asserted facts after the debounce", async () => {
+  it("flushes asserted facts after the debounce", async () => {
     await start();
     db.insert("todo", 1, "title", "Buy milk");
     db.insert("todo", 1, "done", false);
@@ -49,30 +39,35 @@ describe("persist", () => {
     ]);
   });
 
-  it("restores persisted facts on start with their original types", async () => {
-    await pg.exec(`CREATE TABLE jam_local_facts (id TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
-    await pg.query(`INSERT INTO jam_local_facts (id, terms) VALUES (md5($1), $2), (md5($3), $4)`, [
-      JSON.stringify(["todo", 1, "title", "A"]),
-      JSON.stringify(["todo", 1, "title", "A"]),
-      JSON.stringify(["counter", "n", 42]),
-      JSON.stringify(["counter", "n", 42]),
-    ]);
+  it("restores persisted facts on start with their original types and scopes", async () => {
+    await storage.write({
+      upserts: [
+        { terms: ["todo", 1, "title", "A"], scope: "project:p1" },
+        { terms: ["counter", "n", 42], scope: "" },
+      ],
+    });
     await start();
     expect(db.query(["todo", $.id, "title", $.t])).toEqual([{ id: 1, t: "A" }]);
     expect(db.query(["counter", "n", $.n])).toEqual([{ n: 42 }]);
     expect(typeof db.query(["counter", "n", $.n])[0].n).toBe("number");
+    expect(db.scopeOf("todo", 1, "title", "A")).toBe("project:p1");
   });
 
   it("does not write restored facts back", async () => {
-    await pg.exec(`CREATE TABLE jam_local_facts (id TEXT PRIMARY KEY, terms JSONB NOT NULL)`);
-    await pg.query(`INSERT INTO jam_local_facts (id, terms) VALUES (md5($1), $2)`, [
-      JSON.stringify(["todo", 1, "title", "A"]),
-      JSON.stringify(["todo", 1, "title", "A"]),
-    ]);
+    await storage.write({ upserts: [{ terms: ["todo", 1, "title", "A"], scope: "" }] });
     await start();
     const before = await rows();
     await sleep(30);
     expect(await rows()).toEqual(before);
+  });
+
+  it("stores the scope of each fact", async () => {
+    await start();
+    scoped("project:p1", () => remember("issue", "i1", "title", "A"));
+    remember("issue", "i1", "status", "todo");
+    await sleep(30);
+    const facts = await storage.load();
+    expect(facts.map((f) => f.scope)).toEqual(["project:p1", "project:p1"]);
   });
 
   it("deletes retracted facts", async () => {

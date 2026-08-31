@@ -1,7 +1,7 @@
 // Test helpers for rendering @jam/ui components into a real (happy-dom) DOM
 // and inspecting the CSS the style system injected for them.
 
-import { db, mount } from "@jam/core";
+import { $, db, mount, replace, when } from "@jam/core";
 import type { VChild } from "@jam/core/jsx";
 import { clearInjectedStyles } from "./css";
 import { disposeMedia } from "./media";
@@ -58,6 +58,30 @@ export function render(vnode: VChild): RenderResult {
     },
     query: (selector) => container.querySelector(selector) as any,
     all: (selector) => Array.from(container.querySelectorAll(selector)) as any,
+  };
+}
+
+let boxes = 0;
+
+/**
+ * A value components read reactively: `set` re-renders whoever called `get`
+ * during their last render. Backed by a version fact, so it participates in
+ * the same batching as any other jam state.
+ */
+export function box<T>(initial: T): { get(): T; set(value: T): void } {
+  const id = `box-${++boxes}`;
+  let value = initial;
+  let version = 0;
+  replace("__test", id, "version", version);
+  return {
+    get() {
+      when(["__test", id, "version", $.v]);
+      return value;
+    },
+    set(next) {
+      value = next;
+      replace("__test", id, "version", ++version);
+    },
   };
 }
 

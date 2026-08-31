@@ -1,261 +1,323 @@
-// FactDB — MobX-backed fact store with fine-grained per-pattern reactivity.
-//
-// Single unified fact space. Per-pattern indexes prevent circular
-// reactivity: when a fact is written, only patterns that could match
-// it are invalidated. VDOM facts don't match app-state patterns, so
-// writing VDOM doesn't trigger component re-execution.
+// FactDB — the facade over the wasm fact engine. Facts, ownership, scopes and
+// incrementally maintained queries live in the engine; this layer interns
+// terms, names owners, keeps the side-channel refs, and wires query handles
+// into the reactive scheduler.
 
 import {
-  observable,
-  action,
-  computed,
-  untracked,
-  makeObservable,
-  comparer,
-  type IComputedValue,
-} from "mobx";
-import { clearSelectCache } from "./select";
-import {
+  AGG_COUNT,
+  AGG_MAX,
+  AGG_MIN,
+  AGG_SUM,
+  Engine,
+  NONE,
+  PRED_CONTAINS,
+  PRED_CONTAINS_CI,
+  PRED_EQ,
+  PRED_GE,
+  PRED_GT,
+  PRED_LE,
+  PRED_LT,
+  PRED_NE,
+  PRED_STARTS_WITH,
+  PRED_STARTS_WITH_CI,
+  ROOT_OWNER,
+  VAR_BASE,
+  WILD,
   _,
-  GLOBAL_SCOPE,
-  isBinding,
-  type Bindings,
-  type BindingMarker,
-  type Fact,
-  type Pattern,
-  type PatternTerm,
-  type Term,
-  type Wildcard,
-} from "./terms";
+  compareTerms,
+  factKey,
+  type Clause,
+  type EngineStats,
+  type Predicate,
+  type QueryHandle,
+  type QuerySpec,
+  type Sort,
+} from "@jam/engine";
+import { isTracking, markDirty, onWrite, recordRead, registerDrainer, type Dependency, type Effect } from "./reactive";
 
-export { _, GLOBAL_SCOPE } from "./terms";
-export type { Bindings, BindingMarker, Fact, Pattern, PatternTerm, Term, Wildcard } from "./terms";
+export type Term = string | number | boolean;
+export type Fact = Term[];
+export { _, factKey, GLOBAL_SCOPE } from "@jam/engine";
+export type { EngineStats, Wildcard } from "@jam/engine";
+
+export interface DBStats extends EngineStats {
+  /** Named owners, the root included. */
+  namedOwners: number;
+  /** Maintained `index()` queries. */
+  maintainedIndexes: number;
+  /** Live `watch()` subscriptions. */
+  watches: number;
+  /** Fact listeners registered through `observe()`. */
+  listeners: number;
+  /** Values held in `refs`. */
+  refs: number;
+}
 
 export type FactChange = "add" | "delete";
 export interface FactChangeInfo {
-  /**
-   * True when the root owner holds the fact — it came from insert()/replace(),
-   * or a claimed fact was later remembered. Owner revocations, deleteByKey()
-   * of owner-only facts and clear() are never durable.
-   */
-  durable: boolean;
+  /** Sync partition of the fact. */
+  scope: string;
   /** Set on the "add" emitted by replace(), so stores can replace the whole attribute. */
   replace?: true;
 }
+/** Reports durable changes: facts the root owner gained or lost. Claimed facts are never reported. */
 export type FactListener = (type: FactChange, key: string, fact: Fact, info: FactChangeInfo) => void;
 
-// --- Pattern helpers ---
+// --- Pattern types ---
 
-export const $: Record<string, BindingMarker> = new Proxy(
-  {} as Record<string, BindingMarker>,
-  {
-    get(_target, prop: string | symbol): BindingMarker | undefined {
-      if (typeof prop === "symbol") return undefined;
-      return { __binding: true, name: prop };
-    },
+export interface BindingMarker {
+  __binding: true;
+  name: string;
+}
+
+export type PatternTerm = Term | BindingMarker | typeof _;
+export type Pattern = PatternTerm[];
+export type Bindings = Record<string, Term>;
+
+export const $: Record<string, BindingMarker> = new Proxy({} as Record<string, BindingMarker>, {
+  get(_target, prop: string | symbol): BindingMarker | undefined {
+    if (typeof prop === "symbol") return undefined;
+    return { __binding: true, name: prop };
   },
-);
+});
 
-// --- Pattern matching ---
+export function isBinding(x: unknown): x is BindingMarker {
+  return x != null && typeof x === "object" && (x as BindingMarker).__binding === true;
+}
 
+/** Match one fact against one pattern, binding `$` markers; null when it doesn't match. */
 export function matchPattern(pattern: Pattern, fact: Fact): Bindings | null {
   const len = pattern.length;
   if (len !== fact.length) return null;
-
-  // Fast path: check all literals FIRST before allocating bindings.
-  // This avoids allocation for the common case where most facts don't match.
   for (let i = 0; i < len; i++) {
     const p = pattern[i];
-    if (p === _ || (p !== null && typeof p === "object")) continue; // wildcard or binding
+    if (p === _ || (p !== null && typeof p === "object")) continue;
     if (p !== fact[i]) return null;
   }
-
-  // All literals matched — now do the binding pass
-  let bindings: Bindings | null = null;
+  const bindings: Bindings = {};
   for (let i = 0; i < len; i++) {
     const p = pattern[i];
-    if (p === _ || typeof p !== "object" || p === null) continue;
-    // p is a BindingMarker
-    const name = (p as BindingMarker).name;
-    const f = fact[i];
-    if (bindings === null) bindings = {};
-    if (name in bindings) {
-      if (bindings[name] !== f) return null;
+    if (!isBinding(p)) continue;
+    if (p.name in bindings) {
+      if (bindings[p.name] !== fact[i]) return null;
     } else {
-      bindings[name] = f;
+      bindings[p.name] = fact[i];
     }
   }
-  return bindings ?? {};
+  return bindings;
 }
 
-function mergeBindings(a: Bindings, b: Bindings): Bindings | null {
-  // Fast path: check for conflicts before allocating
-  for (const k in b) {
-    if (k in a && a[k] !== b[k]) return null;
-  }
-  // No conflicts — merge. Use Object.assign to avoid spread overhead.
-  const merged = Object.assign({}, a);
-  for (const k in b) {
-    merged[k] = b[k];
-  }
-  return merged;
+// --- Query clauses ---
+
+export type ComparisonOp = "=" | "!=" | "<" | "<=" | ">" | ">=" | "contains" | "startsWith" | "icontains" | "istartsWith";
+
+export interface PredicateSpec {
+  lhs: BindingMarker;
+  op: ComparisonOp;
+  rhs: Term | BindingMarker;
 }
 
-/**
- * Could a fact possibly match a pattern? Quick check using only the
- * literal (non-binding, non-wildcard) terms in the pattern. If any
- * literal at a fixed position doesn't match, the fact can't match.
- */
-function couldMatch(pattern: Pattern, fact: Fact): boolean {
-  if (pattern.length !== fact.length) return false;
-  for (let i = 0; i < pattern.length; i++) {
-    const p = pattern[i];
-    if (p === _ || isBinding(p)) continue;
-    if (p !== fact[i]) return false;
-  }
-  return true;
+/** Rows for which `pattern` has a match are hidden. */
+export interface NotClause {
+  __clause: "not";
+  pattern: Pattern;
 }
 
-/** Serialize a pattern remember for use as a cache key. */
-function patternsKey(patterns: Pattern[]): string {
-  return JSON.stringify(
-    patterns.map((p) =>
-      p.map((t) => {
-        if (t === _) return "__WILD__";
-        if (isBinding(t)) return `__BIND__${t.name}`;
-        return t;
-      }),
-    ),
+/** A row passes when any alternative holds; several `where` clauses all have to pass. */
+export interface WhereClause {
+  __clause: "where";
+  any: PredicateSpec[];
+}
+
+export interface OrderClause {
+  __clause: "order";
+  by: BindingMarker;
+  descending: boolean;
+}
+
+export interface OffsetClause {
+  __clause: "offset";
+  count: number;
+}
+
+export interface LimitClause {
+  __clause: "limit";
+  count: number;
+}
+
+export type AggregateOp = "count" | "sum" | "min" | "max";
+
+/** Folds the rows into one `output` value per distinct `group`; the result rows are `group…, output`. */
+export interface AggregateClause {
+  __clause: "aggregate";
+  op: AggregateOp;
+  input: BindingMarker | null;
+  output: BindingMarker;
+  group: BindingMarker[];
+}
+
+export type QueryClause = Pattern | NotClause | WhereClause | OrderClause | OffsetClause | LimitClause | AggregateClause;
+
+const PRED_CODES: Record<ComparisonOp, number> = {
+  "=": PRED_EQ,
+  "!=": PRED_NE,
+  "<": PRED_LT,
+  "<=": PRED_LE,
+  ">": PRED_GT,
+  ">=": PRED_GE,
+  contains: PRED_CONTAINS,
+  startsWith: PRED_STARTS_WITH,
+  icontains: PRED_CONTAINS_CI,
+  istartsWith: PRED_STARTS_WITH_CI,
+};
+
+const AGG_CODES: Record<AggregateOp, number> = { count: AGG_COUNT, sum: AGG_SUM, min: AGG_MIN, max: AGG_MAX };
+
+function queryKey(clauses: QueryClause[]): string {
+  return JSON.stringify(clauses, (_key, value: unknown) =>
+    value === _ ? "__WILD__" : isBinding(value) ? `__BIND__${value.name}` : value,
   );
+}
+
+/** @internal */
+export interface CompiledQuery {
+  spec: QuerySpec;
+  /** One name per output column. */
+  names: string[];
+  order: Sort[];
+}
+
+export const ROOT_OWNER_ID = "__root__";
+
+/** A maintained query: `get()` returns the current bindings and, inside an effect, subscribes it. */
+export interface IndexHandle {
+  get(): Bindings[];
+}
+
+class Index implements Dependency, IndexHandle {
+  readonly subscribers = new Set<Effect>();
+  handle: QueryHandle | null = null;
+  private version = -1;
+  private cached: Bindings[] = [];
+  /** Valid while `handle` is registered; literal ids are re-interned on each attach. */
+  private compiled: CompiledQuery | null = null;
+
+  constructor(
+    private readonly db: FactDB,
+    readonly key: string,
+    private readonly clauses: QueryClause[],
+  ) {}
+
+  get(): Bindings[] {
+    if (isTracking()) {
+      recordRead(this);
+      this.ensureHandle();
+    }
+    if (!this.handle || !this.compiled) return this.db.evaluate(this.db.compile(this.clauses));
+    this.db.drain();
+    if (this.version !== this.handle.version) {
+      this.version = this.handle.version;
+      this.cached = this.db.decodeRows(this.handle.rows.values(), this.compiled);
+    }
+    return this.cached;
+  }
+
+  private ensureHandle(): void {
+    if (this.handle) return;
+    this.compiled = this.db.compile(this.clauses);
+    this.handle = this.db.attach(this, this.compiled.spec);
+    this.version = -1;
+  }
+
+  onIdle(): void {
+    if (!this.handle) return;
+    this.db.detach(this, this.handle);
+    this.handle = null;
+    this.compiled = null;
+    this.version = -1;
+    this.cached = [];
+  }
 }
 
 // --- FactDB ---
 
 export class FactDB {
-  /** All facts — app state, VDOM, decorations. One unified space. */
-  readonly facts = observable.map<string, Fact>();
+  readonly engine = new Engine();
 
   /** Side-channel for non-serializable values (function refs for event handlers). */
   readonly refs = new Map<string, unknown>();
 
-  /** When non-null, insert() collects keys here (for tracking component-emitted facts). */
-  emitCollector: Set<string> | null = null;
+  private readonly ownerIds = new Map<string, number>([[ROOT_OWNER_ID, ROOT_OWNER]]);
+  private readonly ownerNames = new Map<number, string>([[ROOT_OWNER, ROOT_OWNER_ID]]);
+  private readonly ownerChildren = new Map<number, Set<number>>();
+  private readonly ownerRefs = new Map<number, Set<string>>();
+  private readonly refOwners = new Map<string, Set<number>>();
+  private readonly ownerCounters = new Map<string, number>();
+  private ownerStack: number[] = [ROOT_OWNER];
+  /** Scope names, interned when a write happens so a flush in between cannot free the id. */
+  private scopeStack: (string | null)[] = [null];
 
-  /** Nested write collectors for tracking facts/refs created during scoped execution. */
-  private factCollectorStack: Set<string>[] = [];
-  private refCollectorStack: Set<string>[] = [];
-
-  /** Implicit hierarchical ownership scopes for all writes. */
-  private readonly rootOwner = "__root__";
-  private ownerStack: string[] = [this.rootOwner];
-  private ownerFacts = new Map<string, Set<string>>();
-  private factOwners = new Map<string, Set<string>>();
-  private ownerRefs = new Map<string, Set<string>>();
-  private refOwners = new Map<string, Set<string>>();
-  private ownerParents = new Map<string, string | null>([
-    [this.rootOwner, null],
-  ]);
-  private ownerChildren = new Map<string, Set<string>>();
-  private ownerCounters = new Map<string, number>();
-
-  /** Sync partition per fact; only non-global scopes are stored. */
-  private scopeStack: string[] = [];
-  private factScopes = new Map<string, string>();
-  /** Scope of the first non-global fact per [t0, t1] entity, with a count of its scoped facts for eviction. */
-  private entityScopes = new Map<Term, Map<Term, { scope: string; count: number }>>();
-
-  /** Index of fact keys by first term, for fast querySingle when pattern has a literal first term. */
-  private factsByFirstTerm = new Map<Term, Set<string>>();
-
-  /** Plain (non-observable) mirror of facts for fast reads in query paths without MobX overhead. */
-  private factsPlain = new Map<string, Fact>();
-
-  /**
-   * Per-pattern-set version counters. Each registered pattern set gets
-   * its own observable version. When a fact is written/removed, only
-   * versions for patterns that could match it are bumped.
-   */
-  private patternVersions = new Map<
-    string,
-    { patterns: Pattern[]; version: { get(): number; set(v: number): void } }
-  >();
-
-  /**
-   * Index of pattern entries by their first literal term (for fast invalidation).
-   * Patterns whose first term is a binding/wildcard go into the null bucket.
-   */
-  private patternsByFirstTerm = new Map<Term | null, Set<string>>();
-
+  private readonly indexes = new Map<string, Index>();
+  private readonly unregisterDrainer: () => void;
+  private readonly indexesByHandle = new Map<QueryHandle, Set<Index>>();
+  private readonly dependencies = new Set<{ handles: QueryHandle[]; dep: Dependency }>();
   private listeners: FactListener[] = [];
+  private pendingEvents = false;
 
   constructor() {
-    makeObservable(this, {
-      assert: action,
-      insert: action,
-      drop: action,
-      replace: action,
+    this.engine.onFact((event) => {
+      if (this.listeners.length === 0) return;
+      const key = factKey(event.terms);
+      const info: FactChangeInfo = event.replace ? { scope: event.scope, replace: true } : { scope: event.scope };
+      for (const listener of this.listeners.slice()) {
+        try {
+          listener(event.type, key, event.terms, info);
+        } catch (e) {
+          console.error("[jam] fact listener threw", e);
+        }
+      }
     });
+    this.unregisterDrainer = registerDrainer(() => this.drain());
   }
 
-  private factKey(fact: Fact): string {
-    return JSON.stringify(fact);
-  }
+  // --- owners ---
 
-  private currentOwner(): string {
-    return this.ownerStack[this.ownerStack.length - 1] ?? this.rootOwner;
+  private currentOwner(): number {
+    return this.ownerStack[this.ownerStack.length - 1];
   }
 
   getCurrentOwnerId(): string {
-    return this.currentOwner();
+    return this.ownerNames.get(this.currentOwner()) ?? ROOT_OWNER_ID;
   }
 
-  private ensureOwner(
-    ownerId: string,
-    parentId: string | null = this.currentOwner(),
-  ): void {
-    if (!this.ownerParents.has(ownerId)) {
-      this.ownerParents.set(ownerId, parentId);
-      if (parentId != null) {
-        let children = this.ownerChildren.get(parentId);
-        if (!children) {
-          children = new Set();
-          this.ownerChildren.set(parentId, children);
-        }
-        children.add(ownerId);
-      }
-      return;
-    }
+  private ensureOwner(name: string, parent = this.currentOwner()): number {
+    let id = this.ownerIds.get(name);
+    if (id !== undefined) return id;
+    id = this.engine.createOwner(parent);
+    this.ownerIds.set(name, id);
+    this.ownerNames.set(id, name);
+    let siblings = this.ownerChildren.get(parent);
+    if (!siblings) this.ownerChildren.set(parent, (siblings = new Set()));
+    siblings.add(id);
+    return id;
+  }
 
-    if (parentId != null) {
-      const existingParent = this.ownerParents.get(ownerId);
-      if (existingParent == null) {
-        this.ownerParents.set(ownerId, parentId);
-        let children = this.ownerChildren.get(parentId);
-        if (!children) {
-          children = new Set();
-          this.ownerChildren.set(parentId, children);
-        }
-        children.add(ownerId);
-      }
-    }
+  ownerExists(name: string): boolean {
+    return this.ownerIds.has(name);
   }
 
   createChildOwner(parentId: string, label: string): string {
-    this.ensureOwner(
-      parentId,
-      this.ownerParents.get(parentId) ?? this.rootOwner,
-    );
-    const counterKey = `${parentId}:${label}`;
+    const parent = this.ensureOwner(parentId, ROOT_OWNER);
+    const counterKey = `${parentId}/${label}`;
     const next = (this.ownerCounters.get(counterKey) ?? 0) + 1;
     this.ownerCounters.set(counterKey, next);
-    const ownerId = `${parentId}/${label}:${next}`;
-    this.ensureOwner(ownerId, parentId);
-    return ownerId;
+    const name = `${parentId}/${label}:${next}`;
+    this.ensureOwner(name, parent);
+    return name;
   }
 
   withOwnerScope<T>(ownerId: string, fn: () => T): T {
-    this.ensureOwner(ownerId);
-    this.ownerStack.push(ownerId);
+    this.ownerStack.push(this.ensureOwner(ownerId));
     try {
       return fn();
     } finally {
@@ -264,32 +326,39 @@ export class FactDB {
   }
 
   revokeOwner(ownerId: string): void {
-    const children = Array.from(this.ownerChildren.get(ownerId) ?? []);
-    for (const childId of children) {
-      this.revokeOwner(childId);
-    }
-
-    for (const key of Array.from(this.ownerFacts.get(ownerId) ?? [])) {
-      this.detachFactOwner(key, ownerId);
-    }
-    for (const key of Array.from(this.ownerRefs.get(ownerId) ?? [])) {
-      this.detachRefOwner(key, ownerId);
-    }
-
-    this.ownerFacts.delete(ownerId);
-    this.ownerRefs.delete(ownerId);
-    this.ownerChildren.delete(ownerId);
-
-    const parentId = this.ownerParents.get(ownerId);
-    if (parentId != null) {
-      this.ownerChildren.get(parentId)?.delete(ownerId);
-    }
-    if (ownerId !== this.rootOwner) {
-      this.ownerParents.delete(ownerId);
-    }
+    const id = this.ownerIds.get(ownerId);
+    if (id === undefined) return;
+    if (id === ROOT_OWNER) throw new Error("the root owner cannot be revoked");
+    this.forgetOwner(id);
+    this.engine.revoke(id);
+    this.changed();
   }
 
-  /** Facts added inside fn get `scope` instead of inheriting one. */
+  private forgetOwner(id: number): void {
+    for (const child of this.ownerChildren.get(id) ?? []) this.forgetOwner(child);
+    this.ownerChildren.delete(id);
+    for (const key of this.ownerRefs.get(id) ?? []) {
+      const owners = this.refOwners.get(key);
+      owners?.delete(id);
+      if (owners && owners.size === 0) {
+        this.refOwners.delete(key);
+        this.refs.delete(key);
+      }
+    }
+    this.ownerRefs.delete(id);
+    const name = this.ownerNames.get(id);
+    if (name !== undefined) this.ownerIds.delete(name);
+    this.ownerNames.delete(id);
+  }
+
+  // --- scopes ---
+
+  private currentScope(): number {
+    const scope = this.scopeStack[this.scopeStack.length - 1];
+    return scope === null ? NONE : this.engine.id(scope);
+  }
+
+  /** Facts written inside `fn` belong to the sync partition `scope`. */
   withScope<T>(scope: string, fn: () => T): T {
     this.scopeStack.push(scope);
     try {
@@ -300,531 +369,327 @@ export class FactDB {
   }
 
   scopeOf(...terms: Term[]): string {
-    return this.factScopes.get(this.factKey(terms)) ?? GLOBAL_SCOPE;
+    return this.engine.scopeOf(terms) ?? "";
   }
 
-  /** Re-tag an existing fact without notifying listeners; used when the synced copy of a fact changes partition. */
-  setScope(key: string, scope: string): void {
-    const fact = this.factsPlain.get(key);
-    if (!fact) return;
-    const previous = this.factScopes.get(key) ?? GLOBAL_SCOPE;
-    if (previous === scope) return;
-    this.forgetScope(key, fact);
-    this.recordScope(key, fact, scope);
+  /** Re-tag a fact's partition without notifying listeners. */
+  setScope(fact: Fact, scope: string): void {
+    this.engine.setScope(this.engine.id(scope), fact);
+    this.changed();
   }
 
-  /**
-   * The active scope, else the one inherited from `inherited` (a replaced
-   * fact), else the entity's registered scope, else global.
-   */
-  private resolveScope(terms: Term[], inherited: string | undefined): string {
-    if (this.scopeStack.length > 0) return this.scopeStack[this.scopeStack.length - 1];
-    if (inherited !== undefined) return inherited;
-    if (terms.length >= 2 && this.entityScopes.size > 0) {
-      return this.entityScopes.get(terms[0])?.get(terms[1])?.scope ?? GLOBAL_SCOPE;
-    }
-    return GLOBAL_SCOPE;
+  // --- writes ---
+
+  /** Hold a fact under the current owner; it leaves when every holder is revoked. */
+  assert(...terms: Term[]): void {
+    this.engine.assert(this.currentOwner(), this.currentScope(), terms);
+    this.changed();
   }
 
-  private recordScope(key: string, fact: Fact, scope: string): void {
-    if (scope === GLOBAL_SCOPE) return;
-    this.factScopes.set(key, scope);
-    if (fact.length < 2) return;
-    let byId = this.entityScopes.get(fact[0]);
-    if (!byId) {
-      byId = new Map();
-      this.entityScopes.set(fact[0], byId);
-    }
-    const entry = byId.get(fact[1]);
-    if (entry) entry.count++;
-    else byId.set(fact[1], { scope, count: 1 });
+  /** Hold a fact under the root owner: durable until dropped. */
+  insert(...terms: Term[]): void {
+    this.engine.assert(ROOT_OWNER, this.currentScope(), terms);
+    this.changed();
   }
 
-  private forgetScope(key: string, fact: Fact): void {
-    if (!this.factScopes.delete(key) || fact.length < 2) return;
-    const byId = this.entityScopes.get(fact[0]);
-    const entry = byId?.get(fact[1]);
-    if (!byId || !entry) return;
-    if (--entry.count === 0) {
-      byId.delete(fact[1]);
-      if (byId.size === 0) this.entityScopes.delete(fact[0]);
-    }
+  drop(...terms: (Term | typeof _)[]): void {
+    this.engine.drop(terms);
+    this.changed();
   }
 
-  private attachFactOwner(key: string, ownerId: string): void {
-    let owners = this.factOwners.get(key);
-    if (!owners) {
-      owners = new Set();
-      this.factOwners.set(key, owners);
-    }
-    if (!owners.has(ownerId)) {
-      owners.add(ownerId);
-      let factKeys = this.ownerFacts.get(ownerId);
-      if (!factKeys) {
-        factKeys = new Set();
-        this.ownerFacts.set(ownerId, factKeys);
-      }
-      factKeys.add(key);
-    }
+  /** Drop every fact sharing all but the last term, then insert. */
+  replace(...terms: Term[]): void {
+    if (terms.length < 2) throw new Error("replace() requires at least 2 terms");
+    this.engine.replace(ROOT_OWNER, this.currentScope(), terms);
+    this.changed();
   }
 
-  private deleteFactRecord(key: string, fact: Fact, invalidate: boolean, durable: boolean): void {
-    this.facts.delete(key);
-    this.factsPlain.delete(key);
-    this.factsByFirstTerm.get(fact[0])?.delete(key);
-    if (invalidate) this.invalidatePatterns(fact);
-    this.notify("delete", key, fact, { durable });
-    this.forgetScope(key, fact);
+  /** Forget every fact and owner. Listeners are not notified. */
+  clear(): void {
+    for (const child of Array.from(this.ownerChildren.get(ROOT_OWNER) ?? [])) this.forgetOwner(child);
+    this.ownerChildren.clear();
+    this.refs.clear();
+    this.refOwners.clear();
+    this.ownerRefs.clear();
+    this.ownerStack = [ROOT_OWNER];
+    this.scopeStack = [null];
+    this.engine.clear();
+    this.changed();
   }
 
-  /**
-   * Subscribe to every fact add/delete. Listeners fire synchronously at the
-   * mutation point (inside the caller's action), after all indexes are updated,
-   * and receive the stored plain array — treat it as read-only.
-   */
-  observe(listener: FactListener): () => void {
-    this.listeners.push(listener);
-    return () => {
-      const i = this.listeners.indexOf(listener);
-      if (i >= 0) this.listeners.splice(i, 1);
+  /** Stop participating in flushes and release the engine's WASM memory; the database is unusable afterwards. */
+  dispose(): void {
+    this.unregisterDrainer();
+    this.engine.free();
+  }
+
+  private changed(): void {
+    this.pendingEvents = true;
+    onWrite();
+  }
+
+  // --- reads ---
+
+  /** Every live fact keyed by `factKey`; a snapshot for debugging and tests. */
+  get facts(): Map<string, Fact> {
+    const out = new Map<string, Fact>();
+    for (const { terms } of this.engine.facts()) out.set(factKey(terms), terms);
+    return out;
+  }
+
+  has(...terms: Term[]): boolean {
+    return this.engine.has(terms);
+  }
+
+  /** The engine's size plus this layer's bookkeeping; never tracked. */
+  stats(): DBStats {
+    return {
+      ...this.engine.stats(),
+      namedOwners: this.ownerIds.size,
+      maintainedIndexes: this.indexes.size,
+      watches: this.dependencies.size,
+      listeners: this.listeners.length,
+      refs: this.refs.size,
     };
   }
 
-  private notify(type: FactChange, key: string, fact: Fact, info: FactChangeInfo): void {
-    if (this.listeners.length === 0) return;
-    for (const listener of this.listeners.slice()) {
-      try {
-        listener(type, key, fact, info);
-      } catch (e) {
-        console.error("[jam] fact listener threw", e);
-      }
-    }
+  /** Point-in-time query, never tracked. */
+  query(...clauses: QueryClause[]): Bindings[] {
+    if (clauses.length === 0) return [];
+    return this.evaluate(this.compile(clauses));
   }
 
-  private detachFactOwner(key: string, ownerId: string): void {
-    this.ownerFacts.get(ownerId)?.delete(key);
-    const owners = this.factOwners.get(key);
-    if (!owners) return;
-    owners.delete(ownerId);
-    if (owners.size === 0) {
-      this.factOwners.delete(key);
-      const fact = this.factsPlain.get(key);
-      if (fact) this.deleteFactRecord(key, fact, true, false);
+  /** A maintained query for these clauses; `get()` inside an effect subscribes it. */
+  index(...clauses: QueryClause[]): IndexHandle {
+    const key = queryKey(clauses);
+    let index = this.indexes.get(key);
+    if (!index) {
+      index = new Index(this, key, clauses);
+      this.indexes.set(key, index);
     }
-  }
-
-  private attachRefOwner(key: string, ownerId: string): void {
-    let owners = this.refOwners.get(key);
-    if (!owners) {
-      owners = new Set();
-      this.refOwners.set(key, owners);
-    }
-    if (!owners.has(ownerId)) {
-      owners.add(ownerId);
-      let refKeys = this.ownerRefs.get(ownerId);
-      if (!refKeys) {
-        refKeys = new Set();
-        this.ownerRefs.set(ownerId, refKeys);
-      }
-      refKeys.add(key);
-    }
-  }
-
-  private detachRefOwner(key: string, ownerId: string): void {
-    this.ownerRefs.get(ownerId)?.delete(key);
-    const owners = this.refOwners.get(key);
-    if (!owners) return;
-    owners.delete(ownerId);
-    if (owners.size === 0) {
-      this.refOwners.delete(key);
-      this.refs.delete(key);
-    }
-  }
-
-  /** Bump version counters for pattern sets that could match this fact. */
-  private invalidatePatterns(fact: Fact): void {
-    const firstTerm = fact[0];
-    // Check patterns indexed by this fact's first term
-    const exact = this.patternsByFirstTerm.get(firstTerm);
-    if (exact) this.invalidateEntries(exact, fact);
-    // Also check patterns with wildcard/binding first term
-    const wild = this.patternsByFirstTerm.get(null);
-    if (wild) this.invalidateEntries(wild, fact);
-  }
-
-  private invalidateEntries(keys: Set<string>, fact: Fact): void {
-    for (const key of keys) {
-      const entry = this.patternVersions.get(key);
-      if (!entry) continue;
-      for (const pattern of entry.patterns) {
-        if (couldMatch(pattern, fact)) {
-          entry.version.set(entry.version.get() + 1);
-          break;
-        }
-      }
-    }
-  }
-
-  private addFact(
-    terms: Term[],
-    ownerId: string,
-    inheritedScope?: string,
-    replace?: true,
-  ): void {
-    const key = this.factKey(terms);
-    this.ensureOwner(
-      ownerId,
-      ownerId === this.rootOwner ? null : this.currentOwner(),
-    );
-    const isNew = !this.facts.has(key);
-    const hadRoot = this.factOwners.get(key)?.has(this.rootOwner) ?? false;
-    if (isNew) {
-      this.facts.set(key, terms);
-      this.factsPlain.set(key, terms);
-      if (this.emitCollector) this.emitCollector.add(key);
-      for (const collector of this.factCollectorStack) collector.add(key);
-      const first = terms[0];
-      let bucket = this.factsByFirstTerm.get(first);
-      if (!bucket) {
-        bucket = new Set();
-        this.factsByFirstTerm.set(first, bucket);
-      }
-      bucket.add(key);
-      this.recordScope(key, terms, this.resolveScope(terms, inheritedScope));
-      this.invalidatePatterns(terms);
-    }
-    this.attachFactOwner(key, ownerId);
-    const durable = ownerId === this.rootOwner;
-    if (isNew || (durable && !hadRoot)) {
-      this.notify("add", key, terms, replace ? { durable, replace } : { durable });
-    }
-  }
-
-  assert(...terms: Term[]): void {
-    this.addFact(terms, this.currentOwner());
-  }
-
-  insert(...terms: Term[]): void {
-    this.addFact(terms, this.rootOwner);
-  }
-
-  private dropFact(key: string, fact: Fact, invalidate = true): void {
-    const owners = this.factOwners.get(key);
-    const durable = owners?.has(this.rootOwner) ?? false;
-    for (const ownerId of Array.from(owners ?? [])) {
-      this.ownerFacts.get(ownerId)?.delete(key);
-    }
-    this.factOwners.delete(key);
-    this.deleteFactRecord(key, fact, invalidate, durable);
-  }
-
-  /** Facts matching a wildcard pattern, narrowed by the first-term index when the first term is literal. */
-  private matchingFacts(terms: (Term | Wildcard)[]): [string, Fact][] {
-    const first = terms[0];
-    const keys =
-      first === _
-        ? this.factsPlain.keys()
-        : (this.factsByFirstTerm.get(first) ?? []);
-    const matches: [string, Fact][] = [];
-    for (const key of keys) {
-      const fact = this.factsPlain.get(key)!;
-      if (fact.length !== terms.length) continue;
-      let ok = true;
-      for (let i = 1; i < terms.length; i++) {
-        if (terms[i] === _) continue;
-        if (terms[i] !== fact[i]) {
-          ok = false;
-          break;
-        }
-      }
-      if (ok) matches.push([key, fact]);
-    }
-    return matches;
-  }
-
-  drop(...terms: (Term | Wildcard)[]): void {
-    if (!terms.includes(_)) {
-      const key = this.factKey(terms as Term[]);
-      const fact = this.factsPlain.get(key);
-      if (fact) this.dropFact(key, fact);
-      return;
-    }
-    for (const [key, fact] of this.matchingFacts(terms)) {
-      this.dropFact(key, fact);
-    }
-  }
-
-  replace(...terms: Term[]): void {
-    if (terms.length < 2)
-      throw new Error("replace() requires at least 2 terms");
-    const key = this.factKey(terms);
-    const pattern = [...terms.slice(0, terms.length - 1), _] as (
-      | Term
-      | Wildcard
-    )[];
-    let inheritedScope: string | undefined;
-    for (const [otherKey, fact] of this.matchingFacts(pattern)) {
-      if (otherKey === key) continue;
-      inheritedScope ??= this.factScopes.get(otherKey) ?? GLOBAL_SCOPE;
-      this.dropFact(otherKey, fact);
-    }
-    this.addFact(terms, this.rootOwner, inheritedScope, true);
+    return index;
   }
 
   /**
-   * Create a per-pattern-insert computed index. Returns a computed that:
-   * - Tracks only the version counter for these patterns (fine-grained)
-   * - Re-evaluates (scans all facts) only when that counter bumps
-   * - Uses structural comparison so observers only re-run on actual changes
+   * Subscribe a dependency to raw row changes of several maintained queries.
+   * Effects reading `dep` re-run when any of them changes; `onRow` sees each row as it appears or leaves.
    */
-  index(...patterns: Pattern[]): IComputedValue<Bindings[]> {
-    const key = patternsKey(patterns);
-    if (!this.patternVersions.has(key)) {
-      this.patternVersions.set(key, { patterns, version: observable.box(0) });
-      // Register in first-term index for fast invalidation
-      for (const pattern of patterns) {
-        const first = pattern[0];
-        const indexKey: Term | null =
-          first !== _ && !isBinding(first) ? (first as Term) : null;
-        let bucket = this.patternsByFirstTerm.get(indexKey);
-        if (!bucket) {
-          bucket = new Set();
-          this.patternsByFirstTerm.set(indexKey, bucket);
-        }
-        bucket.add(key);
-      }
-    }
-    const entry = this.patternVersions.get(key)!;
-
-    return computed(
-      () => {
-        entry.version.get(); // track ONLY this pattern remember's version
-        return untracked(() => this.query(...patterns)); // scan facts WITHOUT tracking the map
+  watch(queries: QueryClause[][], onRow: (set: number, row: Uint32Array, added: boolean) => void): { dep: Dependency; dispose(): void } {
+    const dep: Dependency = { subscribers: new Set() };
+    const handles: QueryHandle[] = [];
+    const unsubscribes: (() => void)[] = [];
+    queries.forEach((clauses, set) => {
+      const handle = this.engine.register(this.compile(clauses).spec);
+      handles.push(handle);
+      for (const row of handle.rows.values()) onRow(set, row, true);
+      unsubscribes.push(handle.onRow((row, added) => onRow(set, row, added)));
+    });
+    const entry = { handles, dep };
+    this.dependencies.add(entry);
+    return {
+      dep,
+      dispose: () => {
+        this.dependencies.delete(entry);
+        for (const off of unsubscribes) off();
+        for (const handle of handles) handle.release();
       },
-      { equals: comparer.structural },
-    );
-  }
-
-  /** Return facts to scan for a pattern's first term. Uses the index for literals. */
-  private iterFacts(firstPatternTerm: PatternTerm): Iterable<Fact> {
-    if (firstPatternTerm !== _ && !isBinding(firstPatternTerm)) {
-      const bucket = this.factsByFirstTerm.get(firstPatternTerm as Term);
-      if (!bucket) return [];
-      const facts: Fact[] = [];
-      for (const key of bucket) {
-        const fact = this.factsPlain.get(key);
-        if (fact) facts.push(fact);
-      }
-      return facts;
-    }
-    return this.factsPlain.values();
-  }
-
-  /** Query all facts matching patterns (non-reactive, point-in-time). */
-  query(...patterns: Pattern[]): Bindings[] {
-    if (patterns.length === 0) return [];
-    if (patterns.length === 1) return this.querySingle(patterns[0]);
-    return this.queryJoin(patterns);
-  }
-
-  private querySingle(pattern: Pattern): Bindings[] {
-    const first = pattern[0];
-    const results: Bindings[] = [];
-
-    // If the first term is a literal, use the first-term index to skip irrelevant facts
-    if (first !== _ && !isBinding(first)) {
-      const bucket = this.factsByFirstTerm.get(first as Term);
-      if (!bucket) return results;
-      for (const key of bucket) {
-        const fact = this.factsPlain.get(key);
-        if (!fact) continue;
-        const bindings = matchPattern(pattern, fact);
-        if (bindings) results.push(bindings);
-      }
-    } else {
-      // Wildcard/binding first term — must scan all facts
-      for (const fact of this.factsPlain.values()) {
-        const bindings = matchPattern(pattern, fact);
-        if (bindings) results.push(bindings);
-      }
-    }
-    return results;
+    };
   }
 
   /**
-   * Pre-analyze a pattern into positions of literals, bindings, and wildcards.
-   * Allows the join to skip matchPattern and do direct array access.
+   * @internal Variables are numbered by first appearance in the positive patterns; every
+   * other clause has to refer to one of them. Literal ids are only good until the next flush
+   * unless a registered query holds them.
    */
-  private static compilePattern(pattern: Pattern): {
-    literals: [number, Term][]; // [position, value] for literal terms
-    bindings: [number, string][]; // [position, name] for binding terms
-    length: number;
-  } {
-    const literals: [number, Term][] = [];
-    const bindings: [number, string][] = [];
-    for (let i = 0; i < pattern.length; i++) {
-      const t = pattern[i];
-      if (t === _) continue;
-      if (isBinding(t)) bindings.push([i, t.name]);
-      else literals.push([i, t as Term]);
+  compile(clauses: QueryClause[]): CompiledQuery {
+    const names: string[] = [];
+    const patterns: Clause[] = [];
+    for (const clause of clauses) {
+      if (!Array.isArray(clause)) continue;
+      patterns.push(
+        clause.map((t) => {
+          if (t === _) return WILD;
+          if (!isBinding(t)) return this.engine.id(t);
+          let i = names.indexOf(t.name);
+          if (i < 0) i = names.push(t.name) - 1;
+          return VAR_BASE + i;
+        }),
+      );
     }
-    return { literals, bindings, length: pattern.length };
-  }
-
-  private queryJoin(patterns: Pattern[]): Bindings[] {
-    let current = this.querySingle(patterns[0]);
-    for (let i = 1; i < patterns.length; i++) {
-      const pattern = patterns[i];
-      const compiled = FactDB.compilePattern(pattern);
-
-      // Find shared binding names between current results and this pattern
-      const currentBindingNames =
-        current.length > 0 ? Object.keys(current[0]) : [];
-      let joinKey: string | null = null;
-      let joinPos = -1;
-      for (const [pos, name] of compiled.bindings) {
-        if (currentBindingNames.includes(name)) {
-          joinKey = name;
-          joinPos = pos;
+    const lookup = (marker: BindingMarker): number => {
+      const i = names.indexOf(marker.name);
+      return i < 0 ? WILD : VAR_BASE + i;
+    };
+    const bound = (marker: BindingMarker, what: string): number => {
+      const word = lookup(marker);
+      if (word === WILD) throw new Error(`${what} $.${marker.name} is not bound by a pattern`);
+      return word;
+    };
+    const spec: QuerySpec = { patterns };
+    const not: Clause[] = [];
+    const where: Predicate[][] = [];
+    const order: OrderClause[] = [];
+    let aggregate: AggregateClause | undefined;
+    for (const clause of clauses) {
+      if (Array.isArray(clause)) continue;
+      switch (clause.__clause) {
+        case "not":
+          not.push(clause.pattern.map((t) => (t === _ ? WILD : isBinding(t) ? lookup(t) : this.engine.id(t))));
           break;
-        }
-      }
-
-      if (joinKey !== null) {
-        // Hash join using compiled pattern — direct array access, no matchPattern.
-        const index = new Map<Term, Bindings[]>();
-        const first = pattern[0];
-        const scanBucket =
-          first !== _ && !isBinding(first)
-            ? this.factsByFirstTerm.get(first as Term)
-            : null;
-        const facts = scanBucket ? scanBucket : this.facts.keys(); // fallback: all keys
-
-        for (const keyOrFactKey of facts) {
-          const fact = this.factsPlain.get(keyOrFactKey);
-          if (!fact || fact.length !== compiled.length) continue;
-
-          // Check literals directly (skip position 0 if we used the first-term index)
-          let matches = true;
-          for (let li = 0; li < compiled.literals.length; li++) {
-            const [pos, val] = compiled.literals[li];
-            if (scanBucket && pos === 0) continue; // already filtered by first-term
-            if (fact[pos] !== val) {
-              matches = false;
-              break;
-            }
-          }
-          if (!matches) continue;
-
-          // Extract bindings directly — no object allocation for non-matching facts
-          const joinVal = fact[joinPos];
-          const bindings: Bindings = {};
-          for (const [pos, name] of compiled.bindings) {
-            bindings[name] = fact[pos];
-          }
-
-          let bucket = index.get(joinVal);
-          if (!bucket) {
-            bucket = [];
-            index.set(joinVal, bucket);
-          }
-          bucket.push(bindings);
-        }
-
-        // Probe: for each current binding, look up and merge.
-        // Pre-compute which binding names are new vs shared (beyond the join key).
-        const newNames: string[] = [];
-        const otherSharedNames: string[] = [];
-        for (const [, name] of compiled.bindings) {
-          if (name === joinKey) continue;
-          if (currentBindingNames.includes(name)) otherSharedNames.push(name);
-          else newNames.push(name);
-        }
-
-        const next: Bindings[] = [];
-        for (const existing of current) {
-          const key = existing[joinKey!];
-          const bucket = index.get(key);
-          if (bucket) {
-            for (const factBindings of bucket) {
-              // Check other shared vars for conflicts
-              let conflict = false;
-              for (const name of otherSharedNames) {
-                if (existing[name] !== factBindings[name]) {
-                  conflict = true;
-                  break;
-                }
-              }
-              if (conflict) continue;
-
-              // Fast merge: copy existing + add new keys
-              const merged: Bindings = Object.assign({}, existing);
-              for (const name of newNames) {
-                merged[name] = factBindings[name];
-              }
-              next.push(merged);
-            }
-          }
-        }
-        current = next;
-      } else {
-        // No shared variables — cross product, first-term filtered
-        const next: Bindings[] = [];
-        for (const existing of current) {
-          for (const fact of this.iterFacts(pattern[0])) {
-            const factBindings = matchPattern(pattern, fact);
-            if (factBindings) {
-              const merged = mergeBindings(existing, factBindings);
-              if (merged) next.push(merged);
-            }
-          }
-        }
-        current = next;
+        case "where":
+          where.push(
+            clause.any.map(({ lhs, op, rhs }) => ({
+              lhs: bound(lhs, "predicate variable"),
+              op: PRED_CODES[op],
+              rhs: isBinding(rhs) ? bound(rhs, "predicate variable") : this.engine.id(rhs),
+            })),
+          );
+          break;
+        case "order":
+          order.push(clause);
+          break;
+        case "offset":
+          spec.offset = clause.count;
+          break;
+        case "limit":
+          spec.limit = clause.count;
+          break;
+        case "aggregate":
+          if (aggregate) throw new Error("a query has at most one aggregate");
+          aggregate = clause;
+          spec.aggregate = {
+            op: AGG_CODES[clause.op],
+            input: clause.input ? bound(clause.input, "aggregate input") : WILD,
+            group: clause.group.map((g) => bound(g, "group key")),
+          };
+          break;
       }
     }
-    return current;
+    if (not.length > 0) spec.not = not;
+    if (where.length > 0) spec.where = where;
+    const output = aggregate ? [...aggregate.group.map((g) => g.name), aggregate.output.name] : names;
+    if (aggregate && new Set(output).size !== output.length) {
+      throw new Error(`aggregate output $.${aggregate.output.name} repeats a group key`);
+    }
+    const sorts = order.map(({ by, descending }) => {
+      const column = output.indexOf(by.name);
+      if (column < 0) throw new Error(`order key $.${by.name} is not in the query's output`);
+      return { column, descending };
+    });
+    if (sorts.length > 0) spec.order = sorts;
+    return { spec, names: output, order: sorts };
   }
 
-  /** Delete a fact by its serialized key, maintaining all indexes. */
-  deleteByKey(key: string): void {
-    const fact = this.factsPlain.get(key);
-    if (fact) this.dropFact(key, fact, false);
+  /** @internal one-off evaluation; the engine returns rows in assertion order, so ordered queries sort here */
+  evaluate(compiled: CompiledQuery): Bindings[] {
+    const { arity, data, count } = this.engine.query(compiled.spec);
+    const { names, order } = compiled;
+    const out = new Array<Bindings>(count);
+    if (order.length === 0) {
+      for (let r = 0; r < count; r++) out[r] = this.bindingsOf(data, r * arity, names);
+      return out;
+    }
+    const rows = Array.from({ length: count }, (_row, r) => r);
+    rows.sort((a, b) => {
+      for (const { column, descending } of order) {
+        const x = data[a * arity + column];
+        const y = data[b * arity + column];
+        if (x === y) continue;
+        const c = compareTerms(this.engine.term(x), this.engine.term(y));
+        if (c !== 0) return descending ? -c : c;
+      }
+      return a - b;
+    });
+    for (let r = 0; r < count; r++) out[r] = this.bindingsOf(data, rows[r] * arity, names);
+    return out;
   }
 
-  /** Clear all facts, pattern versions, and refs. */
-  clear(): void {
-    const removed =
-      this.listeners.length > 0 ? Array.from(this.factsPlain) : null;
-    this.facts.clear();
-    this.factsPlain.clear();
-    this.factsByFirstTerm.clear();
-    this.patternVersions.clear();
-    this.patternsByFirstTerm.clear();
-    this.refs.clear();
-    this.factOwners.clear();
-    this.ownerFacts.clear();
-    this.refOwners.clear();
-    this.ownerRefs.clear();
-    this.factScopes.clear();
-    this.entityScopes.clear();
-    clearSelectCache();
-    if (removed) {
-      for (const [key, fact] of removed) this.notify("delete", key, fact, { durable: false });
+  /**
+   * @internal Rows of a maintained query in result order: the query's sort keys, then the order
+   * the facts matching the first pattern were asserted, so a list keyed by entity keeps its
+   * order when other attributes change.
+   */
+  decodeRows(rows: Iterable<Uint32Array>, compiled: CompiledQuery): Bindings[] {
+    const { names, order } = compiled;
+    const sorted = Array.from(rows).sort(this.engine.rowComparator(names.length, order));
+    const out = new Array<Bindings>(sorted.length);
+    for (let r = 0; r < sorted.length; r++) out[r] = this.bindingsOf(sorted[r], 0, names);
+    return out;
+  }
+
+  private bindingsOf(row: ArrayLike<number>, start: number, names: string[]): Bindings {
+    const bindings: Bindings = {};
+    for (let v = 0; v < names.length; v++) bindings[names[v]] = this.engine.term(row[start + v]);
+    return bindings;
+  }
+
+  /** @internal */
+  attach(index: Index, spec: QuerySpec): QueryHandle {
+    const handle = this.engine.register(spec);
+    let set = this.indexesByHandle.get(handle);
+    if (!set) this.indexesByHandle.set(handle, (set = new Set()));
+    set.add(index);
+    return handle;
+  }
+
+  /** @internal */
+  detach(index: Index, handle: QueryHandle): void {
+    const set = this.indexesByHandle.get(handle);
+    set?.delete(index);
+    if (set && set.size === 0) this.indexesByHandle.delete(handle);
+    this.indexes.delete(index.key);
+    handle.release();
+  }
+
+  /** Apply queued writes, notify listeners, fold query deltas into handles and mark their effects dirty. */
+  drain(): void {
+    if (!this.pendingEvents) return;
+    this.pendingEvents = false;
+    const changed = this.engine.flush();
+    if (changed.length === 0) return;
+    const touched = new Set<QueryHandle>(changed);
+    for (const handle of changed) {
+      const indexes = this.indexesByHandle.get(handle);
+      if (indexes) for (const index of indexes) markDirty(index);
+    }
+    for (const entry of this.dependencies) {
+      if (entry.handles.some((h) => touched.has(h))) markDirty(entry.dep);
     }
   }
 
-  // --- Refs ---
+  // --- listeners ---
 
+  observe(listener: FactListener): () => void {
+    this.listeners.push(listener);
+    return () => {
+      this.listeners = this.listeners.filter((l) => l !== listener);
+    };
+  }
+
+  // --- refs ---
+
+  /** Store a non-serializable value; it is dropped with the current owner. */
   setRef(key: string, value: unknown): void {
     this.refs.set(key, value);
+    const owner = this.currentOwner();
+    if (owner === ROOT_OWNER) return;
+    let owners = this.refOwners.get(key);
+    if (!owners) this.refOwners.set(key, (owners = new Set()));
+    owners.add(owner);
+    let keys = this.ownerRefs.get(owner);
+    if (!keys) this.ownerRefs.set(owner, (keys = new Set()));
+    keys.add(key);
   }
+
   getRef(key: string): unknown {
     return this.refs.get(key);
   }
+
   deleteRef(key: string): void {
     this.refs.delete(key);
+    for (const owner of this.refOwners.get(key) ?? []) this.ownerRefs.get(owner)?.delete(key);
+    this.refOwners.delete(key);
   }
 }
 
-// Global singleton
 export const db = new FactDB();

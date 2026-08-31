@@ -1,753 +1,625 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import { PGlite } from "@electric-sql/pglite";
-import { live } from "@electric-sql/pglite/live";
-import { electricSync } from "@electric-sql/pglite-sync";
-import { db, $, _ } from "../db";
-import { remember, replace, forget, claim, whenever, scoped, transaction } from "../primitives";
-import { sync, compileFilter, OUTBOX_TABLE, SHAPES_TABLE, type SyncHandle, type SyncOptions } from "../sync";
-import { JAM_FACTS_SQL, factKey } from "../server";
-import type { JamPGlite } from "../pglite";
-import { FakeElectric } from "./helpers/fake-electric";
-import { installFakeLocks } from "./helpers/fake-locks";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { memoryStorage, type FactStorage } from "@jam/engine/storage";
+import { db, FactDB, _ } from "../db";
+import { claim, forget, remember, replace, scoped, whenever, $ } from "../primitives";
+import { sync, compileFilter, type SyncHandle, type SyncOptions, type SyncWebSocket } from "../sync";
+import { createSyncServer, type ClientMessage, type ServerMessage, type SyncServer } from "../server";
+import { fakeNetwork, type FakeNetwork } from "./helpers/fake-socket";
+import { fakeTabs } from "./helpers/fake-tabs";
 
-const P1 = "project:p1";
-const P2 = "project:p2";
+let storage: FactStorage;
+let handles: SyncHandle[];
 
-async function waitFor(predicate: () => boolean, what = "condition", timeout = 8000): Promise<void> {
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function waitFor(predicate: () => boolean, what: string, timeout = 5000): Promise<void> {
   const start = Date.now();
   while (!predicate()) {
     if (Date.now() - start > timeout) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 10));
+    await sleep(2);
   }
 }
 
-const settle = (ms = 80) => new Promise((r) => setTimeout(r, ms));
-
-function has(...terms: Parameters<typeof factKey>[0]) {
-  return db.facts.has(factKey(terms));
+function facts(first: string): unknown[][] {
+  return Array.from(db.facts.values())
+    .filter((f) => f[0] === first)
+    .sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
 }
 
-function status(kind: string) {
-  return db.query(["sync", kind, $.v]).map((b) => b.v);
+function statusFact(kind: string): unknown {
+  return Array.from(db.facts.values()).find((f) => f[0] === "sync" && f[1] === kind)?.[2];
 }
 
-async function createPg(): Promise<JamPGlite & PGlite> {
-  return PGlite.create({ dataDir: "memory://", extensions: { live, sync: electricSync() } });
+async function stored(): Promise<Array<{ terms: unknown[]; scope: string }>> {
+  return (await storage.load()).sort((a, b) => (JSON.stringify(a.terms) < JSON.stringify(b.terms) ? -1 : 1));
 }
 
-/** Drop everything sync() creates so each test starts from an empty client database. */
-async function resetClient(pg: PGlite) {
-  const tables = await pg.query<{ table_name: string }>(
-    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'jam_%'`,
-  );
-  for (const { table_name } of tables.rows) await pg.exec(`DROP TABLE IF EXISTS "${table_name}" CASCADE`);
-  const metadata = await pg.query(`SELECT 1 FROM information_schema.tables WHERE table_schema = 'electric' AND table_name = 'subscriptions_metadata'`);
-  if (metadata.rows.length) await pg.exec(`DELETE FROM electric.subscriptions_metadata`);
-}
+beforeEach(() => {
+  storage = memoryStorage();
+  handles = [];
+  db.clear();
+});
 
-describe("compileFilter", () => {
-  it("compiles scope and literal pattern positions into a where clause over jam_facts columns", () => {
-    expect(compileFilter()).toMatchObject({ where: "", params: [] });
-    expect(compileFilter({ scope: P1 })).toMatchObject({ where: "scope = $1", params: [P1] });
-    expect(compileFilter({ pattern: ["issue", _, "project"] })).toMatchObject({
-      where: "t0 = $1 AND t2 = $2",
-      params: ['"issue"', '"project"'],
-    });
-    expect(compileFilter({ scope: "", pattern: ["issue", 1, $.col] })).toMatchObject({
-      where: "scope = $1 AND t0 = $2 AND t1 = $3",
-      params: ["", '"issue"', "1"],
-    });
-  });
-
-  it("rejects literals past the third term", () => {
-    expect(() => compileFilter({ pattern: [_, _, _, "x"] })).toThrow("first 3 terms");
-  });
-
-  it("derives stable, distinct table names", () => {
-    const a = compileFilter({ scope: P1 });
-    expect(a.id).toMatch(/^jam_shape_[a-z0-9]+$/);
-    expect(compileFilter({ scope: P1 }).id).toBe(a.id);
-    expect(compileFilter({ scope: P2 }).id).not.toBe(a.id);
-    expect(compileFilter({ scope: P1, pattern: ["issue"] }).id).not.toBe(a.id);
-  });
-
-  it("matches facts client-side the same way", () => {
-    const f = compileFilter({ scope: P1, pattern: ["issue", _, "title"] });
-    expect(f.matches(["issue", 1, "title", "A"], P1)).toBe(true);
-    expect(f.matches(["issue", 1, "title", "A"], P2)).toBe(false);
-    expect(f.matches(["issue", 1, "status", "A"], P1)).toBe(false);
-    expect(compileFilter().matches(["anything"], "")).toBe(true);
-  });
+afterEach(async () => {
+  for (const handle of handles) await handle.dispose();
 });
 
 describe("sync (standalone)", () => {
-  let pg: JamPGlite & PGlite;
-  const handles: SyncHandle[] = [];
-
-  async function start(options: Partial<SyncOptions> = {}) {
-    const handle = await sync({ pg, echoTimeout: 200, retryDelay: 20, ...options });
+  async function start() {
+    const handle = await sync({ storage });
     handles.push(handle);
     return handle;
   }
 
-  async function seed(rows: Array<[Parameters<typeof factKey>[0], string]>) {
-    await pg.exec(JAM_FACTS_SQL);
-    for (const [fact, scope] of rows) await pg.query(`INSERT INTO jam_facts (key, scope) VALUES ($1, $2)`, [factKey(fact), scope]);
-  }
-
-  async function serverRows() {
-    const { rows } = await pg.query<{ key: string; scope: string }>(`SELECT key, scope FROM jam_facts ORDER BY key`);
-    return rows.map((r) => [r.key, r.scope]);
-  }
-
-  beforeAll(async () => {
-    pg = await createPg();
-  });
-  afterAll(async () => {
-    await pg.close();
-  });
-  beforeEach(async () => {
-    db.clear();
-    await resetClient(pg);
-  });
-  afterEach(async () => {
-    while (handles.length) await handles.pop()!.dispose();
-  });
-
-  it("loads only the subscribed scope and reports status facts", async () => {
-    await seed([
-      [["issue", 1, "title", "One"], P1],
-      [["issue", 2, "title", "Two"], P2],
-      [["project", "p1", "name", "P1"], ""],
-    ]);
-    const s = await start();
-    expect(status("status")).toEqual(["standalone"]);
-    const sub = s.subscribe({ scope: P1 });
-    expect(db.query(["sync", "shape", sub.id, "ready", $.r]).map((b) => b.r)).toEqual([false]);
-    await sub.ready;
-    expect(has("issue", 1, "title", "One")).toBe(true);
-    expect(has("issue", 2, "title", "Two")).toBe(false);
-    expect(has("project", "p1", "name", "P1")).toBe(false);
-    expect(db.scopeOf("issue", 1, "title", "One")).toBe(P1);
-    expect(db.query(["sync", "shape", sub.id, "ready", $.r]).map((b) => b.r)).toEqual([true]);
-    expect(status("pending")).toEqual([0]);
-  });
-
-  it("filters by pattern literals, optionally combined with scope", async () => {
-    await seed([
-      [["issue", 1, "title", "One"], P1],
-      [["issue", 1, "status", "todo"], P1],
-      [["comment", 9, "body", "hi"], P1],
-      [["issue", 3, "title", "Three"], P2],
-    ]);
-    const s = await start();
-    await s.subscribe({ pattern: ["issue", _, "title"] }).ready;
-    expect(has("issue", 1, "title", "One")).toBe(true);
-    expect(has("issue", 3, "title", "Three")).toBe(true);
-    expect(has("issue", 1, "status", "todo")).toBe(false);
-    expect(has("comment", 9, "body", "hi")).toBe(false);
-
-    await s.subscribe({ scope: P1, pattern: ["comment"] }).ready;
-    expect(has("comment", 9, "body", "hi")).toBe(true);
-    expect(has("issue", 1, "status", "todo")).toBe(false);
-  });
-
-  it("mirrors rows inserted, rescoped and deleted behind its back", async () => {
-    await seed([]);
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    await pg.query(`INSERT INTO jam_facts (key, scope) VALUES ($1, $2)`, [factKey(["issue", 1, "title", "One"]), P1]);
-    await waitFor(() => has("issue", 1, "title", "One"), "insert to arrive");
-    expect(db.scopeOf("issue", 1, "title", "One")).toBe(P1);
-
-    await pg.query(`UPDATE jam_facts SET scope = $2 WHERE key = $1`, [factKey(["issue", 1, "title", "One"]), P2]);
-    await waitFor(() => !has("issue", 1, "title", "One"), "rescoped row to leave the subscription");
-
-    await pg.query(`UPDATE jam_facts SET scope = $2 WHERE key = $1`, [factKey(["issue", 1, "title", "One"]), P1]);
-    await waitFor(() => has("issue", 1, "title", "One"), "row to come back");
-    await pg.query(`DELETE FROM jam_facts WHERE key = $1`, [factKey(["issue", 1, "title", "One"])]);
-    await waitFor(() => !has("issue", 1, "title", "One"), "delete to arrive");
-  });
-
-  it("stores local remember/replace/forget with their scope and settles pending back to zero", async () => {
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    scoped(P1, () => {
-      remember("issue", 1, "title", "One");
-      remember("issue", 1, "status", "todo");
+  it("loads only the facts a subscription covers and unloads them on dispose", async () => {
+    await storage.write({
+      upserts: [
+        { terms: ["issue", 1, "title", "A"], scope: "p1" },
+        { terms: ["issue", 2, "title", "B"], scope: "p2" },
+        { terms: ["project", "p1", "name", "One"], scope: "" },
+      ],
+      deletes: [],
     });
-    remember("project", "p1", "name", "P1");
-    await s.flush();
-    await waitFor(() => status("pending")[0] === 0, "pending to settle");
-    expect(await serverRows()).toEqual([
-      [factKey(["issue", 1, "status", "todo"]), P1],
-      [factKey(["issue", 1, "title", "One"]), P1],
-      [factKey(["project", "p1", "name", "P1"]), ""],
-    ]);
+    const s = await start();
+    const global = s.subscribe({ scope: "" });
+    await global.ready;
+    expect(facts("project")).toEqual([["project", "p1", "name", "One"]]);
+    expect(facts("issue")).toEqual([]);
 
-    replace("issue", 1, "title", "Uno");
-    await s.flush();
-    await waitFor(() => status("pending")[0] === 0, "replace to settle");
-    expect((await serverRows()).map((r) => r[0])).toContain(factKey(["issue", 1, "title", "Uno"]));
-    expect((await serverRows()).map((r) => r[0])).not.toContain(factKey(["issue", 1, "title", "One"]));
-    expect(db.scopeOf("issue", 1, "title", "Uno")).toBe(P1);
-    expect(has("issue", 1, "title", "Uno")).toBe(true);
+    const p1 = s.subscribe({ scope: "p1" });
+    await p1.ready;
+    expect(facts("issue")).toEqual([["issue", 1, "title", "A"]]);
+    expect(db.scopeOf("issue", 1, "title", "A")).toBe("p1");
+    expect(statusFact("status")).toBe("standalone");
 
-    forget("issue", 1, "status", "todo");
-    await s.flush();
-    await waitFor(() => status("pending")[0] === 0, "forget to settle");
-    expect((await serverRows()).map((r) => r[0])).not.toContain(factKey(["issue", 1, "status", "todo"]));
-    await settle(300);
-    expect(has("issue", 1, "title", "Uno")).toBe(true);
-    expect(has("issue", 1, "status", "todo")).toBe(false);
-    expect((await pg.query(`SELECT count(*)::int AS n FROM ${OUTBOX_TABLE}`)).rows).toEqual([{ n: 0 }]);
+    await p1.dispose();
+    expect(facts("issue")).toEqual([]);
+    expect(facts("project")).toHaveLength(1);
+    expect(await stored()).toHaveLength(3);
   });
 
-  it("never stores excluded or derived facts", async () => {
+  it("stores durable local writes with their scope and skips excluded or derived facts", async () => {
     const s = await start();
     await s.subscribe().ready;
+    scoped("p1", () => remember("issue", 1, "title", "A"));
+    remember("project", "p1", "name", "One");
     remember("dom", "x", "tag", "div");
     const stop = whenever([["issue", $.id, "title", $.t]], (matches) => {
-      for (const { id } of matches) claim("issue", id as number, "derived", true);
+      for (const { id } of matches) claim("issue", id, "derived", true);
     });
-    remember("issue", 1, "title", "One");
-    await waitFor(() => has("issue", 1, "derived", true), "claim to run");
+    expect(db.has("issue", 1, "derived", true)).toBe(true);
     await s.flush();
-    await waitFor(() => status("pending")[0] === 0, "pending to settle");
-    expect(await serverRows()).toEqual([[factKey(["issue", 1, "title", "One"]), ""]]);
-    stop();
-    expect(has("issue", 1, "derived", true)).toBe(false);
-    await s.flush();
-    expect(await serverRows()).toEqual([[factKey(["issue", 1, "title", "One"]), ""]]);
-  });
-
-  it("refcounts identical subscriptions and drops facts only with the last one", async () => {
-    await seed([[["issue", 1, "title", "One"], P1]]);
-    const s = await start();
-    const a = s.subscribe({ scope: P1 });
-    const b = s.subscribe({ scope: P1 });
-    expect(b.id).toBe(a.id);
-    await Promise.all([a.ready, b.ready]);
-    await a.dispose();
-    expect(has("issue", 1, "title", "One")).toBe(true);
-    await b.dispose();
-    expect(has("issue", 1, "title", "One")).toBe(false);
-    await settle();
-    expect((await serverRows()).length).toBe(1);
-    expect((await pg.query(`SELECT count(*)::int AS n FROM ${OUTBOX_TABLE}`)).rows).toEqual([{ n: 0 }]);
-  });
-
-  it("keeps a fact held by another overlapping subscription", async () => {
-    await seed([
-      [["issue", 1, "title", "One"], P1],
-      [["issue", 1, "status", "todo"], P1],
+    expect(await stored()).toEqual([
+      { terms: ["issue", 1, "title", "A"], scope: "p1" },
+      { terms: ["project", "p1", "name", "One"], scope: "" },
     ]);
-    const s = await start();
-    const byScope = s.subscribe({ scope: P1 });
-    const byPattern = s.subscribe({ pattern: ["issue", _, "title"] });
-    await Promise.all([byScope.ready, byPattern.ready]);
-    await byScope.dispose();
-    expect(has("issue", 1, "title", "One")).toBe(true);
-    expect(has("issue", 1, "status", "todo")).toBe(false);
+
+    replace("issue", 1, "title", "B");
+    forget("project", "p1", "name", "One");
+    await s.flush();
+    expect(await stored()).toEqual([{ terms: ["issue", 1, "title", "B"], scope: "p1" }]);
+    stop();
   });
 
-  it("leaves locally remembered facts outside every subscription alone", async () => {
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    scoped(P2, () => remember("issue", 2, "title", "Two"));
-    await s.flush();
-    await waitFor(() => status("pending")[0] === 0, "pending to settle");
-    await settle(300);
-    expect(has("issue", 2, "title", "Two")).toBe(true);
-    expect(await serverRows()).toEqual([[factKey(["issue", 2, "title", "Two"]), P2]]);
-  });
-
-  it("restores facts from the local table on a fresh sync()", async () => {
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    scoped(P1, () => remember("issue", 1, "title", "One"));
-    await s.flush();
-    await waitFor(() => status("pending")[0] === 0, "pending to settle");
-    await handles.pop()!.dispose();
+  it("restores stored facts into a fresh session", async () => {
+    const first = await start();
+    await first.subscribe({ scope: "p1" }).ready;
+    scoped("p1", () => remember("issue", 1, "title", "A"));
+    await first.dispose();
+    handles.length = 0;
     db.clear();
 
-    const again = await start();
-    await again.subscribe({ scope: P1 }).ready;
-    expect(has("issue", 1, "title", "One")).toBe(true);
-    expect(db.scopeOf("issue", 1, "title", "One")).toBe(P1);
+    const second = await start();
+    expect(facts("issue")).toEqual([]);
+    await second.subscribe({ pattern: ["issue", _] }).ready;
+    expect(facts("issue")).toEqual([["issue", 1, "title", "A"]]);
+    expect(db.scopeOf("issue", 1, "title", "A")).toBe("p1");
+  });
+});
+
+describe("sync (server)", () => {
+  let server: SyncServer;
+  let net: FakeNetwork;
+  let received: ServerMessage[];
+
+  beforeEach(async () => {
+    server = await createSyncServer({
+      storage: memoryStorage(),
+      allow: (scope) => scope !== "forbidden",
+    });
+    net = fakeNetwork((socket) => server.handle(socket));
+    received = [];
   });
 
-  it("stores every fact of a transaction", async () => {
+  /** Client socket factory that also records every server message for assertions. */
+  const socket = (url: string): SyncWebSocket => {
+    const s = net.connect(url);
+    return new Proxy(s, {
+      set(target, prop, value) {
+        if (prop === "onmessage" && typeof value === "function") {
+          target.onmessage = (event) => {
+            received.push(JSON.parse(String(event.data)) as ServerMessage);
+            value(event);
+          };
+          return true;
+        }
+        return Reflect.set(target, prop, value);
+      },
+    });
+  };
+
+  async function start(options: Partial<SyncOptions> = {}) {
+    const handle = await sync({ url: "ws://test", storage, socket, retryDelay: 5, ...options });
+    handles.push(handle);
+    return handle;
+  }
+
+  /** Let every in-flight message, storage write and reconnect timer run. */
+  async function settle() {
+    for (let i = 0; i < 3; i++) {
+      await net.idle();
+      await sleep(10);
+    }
+    await net.idle();
+  }
+
+  it("mirrors a snapshot of the subscribed slice and streams matching changes", async () => {
+    await server.apply([
+      { op: "upsert", terms: ["issue", 1, "title", "A"], scope: "p1" },
+      { op: "upsert", terms: ["issue", 2, "title", "B"], scope: "p2" },
+    ]);
+    const s = await start();
+    expect(statusFact("status")).toBe("connecting");
+    const sub = s.subscribe({ scope: "p1" });
+    await sub.ready;
+    expect(facts("issue")).toEqual([["issue", 1, "title", "A"]]);
+    expect(db.scopeOf("issue", 1, "title", "A")).toBe("p1");
+    expect(statusFact("status")).toBe("live");
+    expect(db.has("sync", "shape", sub.id, "ready", true)).toBe(true);
+
+    await server.apply([
+      { op: "upsert", terms: ["issue", 1, "done", true], scope: "p1" },
+      { op: "upsert", terms: ["issue", 2, "done", true], scope: "p2" },
+    ]);
+    await settle();
+    expect(facts("issue")).toEqual([
+      ["issue", 1, "done", true],
+      ["issue", 1, "title", "A"],
+    ]);
+
+    await server.apply([{ op: "delete", terms: ["issue", 1, "title", "A"], scope: "p1" }]);
+    await settle();
+    expect(facts("issue")).toEqual([["issue", 1, "done", true]]);
+    expect(await stored()).toEqual([{ terms: ["issue", 1, "done", true], scope: "p1" }]);
+  });
+
+  it("pushes local writes, retires them on ack and does not flicker on the echo", async () => {
     const s = await start();
     await s.subscribe().ready;
-    transaction(() => {
-      for (let i = 0; i < 20; i++) remember("issue", i, "title", `#${i}`);
+    const events: string[] = [];
+    const off = db.observe((type, _key, fact) => {
+      if (fact[0] === "todo") events.push(`${type}:${JSON.stringify(fact)}`);
     });
+
+    scoped("p1", () => remember("todo", 1, "title", "A"));
+    expect(statusFact("pending")).toBe(1);
     await s.flush();
-    expect((await serverRows()).length).toBe(20);
-    await waitFor(() => status("pending")[0] === 0, "pending to settle");
-    expect(db.query(["issue", $.i, "title", $.t]).length).toBe(20);
+    expect(statusFact("pending")).toBe(0);
+    expect(server.facts()).toEqual([{ terms: ["todo", 1, "title", "A"], scope: "p1" }]);
+    expect(await storage.readLog(0)).toEqual([]);
+
+    replace("todo", 1, "title", "B");
+    await s.flush();
+    await settle();
+    expect(server.facts()).toEqual([{ terms: ["todo", 1, "title", "B"], scope: "p1" }]);
+    expect(facts("todo")).toEqual([["todo", 1, "title", "B"]]);
+    expect(events).toEqual(['add:["todo",1,"title","A"]', 'delete:["todo",1,"title","A"]', 'add:["todo",1,"title","B"]']);
+    off();
   });
 
-  it("refuses to forget a shape that is still subscribed", async () => {
+  it("reports rejected pushes and recovers on the next accepted one", async () => {
     const s = await start();
-    const sub = s.subscribe({ scope: P1 });
+    await s.subscribe().ready;
+    scoped("forbidden", () => remember("secret", 1, "x", 1));
+    await s.flush();
+    expect(String(statusFact("error"))).toContain("forbidden");
+    expect(statusFact("pending")).toBe(0);
+    expect(server.facts()).toEqual([]);
+
+    remember("public", 1, "x", 1);
+    await s.flush();
+    expect(statusFact("error")).toBeUndefined();
+    expect(server.facts()).toEqual([{ terms: ["public", 1, "x", 1], scope: "" }]);
+  });
+
+  it("catches up with a replay after the connection drops and re-pushes offline writes", async () => {
+    await server.apply([{ op: "upsert", terms: ["n", 1], scope: "" }]);
+    const s = await start();
+    const sub = s.subscribe();
     await sub.ready;
-    await expect(s.forgetShape({ scope: P1 })).rejects.toThrow("still subscribed");
-    await sub.dispose();
-    await s.forgetShape({ scope: P1 });
+    expect(received.filter((m) => m.type === "snapshot")).toHaveLength(1);
+
+    net.sockets[0].drop();
+    expect(statusFact("status")).toBe("offline");
+    expect(s.connected).toBe(false);
+
+    await server.apply([{ op: "upsert", terms: ["n", 2], scope: "" }]);
+    remember("n", 3);
+    expect(statusFact("pending")).toBe(1);
+    expect(s.connected).toBe(false);
+
+    await settle();
+    expect(s.connected).toBe(true);
+    expect(statusFact("status")).toBe("live");
+    expect(received.filter((m) => m.type === "snapshot")).toHaveLength(1);
+    expect(received.filter((m) => m.type === "replay")).toHaveLength(1);
+    expect(facts("n")).toEqual([["n", 1], ["n", 2], ["n", 3]]);
+    expect(server.facts().map((f) => f.terms)).toEqual([["n", 1], ["n", 2], ["n", 3]]);
+    expect(statusFact("pending")).toBe(0);
+  });
+
+  it("resumes a fresh session from the mirror with a replay since the last seen seq", async () => {
+    await server.apply([{ op: "upsert", terms: ["n", 1], scope: "" }]);
+    const first = await start();
+    await first.subscribe().ready;
+    await first.dispose();
+    handles.length = 0;
+    db.clear();
+
+    await server.apply([{ op: "delete", terms: ["n", 1], scope: "" }]);
+    await server.apply([{ op: "upsert", terms: ["n", 2], scope: "" }]);
+
+    received = [];
+    const second = await start();
+    const sub = second.subscribe();
+    expect(facts("n")).toEqual([["n", 1]]);
+    await sub.ready;
+    expect(received.map((m) => m.type)).toEqual(["hello", "replay"]);
+    expect(facts("n")).toEqual([["n", 2]]);
+    await second.flush();
+    expect(await stored()).toEqual([{ terms: ["n", 2], scope: "" }]);
+  });
+
+  it("falls back to a snapshot when the server log no longer reaches the last seen seq", async () => {
+    server = await createSyncServer({ storage: memoryStorage(), logRetention: 1 });
+    net = fakeNetwork((socket) => server.handle(socket));
+    await server.apply([{ op: "upsert", terms: ["n", 1], scope: "" }]);
+    const first = await start();
+    await first.subscribe().ready;
+    await first.dispose();
+    handles.length = 0;
+    db.clear();
+
+    for (let i = 2; i <= 5; i++) await server.apply([{ op: "upsert", terms: ["n", i], scope: "" }]);
+    await server.apply([{ op: "delete", terms: ["n", 1], scope: "" }]);
+
+    received = [];
+    const second = await start();
+    await second.subscribe().ready;
+    expect(received.map((m) => m.type)).toEqual(["hello", "snapshot"]);
+    expect(facts("n")).toEqual([["n", 2], ["n", 3], ["n", 4], ["n", 5]]);
+  });
+
+  it("converges with a concurrent replace from another writer", async () => {
+    await server.apply([{ op: "upsert", terms: ["todo", 1, "title", "A"], scope: "" }]);
+    const s = await start();
+    await s.subscribe().ready;
+
+    replace("todo", 1, "title", "B");
+    await server.apply([{ op: "replace", terms: ["todo", 1, "title", "C"], scope: "" }]);
+    await s.flush();
+    await settle();
+    expect(facts("todo")).toEqual([["todo", 1, "title", "B"]]);
+    expect(server.facts().map((f) => f.terms)).toEqual([["todo", 1, "title", "B"]]);
+
+    await server.apply([{ op: "replace", terms: ["todo", 1, "title", "D"], scope: "" }]);
+    await settle();
+    expect(facts("todo")).toEqual([["todo", 1, "title", "D"]]);
+  });
+
+  it("moves a fact between scopes when the server reports a new scope", async () => {
+    await server.apply([{ op: "upsert", terms: ["issue", 1, "title", "A"], scope: "p1" }]);
+    const s = await start();
+    await s.subscribe({ scope: "p1" }).ready;
+    await s.subscribe({ scope: "p2" }).ready;
+    expect(db.scopeOf("issue", 1, "title", "A")).toBe("p1");
+
+    await server.apply([{ op: "upsert", terms: ["issue", 1, "title", "A"], scope: "p2" }]);
+    await settle();
+    expect(db.scopeOf("issue", 1, "title", "A")).toBe("p2");
+    expect(await stored()).toEqual([{ terms: ["issue", 1, "title", "A"], scope: "p2" }]);
+    expect(server.facts()).toEqual([{ terms: ["issue", 1, "title", "A"], scope: "p2" }]);
+  });
+
+  it("drops a fact that moves out of the only subscribed scope", async () => {
+    await server.apply([{ op: "upsert", terms: ["issue", 1, "title", "A"], scope: "p1" }]);
+    const s = await start();
+    await s.subscribe({ scope: "p1" }).ready;
+    await server.apply([{ op: "upsert", terms: ["issue", 1, "title", "A"], scope: "p2" }]);
+    await settle();
+    expect(facts("issue")).toEqual([]);
+    expect(await stored()).toEqual([]);
+  });
+
+  it("refcounts identical subscriptions and unsubscribes on the last dispose", async () => {
+    await server.apply([{ op: "upsert", terms: ["issue", 1, "title", "A"], scope: "p1" }]);
+    const s = await start();
+    const a = s.subscribe({ scope: "p1" });
+    const b = s.subscribe({ scope: "p1" });
+    expect(a.id).toBe(b.id);
+    expect(a.id).toBe(compileFilter({ scope: "p1" }).id);
+    await Promise.all([a.ready, b.ready]);
+    await a.dispose();
+    expect(facts("issue")).toHaveLength(1);
+    await b.dispose();
+    expect(facts("issue")).toHaveLength(0);
+    expect(db.has("sync", "shape", a.id, "ready", true)).toBe(false);
+
+    await server.apply([{ op: "upsert", terms: ["issue", 2, "title", "B"], scope: "p1" }]);
+    await settle();
+    expect(facts("issue")).toHaveLength(0);
   });
 
   it("follow() subscribes whatever the matching facts ask for and overlaps each switch", async () => {
-    await seed([
-      [["issue", 1, "title", "One"], P1],
-      [["issue", 2, "title", "Two"], P2],
-      [["project", "p1", "name", "P1"], ""],
+    await server.apply([
+      { op: "upsert", terms: ["issue", 1, "title", "One"], scope: "p1" },
+      { op: "upsert", terms: ["issue", 2, "title", "Two"], scope: "p2" },
+      { op: "upsert", terms: ["project", "p1", "name", "P1"], scope: "" },
     ]);
-    const s = await start();
+    const s = await start({ exclude: (fact) => fact[0] === "route" });
     const events: string[] = [];
-    const stopTrace = db.observe((type, key) => {
-      if (key.startsWith('["issue"')) events.push(`${type} ${JSON.parse(key)[1]}`);
+    const stopTrace = db.observe((type, _key, fact) => {
+      if (fact[0] === "issue") events.push(`${type} ${fact[1]}`);
     });
-    const stop = s.follow([["route", "project", $.p]], ([route]) => [{ scope: "" }, ...(route ? [{ scope: `project:${route.p}` }] : [])]);
-    await waitFor(() => has("project", "p1", "name", "P1"), "global facts");
+    const stop = s.follow([["route", "project", $.p]], ([route]) => [{ scope: "" }, ...(route ? [{ scope: String(route.p) }] : [])]);
+    await waitFor(() => db.has("project", "p1", "name", "P1"), "global facts");
     await settle();
-    expect(has("issue", 1, "title", "One")).toBe(false);
+    expect(db.has("issue", 1, "title", "One")).toBe(false);
 
     remember("route", "project", "p1");
-    await waitFor(() => has("issue", 1, "title", "One"), "p1 facts");
+    await waitFor(() => db.has("issue", 1, "title", "One"), "p1 facts");
 
     replace("route", "project", "p2");
-    await waitFor(() => has("issue", 2, "title", "Two") && !has("issue", 1, "title", "One"), "switch to p2");
+    await waitFor(() => db.has("issue", 2, "title", "Two") && !db.has("issue", 1, "title", "One"), "switch to p2");
     expect(events).toEqual(["add 1", "add 2", "delete 1"]);
-    expect(db.query(["sync", "shape", $.id, "ready", $.r]).length).toBe(2);
+    expect(db.query(["sync", "shape", $.id, "ready", $.r])).toHaveLength(2);
 
     await stop();
     stopTrace();
-    expect(has("project", "p1", "name", "P1")).toBe(false);
-    expect(has("issue", 2, "title", "Two")).toBe(false);
+    expect(db.has("project", "p1", "name", "P1")).toBe(false);
+    expect(db.has("issue", 2, "title", "Two")).toBe(false);
     expect(db.query(["sync", "shape", $.id, "ready", $.r])).toEqual([]);
     expect(db.query(["route", "project", $.p]).map((b) => b.p)).toEqual(["p2"]);
   });
 
   it("follow() settles on the last of a burst of changes", async () => {
-    await seed([
-      [["issue", 1, "title", "One"], P1],
-      [["issue", 2, "title", "Two"], P2],
-      [["issue", 3, "title", "Three"], "project:p3"],
+    await server.apply([
+      { op: "upsert", terms: ["issue", 1, "title", "One"], scope: "p1" },
+      { op: "upsert", terms: ["issue", 2, "title", "Two"], scope: "p2" },
+      { op: "upsert", terms: ["issue", 3, "title", "Three"], scope: "p3" },
     ]);
-    const s = await start();
+    const s = await start({ exclude: (fact) => fact[0] === "route" });
     remember("route", "project", "p1");
-    const stop = s.follow([["route", "project", $.p]], ([route]) => (route ? [{ scope: `project:${route.p}` }] : []));
-    await waitFor(() => has("issue", 1, "title", "One"), "p1 facts");
+    const stop = s.follow([["route", "project", $.p]], ([route]) => (route ? [{ scope: String(route.p) }] : []));
+    await waitFor(() => db.has("issue", 1, "title", "One"), "p1 facts");
 
     replace("route", "project", "p2");
     replace("route", "project", "p3");
-    await waitFor(() => has("issue", 3, "title", "Three") && !has("issue", 1, "title", "One") && !has("issue", 2, "title", "Two"), "p3 only");
+    await waitFor(
+      () => db.has("issue", 3, "title", "Three") && !db.has("issue", 1, "title", "One") && !db.has("issue", 2, "title", "Two"),
+      "p3 only",
+    );
     await settle();
-    expect(db.query(["sync", "shape", $.id, "ready", $.r]).map((b) => b.id)).toEqual([compileFilter({ scope: "project:p3" }).id]);
+    expect(db.query(["sync", "shape", $.id, "ready", $.r]).map((b) => b.id)).toEqual([compileFilter({ scope: "p3" }).id]);
 
     forget("route", "project", "p3");
-    await waitFor(() => !has("issue", 3, "title", "Three"), "nothing followed");
+    await waitFor(() => !db.has("issue", 3, "title", "Three"), "nothing followed");
     await stop();
   });
 });
 
-describe("sync (Electric)", () => {
-  let client: JamPGlite & PGlite;
-  let server: PGlite;
-  let electric: FakeElectric;
-  const handles: SyncHandle[] = [];
+describe("sync (tabs)", () => {
+  let server: SyncServer;
+  let net: FakeNetwork;
+  let hub: ReturnType<typeof fakeTabs>;
+  let pushes: ClientMessage[];
 
-  async function start(options: Partial<SyncOptions> = {}) {
-    const handle = await sync({
-      pg: client,
-      shapeUrl: electric.shapeUrl,
-      writeUrl: electric.writeUrl,
-      fetch: electric.fetch,
-      echoTimeout: 300,
-      retryDelay: 30,
-      ...options,
-    });
-    handles.push(handle);
-    return handle;
+  interface Tab {
+    s: SyncHandle;
+    db: FactDB;
+    facts(first: string): unknown[][];
+    status(kind: string): unknown;
   }
 
-  async function serverRows() {
-    const { rows } = await server.query<{ key: string; scope: string }>(`SELECT key, scope FROM jam_facts ORDER BY key`);
-    return rows.map((r) => [r.key, r.scope]);
-  }
-
-  const insert = (fact: Parameters<typeof factKey>[0], scope: string) =>
-    electric.sql(`INSERT INTO jam_facts (key, scope) VALUES ($1, $2)`, [factKey(fact), scope]);
-
-  /** Record every add/delete of the given key so tests can assert a fact never flickered. */
-  function trace(fact: Parameters<typeof factKey>[0]) {
-    const key = factKey(fact);
-    const events: string[] = [];
-    const stop = db.observe((type, k) => {
-      if (k === key) events.push(type);
-    });
-    return { events, stop };
-  }
-
-  beforeAll(async () => {
-    client = await createPg();
-    server = await PGlite.create({ dataDir: "memory://" });
-  });
-  afterAll(async () => {
-    await client.close();
-    await server.close();
-  });
   beforeEach(async () => {
-    db.clear();
-    await resetClient(client);
-    await server.exec(`DROP TABLE IF EXISTS jam_facts`);
-    await server.exec(JAM_FACTS_SQL);
-    electric = new FakeElectric(server);
-  });
-  afterEach(async () => {
-    while (handles.length) await handles.pop()!.dispose();
-  });
-
-  it("streams the initial shape and flips status from syncing to live", async () => {
-    await insert(["issue", 1, "title", "One"], P1);
-    await insert(["issue", 2, "title", "Two"], P2);
-    const s = await start();
-    const sub = s.subscribe({ scope: P1 });
-    expect(status("status")).toEqual(["syncing"]);
-    await sub.ready;
-    expect(status("status")).toEqual(["live"]);
-    expect(has("issue", 1, "title", "One")).toBe(true);
-    expect(has("issue", 2, "title", "Two")).toBe(false);
-    expect(db.scopeOf("issue", 1, "title", "One")).toBe(P1);
-    const registry = await client.query<{ ready: boolean }>(`SELECT ready FROM ${SHAPES_TABLE} WHERE table_name = $1`, [sub.id]);
-    expect(registry.rows).toEqual([{ ready: true }]);
-  });
-
-  it("applies remote inserts, rescopes and deletes", async () => {
-    const s = await start();
-    await Promise.all([s.subscribe({ scope: P1 }).ready, s.subscribe({ scope: P2 }).ready]);
-    await insert(["issue", 1, "title", "One"], P1);
-    await waitFor(() => has("issue", 1, "title", "One"), "remote insert");
-
-    const t = trace(["issue", 1, "title", "One"]);
-    await electric.sql(`UPDATE jam_facts SET scope = $2 WHERE key = $1`, [factKey(["issue", 1, "title", "One"]), P2]);
-    await waitFor(() => db.scopeOf("issue", 1, "title", "One") === P2, "rescope to P2");
-    await settle();
-    expect(t.events).toEqual([]);
-    t.stop();
-
-    await electric.sql(`DELETE FROM jam_facts WHERE key = $1`, [factKey(["issue", 1, "title", "One"])]);
-    await waitFor(() => !has("issue", 1, "title", "One"), "remote delete");
-  });
-
-  it("pushes local writes through the outbox and absorbs the echo without flicker", async () => {
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    const t = trace(["issue", 1, "title", "One"]);
-    scoped(P1, () => remember("issue", 1, "title", "One"));
-    await waitFor(() => electric.writes.length === 1, "POST to the write endpoint");
-    expect(electric.writes[0]).toEqual({ changes: [{ op: "upsert", key: factKey(["issue", 1, "title", "One"]), scope: P1 }] });
-    await waitFor(() => status("pending")[0] === 0, "ack");
-    expect(await serverRows()).toEqual([[factKey(["issue", 1, "title", "One"]), P1]]);
-    await settle(200);
-    expect(t.events).toEqual(["add"]);
-    expect((await client.query(`SELECT count(*)::int AS n FROM ${OUTBOX_TABLE}`)).rows).toEqual([{ n: 0 }]);
-
-    forget("issue", 1, "title", "One");
-    await waitFor(() => electric.writes.length === 2, "second POST");
-    await waitFor(() => status("pending")[0] === 0, "delete ack");
-    expect(await serverRows()).toEqual([]);
-    await settle(200);
-    expect(t.events).toEqual(["add", "delete"]);
-    t.stop();
-  });
-
-  it("ships a transaction as one batch", async () => {
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    transaction(() => {
-      scoped(P1, () => {
-        for (let i = 0; i < 20; i++) remember("issue", i, "title", `#${i}`);
+    server = await createSyncServer({ storage: memoryStorage() });
+    pushes = [];
+    net = fakeNetwork((socket) => {
+      socket.on("message", (data) => {
+        const message = JSON.parse(String(data)) as ClientMessage;
+        if (message.type === "push") pushes.push(message);
       });
+      server.handle(socket);
     });
-    await waitFor(() => status("pending")[0] === 0 && electric.writes.length > 0, "ack");
-    expect(electric.writes.length).toBe(1);
-    expect((electric.writes[0] as { changes: unknown[] }).changes.length).toBe(20);
-    expect((await serverRows()).length).toBe(20);
+    hub = fakeTabs();
   });
 
-  it("sends replace as a replace op so concurrent replaces converge", async () => {
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    await insert(["issue", 1, "title", "One"], P1);
-    await waitFor(() => has("issue", 1, "title", "One"), "initial row");
-    await electric.sql(`INSERT INTO jam_facts (key, scope) VALUES ($1, $2)`, [factKey(["issue", 1, "title", "Stale"]), P1]);
-    await waitFor(() => has("issue", 1, "title", "Stale"), "second value");
-
-    replace("issue", 1, "title", "Uno");
-    await waitFor(() => electric.writes.length === 1, "POST");
-    expect((electric.writes[0] as { changes: unknown[] }).changes).toEqual([
-      { op: "delete", key: factKey(["issue", 1, "title", "One"]), scope: P1 },
-      { op: "delete", key: factKey(["issue", 1, "title", "Stale"]), scope: P1 },
-      { op: "replace", key: factKey(["issue", 1, "title", "Uno"]), scope: P1 },
-    ]);
-    await waitFor(() => status("pending")[0] === 0, "ack");
-    expect(await serverRows()).toEqual([[factKey(["issue", 1, "title", "Uno"]), P1]]);
-    await settle(400);
-    expect(db.query(["issue", 1, "title", $.t]).map((b) => b.t)).toEqual(["Uno"]);
-  });
-
-  it("retries pushes after a 5xx and clears the error once they land", async () => {
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    electric.failWritesWith = 503;
-    scoped(P1, () => remember("issue", 1, "title", "One"));
-    await waitFor(() => electric.writes.length >= 2, "retries");
-    expect(status("error").length).toBe(1);
-    expect(status("pending")).toEqual([1]);
-    electric.failWritesWith = null;
-    await waitFor(() => status("pending")[0] === 0, "eventual ack");
-    expect(await serverRows()).toEqual([[factKey(["issue", 1, "title", "One"]), P1]]);
-    expect(status("error")).toEqual([]);
-    expect(has("issue", 1, "title", "One")).toBe(true);
-  });
-
-  it("dead-letters a batch the endpoint rejects instead of wedging the queue", async () => {
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    electric.failWritesWith = 400;
-    scoped(P1, () => remember("issue", 1, "title", "One"));
-    await waitFor(() => status("pending")[0] === 0 && electric.writes.length === 1, "dead-letter");
-    expect(status("error")[0]).toMatch(/400/);
-    electric.failWritesWith = null;
-    scoped(P1, () => remember("issue", 2, "title", "Two"));
-    await waitFor(() => electric.writes.length === 2, "next batch");
-    await waitFor(() => status("pending")[0] === 0, "ack");
-    expect(await serverRows()).toEqual([[factKey(["issue", 2, "title", "Two"]), P1]]);
-  });
-
-  it("isolates the entries a policy rejects and lands the rest of the batch", async () => {
-    electric.applyOptions = { allow: (scope) => scope !== "project:forbidden" };
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    transaction(() => {
-      scoped(P1, () => remember("issue", 1, "title", "One"));
-      scoped("project:forbidden", () => remember("issue", 2, "title", "Two"));
-      scoped(P1, () => remember("issue", 3, "title", "Three"));
-    });
-    await s.flush();
-    await waitFor(() => status("pending")[0] === 0, "batch to settle");
-    expect(await serverRows()).toEqual([
-      [factKey(["issue", 1, "title", "One"]), P1],
-      [factKey(["issue", 3, "title", "Three"]), P1],
-    ]);
-    expect(status("error")[0]).toMatch(/403/);
-    expect(electric.writes.length).toBeGreaterThan(1);
-    expect((await client.query(`SELECT count(*)::int AS n FROM ${OUTBOX_TABLE} WHERE acked_at IS NULL`)).rows).toEqual([{ n: 0 }]);
-  });
-
-  it("round-trips facts far larger than an index entry", async () => {
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    const big = Array.from({ length: 6000 }, (_x, i) => String.fromCharCode(0x4e00 + ((i * 7919) % 20000))).join("");
-    scoped(P1, () => remember("issue", 1, "description", big));
-    await s.flush();
-    await waitFor(() => status("pending")[0] === 0, "ack");
-    expect(await serverRows()).toEqual([[factKey(["issue", 1, "description", big]), P1]]);
-    await electric.apply([{ op: "replace", key: factKey(["issue", 1, "description", `${big}!`]), scope: P1 }]);
-    await waitFor(() => has("issue", 1, "description", `${big}!`), "remote replace");
-    await waitFor(() => !has("issue", 1, "description", big), "old value to leave");
-  });
-
-  it("honours acknowledged outbox entries left over from a previous session", async () => {
-    await insert(["issue", 1, "title", "One"], P1);
-    await insert(["issue", 3, "title", "Gone"], P1);
-    await client.exec(`
-      CREATE TABLE ${OUTBOX_TABLE} (seq SERIAL PRIMARY KEY, key TEXT NOT NULL, op TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '', acked_at TIMESTAMPTZ);
-    `);
-    await client.query(`INSERT INTO ${OUTBOX_TABLE} (key, op, scope, acked_at) VALUES ($1, 'upsert', $2, now()), ($3, 'delete', '', now())`, [
-      factKey(["issue", 2, "title", "Two"]),
-      P1,
-      factKey(["issue", 3, "title", "Gone"]),
-    ]);
-    const s = await start({ echoTimeout: 1500 });
-    expect(has("issue", 2, "title", "Two")).toBe(true);
-    expect(db.scopeOf("issue", 2, "title", "Two")).toBe(P1);
-    const gone = trace(["issue", 3, "title", "Gone"]);
-    await s.subscribe({ scope: P1 }).ready;
-    expect(has("issue", 1, "title", "One")).toBe(true);
-    expect(has("issue", 3, "title", "Gone")).toBe(false);
-    await waitFor(() => has("issue", 3, "title", "Gone"), "echo timeout to re-evaluate the stale delete");
-    expect(gone.events).toEqual(["add"]);
-    gone.stop();
-    await waitFor(() => has("issue", 2, "title", "Two") === false, "unechoed upsert to time out");
-    expect((await client.query(`SELECT count(*)::int AS n FROM ${OUTBOX_TABLE}`)).rows).toEqual([{ n: 0 }]);
-  });
-
-  it("moves a fact between two subscribed scopes without dropping it", async () => {
-    await insert(["issue", 1, "title", "One"], P1);
-    const s = await start();
-    await Promise.all([s.subscribe({ scope: P1 }).ready, s.subscribe({ scope: P2 }).ready]);
-    const t = trace(["issue", 1, "title", "One"]);
-    await electric.sql(`UPDATE jam_facts SET scope = $2 WHERE key = $1`, [factKey(["issue", 1, "title", "One"]), P2]);
-    await waitFor(() => db.scopeOf("issue", 1, "title", "One") === P2, "scope move");
-    await settle(200);
-    expect(t.events).toEqual([]);
-    t.stop();
-  });
-
-  it("refetches one shape on 409 without disturbing another", async () => {
-    await insert(["issue", 1, "title", "One"], P1);
-    await insert(["issue", 2, "title", "Two"], P2);
-    const s = await start();
-    await Promise.all([s.subscribe({ scope: P1 }).ready, s.subscribe({ scope: P2 }).ready]);
-    const two = trace(["issue", 2, "title", "Two"]);
-    const one = trace(["issue", 1, "title", "One"]);
-    await server.query(`INSERT INTO jam_facts (key, scope) VALUES ($1, $2)`, [factKey(["issue", 1, "status", "todo"]), P1]);
-    electric.mustRefetch("scope = $1", [P1]);
-    await waitFor(() => has("issue", 1, "status", "todo"), "refetched shape to include the new row");
-    expect(has("issue", 1, "title", "One")).toBe(true);
-    expect(one.events).toEqual([]);
-    expect(two.events).toEqual([]);
-    one.stop();
-    two.stop();
-  });
-
-  it("clears a shape table that has rows but no registry entry", async () => {
-    const { id } = compileFilter({ scope: P1 });
-    await client.exec(`CREATE TABLE "${id}" (id TEXT PRIMARY KEY, key TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '')`);
-    await client.query(`INSERT INTO "${id}" (id, key, scope) VALUES (md5($1), $1, $2)`, [factKey(["issue", 9, "title", "Leftover"]), P1]);
-    await insert(["issue", 1, "title", "One"], P1);
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    expect(has("issue", 1, "title", "One")).toBe(true);
-    expect(has("issue", 9, "title", "Leftover")).toBe(false);
-  });
-
-  it("resumes a disposed subscription from its local table and offset", async () => {
-    await insert(["issue", 1, "title", "One"], P1);
-    const s = await start();
-    const first = s.subscribe({ scope: P1 });
-    await first.ready;
-    await first.dispose();
-    expect(has("issue", 1, "title", "One")).toBe(false);
-    await insert(["issue", 1, "status", "todo"], P1);
-
-    electric.requests.length = 0;
-    const second = s.subscribe({ scope: P1 });
-    await second.ready;
-    expect(has("issue", 1, "title", "One")).toBe(true);
-    await waitFor(() => has("issue", 1, "status", "todo"), "catch-up");
-    expect(electric.requests.some((r) => r.includes("offset=-1"))).toBe(false);
-    await second.dispose();
-
-    await s.forgetShape({ scope: P1 });
-    const tables = await client.query(`SELECT 1 FROM information_schema.tables WHERE table_name = $1`, [second.id]);
-    expect(tables.rows).toEqual([]);
-  });
-
-  async function shapeTables() {
-    const { rows } = await client.query<{ table_name: string }>(`SELECT table_name FROM information_schema.tables WHERE table_name ~ '^jam_shape_[a-z0-9]+$' ORDER BY 1`);
-    return rows.map((r) => r.table_name);
+  /** A tab with its own FactDB sharing the test's storage; `url` is omitted for a standalone tab. */
+  async function openTab(url: string | null = "ws://test"): Promise<Tab> {
+    const tabDb = new FactDB();
+    const s = await sync({ url: url ?? undefined, storage, socket: net.connect, retryDelay: 5, tabs: hub.join(), db: tabDb });
+    handles.push(s);
+    return {
+      s,
+      db: tabDb,
+      facts: (first) =>
+        Array.from(tabDb.facts.values())
+          .filter((f) => f[0] === first)
+          .sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1)),
+      status: (kind) => Array.from(tabDb.facts.values()).find((f) => f[0] === "sync" && f[1] === kind)?.[2],
+    };
   }
 
-  async function registered() {
-    const { rows } = await client.query<{ table_name: string }>(`SELECT table_name FROM ${SHAPES_TABLE} ORDER BY last_used`);
-    return rows.map((r) => r.table_name);
-  }
-
-  it("keeps only the most recently used idle shapes on disk", async () => {
-    await insert(["issue", 1, "title", "One"], P1);
-    await insert(["issue", 2, "title", "Two"], P2);
-    const s = await start({ keepShapes: 1 });
-    const p1 = compileFilter({ scope: P1 }).id;
-    const p2 = compileFilter({ scope: P2 }).id;
-
-    const first = s.subscribe({ scope: P1 });
-    await first.ready;
-    await first.dispose();
-    expect(await shapeTables()).toEqual([p1]);
-
-    const second = s.subscribe({ scope: P2 });
-    await second.ready;
-    await second.dispose();
-    expect(await shapeTables()).toEqual([p2]);
-    expect(await registered()).toEqual([p2]);
-
-    electric.requests.length = 0;
-    await s.subscribe({ scope: P1 }).ready;
-    expect(has("issue", 1, "title", "One")).toBe(true);
-    expect(electric.requests.some((r) => r.includes(`offset=-1`))).toBe(true);
-  });
-
-  it("never prunes a shape that is still subscribed", async () => {
-    const s = await start({ keepShapes: 0 });
-    const held = s.subscribe({ scope: P1 });
-    await held.ready;
-    const other = s.subscribe({ scope: P2 });
-    await other.ready;
-    await other.dispose();
-    expect(await shapeTables()).toEqual([held.id]);
-    await held.dispose();
-    expect(await shapeTables()).toEqual([]);
-  });
-
-  it("leaves a shape alone while another tab is subscribed to it", async () => {
-    const restoreLocks = installFakeLocks();
-    try {
-      await insert(["issue", 1, "title", "One"], P1);
-      const tabA = await start({ keepShapes: 0 });
-      const held = tabA.subscribe({ scope: P1 });
-      await held.ready;
-
-      const tabB = await start({ keepShapes: 0 });
-      expect(await shapeTables()).toEqual([held.id]);
-      await tabB.forgetShape({ scope: P1 });
-      expect(await shapeTables()).toEqual([held.id]);
-      await insert(["issue", 1, "status", "todo"], P1);
-      await waitFor(() => has("issue", 1, "status", "todo"), "tab A still streaming");
-
-      await held.dispose();
-      expect(await shapeTables()).toEqual([]);
-      expect(await registered()).toEqual([]);
-    } finally {
-      restoreLocks();
+  /** Let every tab message, network message, storage write and reconnect timer run. */
+  async function settle() {
+    for (let i = 0; i < 4; i++) {
+      await hub.idle();
+      await net.idle();
+      await sleep(10);
     }
-  });
+    await hub.idle();
+    await net.idle();
+  }
 
-  it("prunes idle shapes left over from a previous session on start", async () => {
-    await insert(["issue", 1, "title", "One"], P1);
-    const first = await start();
-    const sub = first.subscribe({ scope: P1 });
+  it("elects one leader that holds the only connection and subscribes on behalf of the others", async () => {
+    await server.apply([
+      { op: "upsert", terms: ["issue", 1, "title", "A"], scope: "p1" },
+      { op: "upsert", terms: ["issue", 2, "title", "B"], scope: "p2" },
+    ]);
+    const a = await openTab();
+    const b = await openTab();
+    await settle();
+    expect(a.s.leading).toBe(true);
+    expect(b.s.leading).toBe(false);
+    expect(net.sockets).toHaveLength(1);
+    expect(b.status("status")).toBe("live");
+
+    const sub = b.s.subscribe({ scope: "p1" });
     await sub.ready;
-    await sub.dispose();
-    await first.dispose();
-    handles.pop();
-    expect(await shapeTables()).toEqual([sub.id]);
+    expect(b.facts("issue")).toEqual([["issue", 1, "title", "A"]]);
+    expect(b.db.scopeOf("issue", 1, "title", "A")).toBe("p1");
+    expect(a.facts("issue")).toEqual([]);
+    expect(server.connections).toBe(1);
 
-    db.clear();
-    await start({ keepShapes: 0 });
-    expect(await shapeTables()).toEqual([]);
-    expect(await registered()).toEqual([]);
-    const metadata = await client.query(`SELECT 1 FROM electric.subscriptions_metadata WHERE key = $1`, [sub.id]);
-    expect(metadata.rows).toEqual([]);
+    await server.apply([{ op: "upsert", terms: ["issue", 1, "done", true], scope: "p1" }]);
+    await settle();
+    expect(b.facts("issue")).toEqual([
+      ["issue", 1, "done", true],
+      ["issue", 1, "title", "A"],
+    ]);
+    expect(a.facts("issue")).toEqual([]);
+    expect(await stored()).toHaveLength(2);
+
+    const own = a.s.subscribe({ scope: "p1" });
+    await own.ready;
+    expect(a.facts("issue")).toEqual(b.facts("issue"));
+    expect(a.status("status")).toBe("live");
+
+    await sub.dispose();
+    expect(b.facts("issue")).toEqual([]);
+    await server.apply([{ op: "upsert", terms: ["issue", 3, "title", "C"], scope: "p1" }]);
+    await settle();
+    expect(a.facts("issue")).toHaveLength(3);
+    await own.dispose();
+    await server.apply([{ op: "upsert", terms: ["issue", 4, "title", "D"], scope: "p1" }]);
+    await settle();
+    expect((await stored()).map((f) => f.terms[1])).not.toContain(4);
   });
 
-  it("converges on the server when another client replaces the same attribute", async () => {
-    const s = await start();
-    await s.subscribe({ scope: P1 }).ready;
-    await insert(["issue", 1, "title", "One"], P1);
-    await waitFor(() => has("issue", 1, "title", "One"), "seed");
-    replace("issue", 1, "title", "From A");
-    await s.flush();
-    await waitFor(() => status("pending")[0] === 0, "A acked");
-    await electric.fetch(electric.writeUrl, {
-      method: "POST",
-      body: JSON.stringify({ changes: [{ op: "replace", key: factKey(["issue", 1, "title", "From B"]), scope: P1 }] }),
-    });
-    expect(await serverRows()).toEqual([[factKey(["issue", 1, "title", "From B"]), P1]]);
-    await waitFor(() => db.query(["issue", 1, "title", $.t]).map((x) => x.t).join() === "From B", "convergence on the server value");
+  it("shows a follower's write in every tab and pushes it once through the leader", async () => {
+    const a = await openTab();
+    const b = await openTab();
+    await Promise.all([a.s.subscribe().ready, b.s.subscribe().ready]);
+    expect(b.s.leading).toBe(false);
+
+    b.db.insert("todo", 1, "title", "A");
+    expect(b.status("pending")).toBe(1);
+    await settle();
+    expect(a.facts("todo")).toEqual([["todo", 1, "title", "A"]]);
+    expect(server.facts()).toEqual([{ terms: ["todo", 1, "title", "A"], scope: "" }]);
+    expect(pushes).toHaveLength(1);
+    expect(a.status("pending")).toBe(0);
+    expect(b.status("pending")).toBe(0);
+    expect(await storage.readLog(0)).toEqual([]);
+
+    a.db.insert("todo", 2, "title", "B");
+    await a.s.flush();
+    await settle();
+    expect(b.facts("todo")).toEqual([
+      ["todo", 1, "title", "A"],
+      ["todo", 2, "title", "B"],
+    ]);
+    expect(pushes).toHaveLength(2);
+
+    b.db.drop("todo", 1, "title", "A");
+    await b.s.flush();
+    expect(server.facts().map((f) => f.terms)).toEqual([["todo", 2, "title", "B"]]);
+    await settle();
+    expect(a.facts("todo")).toEqual([["todo", 2, "title", "B"]]);
+  });
+
+  it("hands the connection to another tab when the leader closes", async () => {
+    await server.apply([{ op: "upsert", terms: ["n", 1], scope: "" }]);
+    const a = await openTab();
+    const b = await openTab();
+    await b.s.subscribe().ready;
+    expect(b.facts("n")).toEqual([["n", 1]]);
+
+    await a.s.dispose();
+    handles.splice(handles.indexOf(a.s), 1);
+    b.db.insert("n", 2);
+    await settle();
+    expect(b.s.leading).toBe(true);
+    expect(b.status("status")).toBe("live");
+    expect(net.sockets).toHaveLength(2);
+    expect(server.connections).toBe(1);
+    expect(server.facts().map((f) => f.terms)).toEqual([["n", 1], ["n", 2]]);
+    expect(b.status("pending")).toBe(0);
+
+    await server.apply([{ op: "upsert", terms: ["n", 3], scope: "" }]);
+    await settle();
+    expect(b.facts("n")).toEqual([["n", 1], ["n", 2], ["n", 3]]);
+
+    const c = await openTab();
+    await c.s.subscribe().ready;
+    expect(c.s.leading).toBe(false);
+    expect(c.facts("n")).toEqual(b.facts("n"));
+  });
+
+  it("reports the leader's connection state to followers and keeps their offline writes for the reconnect", async () => {
+    const a = await openTab();
+    const b = await openTab();
+    await Promise.all([a.s.subscribe().ready, b.s.subscribe().ready]);
+
+    net.sockets[0].drop();
+    await hub.idle();
+    expect(a.status("status")).toBe("offline");
+    expect(b.status("status")).toBe("offline");
+    expect(b.s.connected).toBe(false);
+
+    b.db.insert("n", 1);
+    a.db.insert("n", 2);
+    await settle();
+    expect(a.status("status")).toBe("live");
+    expect(b.status("status")).toBe("live");
+    expect(server.facts().map((f) => f.terms)).toEqual([["n", 1], ["n", 2]]);
+    expect(a.facts("n")).toEqual([["n", 1], ["n", 2]]);
+    expect(b.facts("n")).toEqual([["n", 1], ["n", 2]]);
+    expect(pushes.length).toBeLessThanOrEqual(2);
+  });
+
+  it("shares standalone writes between tabs without any connection", async () => {
+    const a = await openTab(null);
+    const b = await openTab(null);
+    await Promise.all([a.s.subscribe({ scope: "p1" }).ready, b.s.subscribe({ scope: "p1" }).ready]);
+    expect(a.status("status")).toBe("standalone");
+    expect(a.s.leading).toBe(false);
+
+    a.db.withScope("p1", () => a.db.insert("issue", 1, "title", "A"));
+    b.db.withScope("p2", () => b.db.insert("issue", 2, "title", "B"));
+    await settle();
+    expect(b.facts("issue")).toEqual([
+      ["issue", 1, "title", "A"],
+      ["issue", 2, "title", "B"],
+    ]);
+    expect(b.db.scopeOf("issue", 1, "title", "A")).toBe("p1");
+    expect(a.facts("issue")).toEqual([["issue", 1, "title", "A"]]);
+    expect(await stored()).toHaveLength(2);
+    expect(net.sockets).toHaveLength(0);
+
+    a.db.drop("issue", 1, "title", "A");
+    await settle();
+    expect(b.facts("issue")).toEqual([["issue", 2, "title", "B"]]);
+    expect(await stored()).toEqual([{ terms: ["issue", 2, "title", "B"], scope: "p2" }]);
   });
 });

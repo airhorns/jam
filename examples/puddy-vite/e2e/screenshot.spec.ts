@@ -7,6 +7,7 @@ test("screenshot: initial state", async ({ page }, testInfo) => {
     const db = (window as any).__db;
     return Boolean(db?.insert && db?.replace);
   });
+  await expect(page.getByTestId("detail-title")).toBeVisible();
 
   await page.evaluate(() => {
     const db = (window as any).__db;
@@ -21,6 +22,7 @@ test("screenshot: initial state", async ({ page }, testInfo) => {
     db.insert("session", "s-1002", "agent", "claude-opus");
     db.insert("session", "s-1002", "status", "ended");
 
+    db.replace("workspace", "default", "selectedSession", "s-1001");
     db.replace("ui", "selectedSession", "s-1001");
 
     db.insert("message", "s-1001", "msg-0", "user", "text", "Can you help me refactor the auth module?");

@@ -21,5 +21,13 @@ shots *filter:
 typecheck:
     corepack pnpm -r typecheck
 
+# Rust engine: fmt, clippy, cargo-deny, no ignored tests, cargo test (what CI runs)
+rust-check:
+    corepack pnpm rust:check
+
+# Rebuild packages/engine/pkg from crates/jam-engine-wasm
+build-engine:
+    corepack pnpm build:engine
+
 dev:
     corepack pnpm --dir examples/folk-todo dev

@@ -1,0 +1,81 @@
+//! The wrapper is plain Rust apart from `JsError`, so everything but the error
+//! conversion runs natively; `packages/engine` covers the boundary itself.
+
+use jam_engine::wire::*;
+use jam_engine::{NONE, ROOT_OWNER, VAR_BASE, WILD};
+use pretty_assertions::assert_eq;
+
+use super::JamEngine;
+
+fn v(i: u32) -> u32 {
+    VAR_BASE + i
+}
+
+fn stat(e: &JamEngine, position: usize) -> u32 {
+    e.stats()[position]
+}
+
+#[test]
+fn terms_round_trip_through_the_interner() {
+    let mut e = JamEngine::default();
+    let base = stat(&e, STAT_TERMS);
+    let s = e.intern_str("todo");
+    let n = e.intern_num(2.5);
+    assert_eq!(e.intern_str("todo"), s);
+    assert_eq!((stat(&e, STAT_TERMS), stat(&e, STAT_TERM_SLOTS)), (base + 2, base + 2));
+    assert_eq!((e.term_kind(s), e.term_kind(n)), (0, 1));
+    assert_eq!(e.term_kind(1), 2, "the true term is preinterned");
+    assert_eq!(e.term_kind(u32::MAX - 5), 3);
+    assert_eq!(e.term_str(s), Some("todo".to_string()));
+    assert_eq!(e.term_str(n), None);
+    assert_eq!(e.term_num(n), 2.5);
+    assert_eq!(e.term_num(1), 1.0);
+    assert_eq!(e.term_num(0), 0.0);
+    assert!(e.term_num(s).is_nan());
+    assert_eq!(e.drain(), vec![]);
+    assert_eq!(e.drain(), vec![EV_FREE, 2, s, n], "unused terms are freed by the second drain");
+    assert_eq!((stat(&e, STAT_TERMS), stat(&e, STAT_TERM_SLOTS)), (base, base + 2));
+    assert_eq!(e.term_kind(s), 3);
+}
+
+#[test]
+fn transactions_queries_and_views_pass_through() {
+    let mut e = JamEngine::new();
+    e.set_fact_events(FACT_EVENTS_ALL);
+    let (todo, title, milk, eggs) =
+        (e.intern_str("todo"), e.intern_str("title"), e.intern_str("milk"), e.intern_str("eggs"));
+    let (one, two) = (e.intern_num(1.0), e.intern_num(2.0));
+    let owner = e.create_owner(ROOT_OWNER);
+    assert!(e.owner_exists(owner));
+    assert_eq!(e.create_owner(9999), NONE, "unknown parents yield NONE");
+
+    let q = e.register(&[1, CLAUSE_PATTERN, 4, todo, v(0), title, v(1)]).unwrap();
+    e.apply(&[OP_ASSERT, ROOT_OWNER, NONE, 4, todo, one, title, milk]).unwrap();
+    e.apply(&[OP_ASSERT, owner, NONE, 4, todo, two, title, eggs]).unwrap();
+    let events = e.drain();
+    assert_eq!(events[0], EV_FACT);
+    assert!(events.contains(&EV_QUERY));
+
+    assert_eq!(e.rows(q)[..2], [2, 2]);
+    assert_eq!(e.query(&[1, CLAUSE_PATTERN, 4, todo, v(0), title, v(1)]).unwrap()[..2], [2, 2]);
+    let count = e
+        .query(&[2, CLAUSE_PATTERN, 4, todo, v(0), title, v(1), CLAUSE_AGGREGATE, 2, AGG_COUNT, WILD])
+        .unwrap();
+    assert_eq!((count[0], count[1], e.term_num(count[2])), (1, 1, 2.0));
+    assert_eq!(e.facts(NONE, &[])[0], 2);
+    assert_eq!(e.facts(NONE, &[todo, one, WILD, WILD])[0], 1);
+    assert!(e.has_fact(&[todo, one, title, milk]));
+    assert!(!e.has_fact(&[todo, one, title, eggs]));
+    assert_eq!(e.scope_of(&[todo, one, title, milk]), 2, "the default scope is the empty string");
+    assert_eq!(e.scope_of(&[todo, one, title, eggs]), NONE);
+    let stats = e.stats();
+    assert_eq!(stats.len(), STAT_LEN);
+    assert_eq!((stats[STAT_FACTS], stats[STAT_QUERIES], stats[STAT_RESULT_ROWS]), (2, 1, 2));
+    assert!(stats[STAT_INDEXES] > 0);
+
+    e.apply(&[OP_REVOKE, owner]).unwrap();
+    assert!(!e.owner_exists(owner));
+    assert_eq!(stat(&e, STAT_FACTS), 1);
+    assert!(e.release(q));
+    assert_eq!(stat(&e, STAT_QUERIES), 0);
+}

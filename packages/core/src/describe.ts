@@ -4,8 +4,8 @@
 // it; it is what a screen reader would be told, with entity ids so that
 // drive()/press() can act on what it names.
 
-import type { Term } from "./db";
-import { buildVdomIndex, type VdomIndex } from "./select";
+import { db, type Term } from "./db";
+import { vdom, type VdomIndex } from "./select";
 import { componentChain, componentInfo, entityId, nodeFor } from "./mounts";
 import { drivenComponents, driversFor } from "./drive";
 
@@ -146,7 +146,7 @@ class Describer {
     if (this.hidden(el)) return "";
     const label = this.prop(el, "aria-label") ?? this.prop(el, "alt");
     if (label !== undefined && String(label)) return String(label);
-    return (this.idx.children.get(el) ?? []).map((child) => this.textContent(child)).join(" ");
+    return this.idx.children(el).map((child) => this.textContent(child)).join(" ");
   }
 
   private referencedText(refs: Term | undefined): string | undefined {
@@ -260,7 +260,7 @@ class Describer {
     const hasControl = (id: string): boolean => {
       const tag = this.idx.tags.get(id);
       if (tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "meter" || tag === "progress" || tag === "output") return true;
-      return (this.idx.children.get(id) ?? []).some(hasControl);
+      return this.idx.children(id).some(hasControl);
     };
     return hasControl(el);
   }
@@ -303,7 +303,7 @@ class Describer {
       }
     }
 
-    for (const child of this.idx.children.get(el) ?? []) node.children.push(...this.describe(child));
+    for (const child of this.idx.children(el)) node.children.push(...this.describe(child));
     if (CHILDREN_PRESENTATIONAL.has(role)) node.children = controlsWithin(node.children);
     else if ((NAME_FROM_CONTENT.has(role) && node.name !== undefined) || (tag === "label" && this.labelsControl(el))) {
       node.children = withoutText(node.children);
@@ -333,9 +333,9 @@ class Describer {
     const tops: string[] = [];
     const visit = (el: string) => {
       if (componentChain(el).includes(componentId)) tops.push(el);
-      else for (const child of this.idx.children.get(el) ?? []) visit(child);
+      else for (const child of this.idx.children(el)) visit(child);
     };
-    for (const top of this.idx.children.get("dom") ?? []) visit(top);
+    for (const top of this.idx.children("dom")) visit(top);
     return tops;
   }
 
@@ -343,9 +343,9 @@ class Describer {
     const visit = (el: string): boolean => {
       if (el === root) return true;
       for (const componentId of componentChain(el)) this.seenComponents.add(componentId);
-      return (this.idx.children.get(el) ?? []).some(visit);
+      return this.idx.children(el).some(visit);
     };
-    (this.idx.children.get("dom") ?? []).some(visit);
+    this.idx.children("dom").some(visit);
   }
 
   private hiddenNode(componentId: string, keys: Record<string, Term | undefined>): UINode {
@@ -400,12 +400,13 @@ function onlyInteractive(nodes: UINode[]): UINode[] {
  * components with nothing visible are listed last as `hidden` nodes.
  */
 export function describeUI(options: DescribeOptions = {}): UINode[] {
-  const idx = buildVdomIndex();
+  db.drain();
+  const idx = vdom();
   const describer = new Describer(idx);
   let nodes: UINode[];
   if (options.root !== undefined) nodes = describer.describeFrom(entityId(options.root));
   else {
-    nodes = (idx.children.get("dom") ?? []).flatMap((root) => describer.describe(root));
+    nodes = idx.children("dom").flatMap((root) => describer.describe(root));
     nodes.push(...describer.unseenDrivable());
   }
   return options.interactive ? onlyInteractive(nodes) : nodes;

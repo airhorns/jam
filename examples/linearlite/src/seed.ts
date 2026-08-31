@@ -1,17 +1,12 @@
-// Seed data as jam_facts rows: the same rows load a standalone PGlite and the
-// Postgres behind Electric. Issues are spread evenly across a few projects so
-// switching projects exercises selective sync.
+// Seed data as facts: the same facts fill a standalone browser database and
+// the sync server. Issues are spread evenly across a few projects so switching
+// projects exercises selective sync.
 
 import { faker } from "@faker-js/faker";
 import { generateNKeysBetween } from "fractional-indexing";
-import type { PGliteInterface } from "@electric-sql/pglite";
-import { JAM_FACTS_TABLE, factKey } from "@jam/core/server";
+import type { FactStorage, StoredFact } from "@jam/core";
+import type { SyncServer } from "@jam/core/server";
 import { PriorityValues, StatusValues, projectScope, type Comment, type Issue, type Project } from "./types";
-
-export interface SeedFact {
-  key: string;
-  scope: string;
-}
 
 export const SEED_PROJECTS: Project[] = [
   { id: "web", name: "Web App", key: "WEB", created: "2025-01-06T09:00:00.000Z" },
@@ -57,14 +52,15 @@ export function generateSeed(count: number, seed = 1): { projects: Project[]; is
   return { projects: SEED_PROJECTS, issues, comments };
 }
 
-function entityFacts(entity: string, record: { id: string }, scope: string): SeedFact[] {
+/** One `[entity, id, column, value]` fact per column of a record. */
+export function entityFacts(entity: string, record: { id: string }, scope: string): StoredFact[] {
   return Object.entries(record)
     .filter(([column]) => column !== "id")
-    .map(([column, value]) => ({ key: factKey([entity, record.id, column, value as string]), scope }));
+    .map(([column, value]) => ({ terms: [entity, record.id, column, value as string], scope }));
 }
 
-/** Everything generateSeed() produces, as rows for jam_facts. */
-export function seedFacts(count: number, seed = 1): SeedFact[] {
+/** Everything generateSeed() produces, as stored facts. */
+export function seedFacts(count: number, seed = 1): StoredFact[] {
   const { projects, issues, comments } = generateSeed(count, seed);
   const issueProject = new Map(issues.map((issue) => [issue.id, issue.project]));
   return [
@@ -74,26 +70,18 @@ export function seedFacts(count: number, seed = 1): SeedFact[] {
   ];
 }
 
-/** Insert facts straight into a PGlite or Postgres `jam_facts` table in batches. */
-export async function insertSeedFacts(
-  query: (sql: string, params: unknown[]) => Promise<unknown>,
-  facts: SeedFact[],
-  batchSize = 1000,
-): Promise<void> {
-  for (let i = 0; i < facts.length; i += batchSize) {
-    await query(
-      `INSERT INTO ${JAM_FACTS_TABLE} (key, scope)
-       SELECT key, scope FROM json_to_recordset($1::text::json) AS t(key TEXT, scope TEXT)
-       ON CONFLICT (id) DO NOTHING`,
-      [JSON.stringify(facts.slice(i, i + batchSize))],
-    );
-  }
+/** Fill a standalone browser database when it has no facts yet. */
+export async function seedLocal(storage: FactStorage, count: number): Promise<boolean> {
+  if ((await storage.load()).length > 0) return false;
+  await storage.write({ upserts: seedFacts(count), deletes: [] });
+  return true;
 }
 
-/** Seed a standalone PGlite (no Electric) when it has no facts yet. */
-export async function seedLocal(pg: PGliteInterface, count: number): Promise<boolean> {
-  const existing = await pg.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${JAM_FACTS_TABLE}`);
-  if (existing.rows[0].n > 0) return false;
-  await pg.transaction((tx) => insertSeedFacts((sql, params) => tx.query(sql, params), seedFacts(count)));
-  return true;
+/** Commit the seed to a sync server in batches, each one transaction in its log. */
+export async function seedServer(server: SyncServer, count: number, batchSize = 2000): Promise<number> {
+  const facts = seedFacts(count);
+  for (let i = 0; i < facts.length; i += batchSize) {
+    await server.apply(facts.slice(i, i + batchSize).map((fact) => ({ op: "upsert" as const, terms: fact.terms, scope: fact.scope })));
+  }
+  return facts.length;
 }

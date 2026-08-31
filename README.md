@@ -1,6 +1,6 @@
 # Jam
 
-A reactive web framework where all application state — including the VDOM — lives in a shared fact database. Inspired by [Folk Computer](https://folk.computer) and [Dynamicland](https://dynamicland.org), Jam combines Datalog-style pattern matching with MobX reactivity and JSX rendering.
+A reactive web framework where all application state — including the VDOM — lives in a shared fact database. Inspired by [Folk Computer](https://folk.computer) and [Dynamicland](https://dynamicland.org), Jam combines Datalog-style pattern matching with fine-grained reactivity and JSX rendering.
 
 The core idea: programs don't call each other. They make **claims** into a shared database, and other programs **react** to those claims. This produces radically composable, malleable software — any program can observe or decorate any other program's output without coordination.
 
@@ -45,7 +45,7 @@ another app's dev server. Set `PLAYWRIGHT_PORT` or the example-specific
 - `examples/trello-clone` — kanban workflow example with ordered board state
 - `examples/obsidian-clone` — linked-note workspace with graph-derived views
 - `examples/puddy-vite` — chat/session app with VCR-style network tests
-- `examples/linearlite` — Multi-project Linear clone on `sync()` with per-project subscriptions over Electric, with unit and e2e coverage
+- `examples/linearlite` — Multi-project Linear clone on `sync()` with per-project subscriptions against a WebSocket sync server, with unit and e2e coverage
 - `examples/catalog` — browser catalog for `@jam/ui` components, with screenshot and e2e tooling
 
 ## Core API
@@ -111,7 +111,36 @@ const todos = when(
 // → [{ id: 1, title: "Buy milk", done: false }, ...]
 ```
 
-Inside a component or MobX tracking context, `when` is reactive — the component re-renders when matching facts change. Facts that don't match the pattern (like VDOM facts) won't trigger a re-render.
+Inside a component or any tracked context (`autorun`, `whenever`), `when` is reactive — the component re-renders when matching facts change. Facts that don't match the pattern (like VDOM facts) won't trigger a re-render.
+
+Patterns can be followed by clauses that shape the result. The engine maintains all of them incrementally, so a filtered, sorted page or a count is one query whose rows only change when they need to:
+
+```typescript
+import { $, _, count, limit, not, offset, orderBy, when, where } from "@jam/core";
+
+// Open todos nobody has snoozed, matching a search, newest first, second page of 50
+when(
+  ["todo", $.id, "done", false],
+  ["todo", $.id, "title", $.title],
+  ["todo", $.id, "created", $.created],
+  not("todo", $.id, "snoozedUntil", _),
+  where($.title, "icontains", search),
+  orderBy($.created, "desc"),
+  offset(50),
+  limit(50),
+);
+
+// How many todos each list has
+when(["todo", $.id, "list", $.list], count($.n, $.list));
+// → [{ list: "home", n: 3 }, { list: "work", n: 7 }]
+```
+
+- `not(...pattern)` hides rows for which the pattern has a match; variables shared with the patterns join through the row.
+- `where(x, op, y)` compares a bound variable with a value or another variable: `=`, `!=`, `<`, `<=`, `>`, `>=`, `contains`, `startsWith`, `icontains`, `istartsWith`. `where(x, "in", values)` matches any of a list, and `where.any(...)` is a disjunction of comparisons; several `where` clauses conjoin.
+- `orderBy(x, "asc" | "desc")` sorts (several compose, most significant first; ties keep assertion order), `offset(n)` and `limit(n)` window the sorted rows.
+- `count(out, ...group)`, `sum(input, out, ...group)`, `min(...)` and `max(...)` fold rows into one row per distinct combination of the group variables; the output row is the group keys plus `out`.
+
+Comparisons and sorting use one total order over terms — booleans, then numbers, then strings — so mixed types compare rather than fail.
 
 ### Components and rendering
 
@@ -139,6 +168,8 @@ mount(<Counter />, document.getElementById("app")!);
 The renderer works in two phases:
 1. **Emit** — executes the component tree, writing VDOM claims into the fact database
 2. **Patch** — reads all VDOM claims and reconciles them into the real DOM
+
+A component that keeps state outside the tree — a timer, per-instance facts keyed by `useComponentId()` — releases it with `useCleanup(fn)`, which runs once when the component leaves the tree or the root unmounts.
 
 ### Reactive rules with `whenever`
 
@@ -261,32 +292,23 @@ Components opt into `drive()` with `useDriver(key, { set, get })` — `@jam/ui`'
 
 ## Persistence and sync
 
-Jam stores durable state in [PGlite](https://pglite.dev) — Postgres compiled to WASM, running in a shared Web Worker and backed by IndexedDB. Tabs on the same database elect a leader that owns the files; the others proxy queries to it.
+Facts live in memory in a Rust engine compiled to WASM (`@jam/engine`) that does the indexing, pattern matching and change tracking. Durable facts are kept in a `FactStorage` — IndexedDB in the browser, SQLite (`node:sqlite`) or memory in Node — which only stores facts; syncing and reactivity happen in the engine.
 
-```typescript
-import { openDatabase } from "@jam/core";
-
-const pg = await openDatabase({ name: "my-app" });   // idb://my-app
-```
-
-`openDatabase` accepts `dataDir` (`idb://`, `opfs-ahp://`, `memory://`) and `relaxedDurability` (default `true`: queries resolve before the write reaches storage; `await pg.syncToDisk()` when you need it flushed). PGlite currently logs one harmless `ErrnoError` the first time it creates an IndexedDB data directory.
-
-There are three ways to keep facts around, from most to least automatic:
+There are two ways to keep facts around:
 
 | You want... | Use |
 |---|---|
-| durable facts stored automatically, optionally synced with Postgres and other clients | `sync()` |
+| durable facts stored automatically, optionally synced with a server and other clients | `sync()` |
 | facts that stay on this device only (UI preferences, recently viewed) | `persist()` |
-| an existing relational table to show up as facts | `syncTable()` |
 
 ### Storing and syncing facts
 
-`sync()` stores every durable fact in one `jam_facts` table — `remember`/`replace` write it, `forget` removes it, `claim`ed facts never leave memory because they are derived and would be re-derived anyway. Nothing is mapped by hand: a new program that invents new facts gets them stored the moment it runs. A fact is a row `(key, scope)` where `key` is `JSON.stringify(fact)` and `scope` names the partition it belongs to.
+`sync()` stores every durable fact — `remember`/`replace` write it, `forget` removes it, `claim`ed facts never leave memory because they are derived and would be re-derived anyway. Nothing is mapped by hand: a new program that invents new facts gets them stored the moment it runs. Every fact carries a `scope` naming the partition it belongs to.
 
 ```typescript
 import { sync, scoped, remember, replace } from "@jam/core";
 
-const handle = await sync({ pg });                      // standalone: local jam_facts only
+const handle = await sync({ name: "my-app" });           // local only: IndexedDB, no network
 const projects = handle.subscribe({ scope: "" });        // global facts
 const current = handle.subscribe({ scope: "project:p1" });
 await current.ready;
@@ -296,7 +318,7 @@ replace("issue", "i1", "title", "Ship it");                            // inheri
 await current.dispose();                                               // its facts leave memory
 ```
 
-Scopes are how a client decides what to load. Facts written without `scoped()` inherit the scope of the fact they replace, else of their `[entity, id]`, else the global scope `""`. A subscription's `FactFilter` is `{ scope?, pattern? }`, where a pattern narrows on literal terms in the first three positions (`["issue", _, "project"]`); subscribing to the same filter twice shares one stream, and facts stay in memory while any subscription holds them.
+Scopes are how a client decides what to load. Facts written without `scoped()` inherit the scope of the fact they replace, else of their `[entity, id]`, else the global scope `""`. A subscription's `FactFilter` is `{ scope?, pattern? }`, where a pattern narrows on literal terms (`["issue", _, "project"]`); subscribing to the same filter twice shares one stream, and facts stay in memory while any subscription holds them.
 
 Most apps want subscriptions to track some other fact — the route, the selected workspace — rather than being managed by hand. `follow()` takes patterns and a function from their matches to the filters that should be live, and keeps the two in step: new filters are subscribed and ready before the ones they replace are released, so a switch never empties the screen first, and a burst of changes settles on the last one.
 
@@ -308,92 +330,49 @@ const stop = handle.follow([["route", "project", $.id]], ([route]) => [
 await stop();   // releases everything it holds
 ```
 
-Point the same call at [Electric](https://electric-sql.com) and the table lives in Postgres:
+Give it a `url` and the facts live on a sync server:
 
 ```typescript
 const handle = await sync({
-  pg,
-  shapeUrl: "http://localhost:3001/jam/shape",   // your sync server, fronting Electric
-  writeUrl: "http://localhost:3001/jam/changes", // your sync server's write endpoint
-  exclude: (fact) => fact[0] === "ui",           // local-only facts; default excludes VDOM facts
+  url: "ws://localhost:3001",
+  exclude: (fact) => fact[0] === "ui",   // local-only facts; default excludes VDOM facts
 });
 ```
 
-Each subscription becomes an Electric shape over `jam_facts` (`WHERE scope = $1`, plus `t0..t2` for pattern terms) mirrored into a local table, so the browser only ever downloads the partitions it asked for and resumes from its local copy on reload. Released shapes keep their table and offset so coming back is a catch-up rather than a reload; the `keepShapes` most recently used ones are retained (default 16) and older ones are dropped on release and on start. Local writes go to a `jam_outbox` table and are posted to `writeUrl` as `{ changes: [{ op: "upsert" | "delete" | "replace", key, scope }] }`, retried with backoff, and reconciled when Electric echoes them back.
-
-The server side is a few lines with `@jam/core/server`, which is dependency-free and runs anywhere a Postgres client does. Authorization lives here, in one `allow` policy applied to both directions: `shapeProxy` admits shape requests whose filter the policy accepts and forwards them to Electric (validating the table, columns and where-clause, passing only Electric's own protocol params through, and marking responses `private` so shared caches don't serve one user's partition to another), and `applyFactChanges` refuses to write into — or move facts out of — a scope the policy rejects:
+Each subscription asks the server for its filter; the server answers with a snapshot (or a replay of what happened since the seq the client last saw) and then streams every committed change matching it, so the browser only ever downloads the partitions it asked for and resumes from its IndexedDB mirror on reload. Local writes queue in the mirror's log and are pushed as `{ op: "upsert" | "delete" | "replace", terms, scope }`; while a key is queued, the server's changes for it are ignored so an echo can never flicker a local write. Reconnects back off exponentially and pick up from the last acknowledged seq. The server is `@jam/core/server`, which runs in Node over any `FactStorage`:
 
 ```typescript
-import { JAM_FACTS_SQL, applyFactChanges, parseFactChanges, shapeProxy, ForbiddenScopeError, isDataError } from "@jam/core/server";
+import { createSyncServer, sqliteStorage } from "@jam/core/server";
+import { WebSocketServer } from "ws";
 
-await sql.unsafe(JAM_FACTS_SQL);   // idempotent: table, trigger deriving terms/t0..t2 from key, indexes
-const allow = (scope: string) => scope === "" || scope.startsWith("project:");   // or look the session up
-
-const shape = shapeProxy({ electricUrl: "http://localhost:3000", allow: (filter) => filter.scope !== undefined && allow(filter.scope) });
-app.get("/jam/shape", (c) => shape(c.req.raw));
-
-app.post("/jam/changes", async (c) => {
-  const changes = parseFactChanges(await c.req.json());
-  try {
-    await sql.begin((tx) => applyFactChanges((q, p) => tx.unsafe(q, p), changes, { allow }));
-  } catch (error) {
-    if (error instanceof ForbiddenScopeError) return c.text(error.message, 403);
-    if (isDataError(error)) return c.text("invalid change", 400);
-    throw error;
-  }
-  return c.json({ success: true });
+const server = await createSyncServer({
+  storage: sqliteStorage("./data/facts.db"),
+  allow: (scope, user) => scope === "" || scope === `user:${user.id}`,   // optional write authorization
 });
+new WebSocketServer({ port: 3001 }).on("connection", (socket, request) => server.handle(socket, authenticate(request)));
+await server.apply([{ op: "upsert", terms: ["project", "p1", "name", "Web"], scope: "" }]);   // seeds, admin tools
 ```
 
-Electric itself never has to be reachable from the browser. `replace` on the server removes every other fact sharing all but the last term, so two clients replacing the same attribute converge on the last write. When the endpoint rejects part of a batch with a 4xx, the client bisects it so one bad entry is dropped and the rest still land.
+`replace` on the server removes every other fact sharing all but the last term, so two clients replacing the same attribute converge on the last write. A batch touching a scope `allow` refuses is rejected whole and surfaces on the client as `["sync", "error", message]`.
 
-The handle publishes its state as facts: `["sync", "status", "standalone" | "syncing" | "live"]`, `["sync", "pending", n]` unpushed changes, `["sync", "shape", id, "ready", bool]` per subscription (`compileFilter(filter).id`), and `["sync", "error", message]` when the write endpoint rejects a batch. `handle.flush()` pushes now; `handle.dispose()` stops.
+The handle publishes its state as facts: `["sync", "status", "standalone" | "connecting" | "syncing" | "live" | "offline"]`, `["sync", "pending", n]` unpushed changes, `["sync", "shape", id, "ready", bool]` per subscription (`compileFilter(filter).id`), and `["sync", "error", message]` when the server rejects a batch. `handle.flush()` waits for every queued write to be acknowledged; `handle.dispose()` stops.
 
-Scaling notes: rows are keyed by `md5(key)`, so a fact can be as large as a Postgres row allows rather than as large as a btree entry. Each shape is read through a PGlite `live.changes` feed that re-diffs the whole shape per Electric commit — a remote change costs ~7 ms against a 1k-fact shape and ~35 ms against 10k, so keep individual shapes in the low tens of thousands of facts and split bigger partitions with `pattern`. `packages/core/src/__bench__/sync.bench.ts` (`pnpm bench`) measures initial load, remote-change latency and write round-trips.
+Browser tabs that share a `name` share one connection. The tabs elect a leader through a Web Lock; it holds the WebSocket, subscribes to the union of every tab's filters, mirrors what the server sends into IndexedDB and pushes the shared outbox, broadcasting what it applied over a `BroadcastChannel` so the other tabs stay current. Any tab's write lands in the shared outbox and shows up in every tab at once, connected or not. When the leader tab closes, the lock passes to another tab, which reconnects and resumes from the seqs recorded in storage; `handle.leading` says whether this tab holds the connection. Pass `tabs: soloTabs()` to opt a tab out of the coordination, or your own `TabCoordinator` to replace it.
 
 ### Persisting facts locally
 
-`persist()` mirrors facts into a `jam_local_facts` table and restores them on the next load — for facts that should survive a reload but never leave the device. Only durable facts are stored; `replace()` is a delete plus an insert.
+`persist()` mirrors facts into its own storage and restores them on the next load — for facts that should survive a reload but never leave the device. Only durable facts are stored; `replace()` is a delete plus an insert.
 
 ```typescript
 import { persist } from "@jam/core";
 
-const handle = await persist({ pg, include: (fact) => fact[0] === "recent" });
+const handle = await persist({ name: "my-app-local", include: (fact) => fact[0] === "recent" });
 // handle.flush() writes pending changes now; await handle() flushes and stops.
 ```
 
-Without `include`, everything except VDOM facts (`defaultExclude`) is persisted. Pass the same `pg` to `persist` and `sync` so they share one database, and keep their `include`/`exclude` disjoint so a fact isn't stored twice.
+Without `include`, everything except VDOM facts (`defaultExclude`) is persisted. Give `persist` and `sync` different `name`s (or `storage`s) and keep their `include`/`exclude` disjoint so a fact isn't stored twice.
 
-### Mirroring tables as facts
-
-`syncTable` is the escape hatch for data that already lives in a relational table. It projects a (windowed) live query over a PGlite table into `[entity, id, column, value]` facts and writes fact mutations back as SQL. Because it only watches the table, anything that writes to PGlite — your code, a migration, or Electric syncing a shape from Postgres — shows up in facts with no further integration.
-
-```typescript
-import { syncTable, replace, forget, _ } from "@jam/core";
-
-const list = syncTable(pg, {
-  table: "issue",
-  query: "SELECT * FROM issue WHERE deleted = false ORDER BY created DESC",
-  offset: 0, limit: 100,
-  name: "list",                 // emits ["query", "list", "row", index, id], "total", "offset", "limit", "ready"
-  readonly: ["synced"],         // generated columns are never written back
-  writeDebounce: 300,
-});
-await list.ready;
-
-replace("issue", id, "title", "New title");   // → UPDATE issue SET title = $2 WHERE id = $1
-forget("issue", id, _, _);                    // → DELETE FROM issue WHERE id = $1
-await list.refresh({ offset: 200 });          // move the window
-await list.dispose();
-```
-
-- A NULL column is an absent fact; forgetting one column writes NULL, forgetting a row's last fact deletes the row (decided at that moment, so a binding that re-mirrors the row before the debounced flush doesn't resurrect it).
-- Remembering facts for an id the table doesn't have inserts a row from all of its current facts.
-- Several bindings can watch the same entity (a list and a detail view); a fact is dropped only when no binding still holds it. Rebinding with the same `name` hands the `["query", name, …]` facts to the new binding.
-- While a write is pending, live results don't overwrite that cell, so keystrokes aren't clobbered by a stale echo.
-- Mirrored facts are durable, not scoped: a rule that `claim`s on top of them is revoked as usual, the row facts stay until the table changes.
-
-See `examples/linearlite` for a full app on `sync()`, including per-project subscriptions over Electric.
+See `examples/linearlite` for a full app on `sync()`, including per-project subscriptions against a sync server.
 
 ### Components and children
 

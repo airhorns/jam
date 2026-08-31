@@ -1,8 +1,8 @@
-// select() — CSS selector queries against VDOM facts.
+// The VDOM index and select() — CSS selector queries against VDOM facts.
 //
-// Returns a reactive computed of VdomElement objects matching the selector.
-// Reads db.facts directly (tracks the map), uses structural comparison
-// so downstream observers only re-run when the matching remember changes.
+// The index is maintained incrementally from the row deltas of eight
+// registered wildcard queries over `[entity, attr, …]` facts; the renderer
+// reconciles the DOM from it and select() matches selectors against it.
 //
 // Supported selectors:
 //   tag:        div, button, span
@@ -13,8 +13,8 @@
 //   descendant: .sidebar .session-row
 //   child:      .sidebar > button
 
-import { computed, comparer } from "mobx";
-import { db, type Term } from "./db";
+import { db, $, type QueryClause, type Term } from "./db";
+import { markDirty, recordRead, registerDrainer, type Dependency } from "./reactive";
 
 // --- Public types ---
 
@@ -23,6 +23,136 @@ export interface VdomElement {
   tag: string;
   classes: string[];
   props: Record<string, Term>;
+}
+
+// --- VDOM index ---
+
+const VDOM_PATTERNS: QueryClause[][] = [
+  [[$.e, "tag", $.v]],
+  [[$.e, "class", $.v]],
+  [[$.e, "prop", $.k, $.v]],
+  [[$.e, "text", $.v]],
+  [[$.e, "handler", $.k, $.v]],
+  [[$.e, "elementRef", $.v]],
+  [[$.e, "childMode", $.v]],
+  [[$.e, "child", $.k, $.v]],
+];
+
+export class VdomIndex {
+  readonly tags = new Map<string, string>();
+  readonly classes = new Map<string, Set<string>>();
+  readonly props = new Map<string, Map<string, Term>>();
+  readonly texts = new Map<string, string>();
+  readonly handlers = new Map<string, Map<string, string>>();
+  readonly elementRefs = new Map<string, string>();
+  readonly childModes = new Map<string, string>();
+  readonly parents = new Map<string, string>();
+  private readonly childEntries = new Map<string, Map<number, string>>();
+  private readonly sorted = new Map<string, string[]>();
+  version = 0;
+  readonly dep: Dependency;
+  private readonly watch: { dep: Dependency; dispose(): void };
+
+  constructor() {
+    this.watch = db.watch(VDOM_PATTERNS, (set, row, added) => this.apply(set, row, added));
+    this.dep = this.watch.dep;
+  }
+
+  /** Subscribe the running effect to every VDOM change and bring the index up to date. */
+  track(): void {
+    recordRead(this.dep);
+    db.drain();
+  }
+
+  children(parent: string): string[] {
+    let list = this.sorted.get(parent);
+    if (!list) {
+      const entries = this.childEntries.get(parent);
+      list = entries ? Array.from(entries.entries()).sort((a, b) => a[0] - b[0]).map(([, id]) => id) : [];
+      this.sorted.set(parent, list);
+    }
+    return list;
+  }
+
+  private apply(set: number, row: Uint32Array, added: boolean): void {
+    this.version++;
+    const entity = String(db.engine.term(row[0]));
+    switch (set) {
+      case 0:
+        return setSingle(this.tags, entity, String(db.engine.term(row[1])), added);
+      case 1:
+        return setMulti(this.classes, entity, String(db.engine.term(row[1])), added);
+      case 2:
+        return setKeyed(this.props, entity, String(db.engine.term(row[1])), db.engine.term(row[2]), added);
+      case 3:
+        return setSingle(this.texts, entity, String(db.engine.term(row[1])), added);
+      case 4:
+        return setKeyed(this.handlers, entity, String(db.engine.term(row[1])), String(db.engine.term(row[2])), added);
+      case 5:
+        return setSingle(this.elementRefs, entity, String(db.engine.term(row[1])), added);
+      case 6:
+        return setSingle(this.childModes, entity, String(db.engine.term(row[1])), added);
+      case 7: {
+        const index = db.engine.term(row[1]) as number;
+        const child = String(db.engine.term(row[2]));
+        this.sorted.delete(entity);
+        if (added) {
+          let entries = this.childEntries.get(entity);
+          if (!entries) this.childEntries.set(entity, (entries = new Map()));
+          entries.set(index, child);
+          this.parents.set(child, entity);
+        } else {
+          const entries = this.childEntries.get(entity);
+          if (entries?.get(index) === child) entries.delete(index);
+          if (entries?.size === 0) this.childEntries.delete(entity);
+          if (this.parents.get(child) === entity) this.parents.delete(child);
+        }
+        return;
+      }
+    }
+  }
+
+  dispose(): void {
+    this.watch.dispose();
+  }
+}
+
+function setSingle(map: Map<string, string>, entity: string, value: string, added: boolean): void {
+  if (added) map.set(entity, value);
+  else if (map.get(entity) === value) map.delete(entity);
+}
+
+function setMulti(map: Map<string, Set<string>>, entity: string, value: string, added: boolean): void {
+  let values = map.get(entity);
+  if (added) {
+    if (!values) map.set(entity, (values = new Set()));
+    values.add(value);
+  } else if (values) {
+    values.delete(value);
+    if (values.size === 0) map.delete(entity);
+  }
+}
+
+function setKeyed<V>(map: Map<string, Map<string, V>>, entity: string, key: string, value: V, added: boolean): void {
+  let values = map.get(entity);
+  if (added) {
+    if (!values) map.set(entity, (values = new Map()));
+    values.set(key, value);
+  } else if (values && values.get(key) === value) {
+    values.delete(key);
+    if (values.size === 0) map.delete(entity);
+  }
+}
+
+let vdomIndex: VdomIndex | null = null;
+
+/** The shared VDOM index over the global db, started on first use. */
+export function vdom(): VdomIndex {
+  if (!vdomIndex) {
+    vdomIndex = new VdomIndex();
+    registerDrainer(refreshSelections);
+  }
+  return vdomIndex;
 }
 
 // --- Selector AST ---
@@ -62,47 +192,44 @@ function parseSelector(input: string): SelectorSegment[] {
     skipWs();
     if (i >= len) break;
 
-    // Determine combinator before this segment
     let combinator: Combinator | undefined;
     if (segments.length > 0) {
-      // We already consumed whitespace. Check if there's a > combinator
       if (input[i] === ">") {
         combinator = ">";
         i++;
         skipWs();
       } else {
-        combinator = " "; // descendant
+        combinator = " ";
       }
     }
 
-    // Parse simple selector
     const simple: SimpleSelector = { classes: [], attrs: [] };
 
     while (i < len && input[i] !== " " && input[i] !== ">") {
       if (input[i] === ".") {
-        i++; // skip dot
+        i++;
         simple.classes.push(readIdent());
       } else if (input[i] === "#") {
-        i++; // skip hash
+        i++;
         simple.id = readIdent();
       } else if (input[i] === "[") {
-        i++; // skip [
+        i++;
         const name = readIdent();
         let value = "";
         if (i < len && input[i] === "=") {
-          i++; // skip =
+          i++;
           if (input[i] === '"' || input[i] === "'") {
             const quote = input[i];
-            i++; // skip opening quote
+            i++;
             const vstart = i;
             while (i < len && input[i] !== quote) i++;
             value = input.slice(vstart, i);
-            i++; // skip closing quote
+            i++;
           } else {
             value = readIdent();
           }
         }
-        if (i < len && input[i] === "]") i++; // skip ]
+        if (i < len && input[i] === "]") i++;
         simple.attrs.push({ name, value });
       } else if (/[\w-]/.test(input[i])) {
         simple.tag = readIdent();
@@ -117,98 +244,21 @@ function parseSelector(input: string): SelectorSegment[] {
   return segments;
 }
 
-// --- VDOM tree builder (shared logic) ---
-
-export interface VdomIndex {
-  tags: Map<string, string>;
-  classes: Map<string, Set<string>>;
-  props: Map<string, Map<string, Term>>;
-  texts: Map<string, string>; // text node → content
-  handlers: Map<string, Set<string>>; // element → event names with handlers
-  children: Map<string, string[]>; // parent → ordered child IDs
-  parents: Map<string, string>; // child → parent
-}
-
-export function buildVdomIndex(): VdomIndex {
-  const tags = new Map<string, string>();
-  const classes = new Map<string, Set<string>>();
-  const props = new Map<string, Map<string, Term>>();
-  const texts = new Map<string, string>();
-  const handlers = new Map<string, Set<string>>();
-  const childEntries = new Map<string, [number, string][]>();
-  const parents = new Map<string, string>();
-
-  for (const fact of db.facts.values()) {
-    const entity = String(fact[0]);
-    const attr = fact[1];
-
-    if (attr === "tag") {
-      tags.set(entity, String(fact[2]));
-    } else if (attr === "class") {
-      if (!classes.has(entity)) classes.set(entity, new Set());
-      classes.get(entity)!.add(String(fact[2]));
-    } else if (attr === "prop") {
-      if (!props.has(entity)) props.set(entity, new Map());
-      props.get(entity)!.set(String(fact[2]), fact[3]);
-    } else if (attr === "text") {
-      texts.set(entity, String(fact[2]));
-    } else if (attr === "handler") {
-      if (!handlers.has(entity)) handlers.set(entity, new Set());
-      handlers.get(entity)!.add(String(fact[2]));
-    } else if (attr === "child") {
-      const parent = entity;
-      const index = fact[2] as number;
-      const childId = String(fact[3]);
-      if (!childEntries.has(parent)) childEntries.set(parent, []);
-      childEntries.get(parent)!.push([index, childId]);
-      parents.set(childId, parent);
-    }
-  }
-
-  // Sort and flatten children
-  const children = new Map<string, string[]>();
-  for (const [parent, entries] of childEntries) {
-    entries.sort((a, b) => a[0] - b[0]);
-    children.set(
-      parent,
-      entries.map(([, id]) => id),
-    );
-  }
-
-  return { tags, classes, props, texts, handlers, children, parents };
-}
-
 // --- Matcher ---
 
-function matchesSimple(
-  entityId: string,
-  sel: SimpleSelector,
-  idx: VdomIndex,
-): boolean {
-  if (sel.tag) {
-    const tag = idx.tags.get(entityId);
-    if (tag !== sel.tag) return false;
-  }
-  if (sel.id) {
-    const elProps = idx.props.get(entityId);
-    if (elProps?.get("id") !== sel.id) return false;
-  }
+function matchesSimple(entityId: string, sel: SimpleSelector, idx: VdomIndex): boolean {
+  if (sel.tag && idx.tags.get(entityId) !== sel.tag) return false;
+  if (sel.id && idx.props.get(entityId)?.get("id") !== sel.id) return false;
   for (const cls of sel.classes) {
-    const elClasses = idx.classes.get(entityId);
-    if (!elClasses?.has(cls)) return false;
+    if (!idx.classes.get(entityId)?.has(cls)) return false;
   }
   for (const attr of sel.attrs) {
-    const elProps = idx.props.get(entityId);
-    if (String(elProps?.get(attr.name) ?? "") !== attr.value) return false;
+    if (String(idx.props.get(entityId)?.get(attr.name) ?? "") !== attr.value) return false;
   }
   return true;
 }
 
-function isDescendantOf(
-  entityId: string,
-  ancestorId: string,
-  idx: VdomIndex,
-): boolean {
+function isDescendantOf(entityId: string, ancestorId: string, idx: VdomIndex): boolean {
   let current = idx.parents.get(entityId);
   while (current) {
     if (current === ancestorId) return true;
@@ -217,54 +267,27 @@ function isDescendantOf(
   return false;
 }
 
-function isChildOf(
-  entityId: string,
-  parentId: string,
-  idx: VdomIndex,
-): boolean {
-  return idx.parents.get(entityId) === parentId;
-}
-
 function matchSelector(segments: SelectorSegment[], idx: VdomIndex): string[] {
   if (segments.length === 0) return [];
 
-  // Start with all entities matching the first segment
   let candidates: string[] = [];
   for (const entityId of idx.tags.keys()) {
-    if (matchesSimple(entityId, segments[0].simple, idx)) {
-      candidates.push(entityId);
-    }
+    if (matchesSimple(entityId, segments[0].simple, idx)) candidates.push(entityId);
   }
 
-  // Apply each subsequent segment as a filter
   for (let i = 1; i < segments.length; i++) {
     const { simple, combinator } = segments[i];
     const next: string[] = [];
-
-    // Find all entities matching this segment's simple selector
-    const matching: string[] = [];
     for (const entityId of idx.tags.keys()) {
-      if (matchesSimple(entityId, simple, idx)) {
-        matching.push(entityId);
-      }
-    }
-
-    // Filter by combinator relationship with candidates
-    for (const entityId of matching) {
+      if (!matchesSimple(entityId, simple, idx)) continue;
       for (const ancestor of candidates) {
-        if (combinator === ">" && isChildOf(entityId, ancestor, idx)) {
-          next.push(entityId);
-          break;
-        } else if (
-          combinator === " " &&
-          isDescendantOf(entityId, ancestor, idx)
-        ) {
+        const related = combinator === ">" ? idx.parents.get(entityId) === ancestor : isDescendantOf(entityId, ancestor, idx);
+        if (related) {
           next.push(entityId);
           break;
         }
       }
     }
-
     candidates = next;
   }
 
@@ -280,36 +303,60 @@ function toVdomElement(entityId: string, idx: VdomIndex): VdomElement {
   };
 }
 
+function sameElements(a: VdomElement[], b: VdomElement[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x.id !== y.id || x.tag !== y.tag || x.classes.length !== y.classes.length) return false;
+    for (let c = 0; c < x.classes.length; c++) if (x.classes[c] !== y.classes[c]) return false;
+    const xk = Object.keys(x.props);
+    if (xk.length !== Object.keys(y.props).length) return false;
+    for (const k of xk) if (x.props[k] !== y.props[k]) return false;
+  }
+  return true;
+}
+
 // --- Public API ---
 
-// Cache parsed selectors → MobX computeds (so repeated select() calls reuse the same computed)
-const selectorCache = new Map<string, { get(): VdomElement[] }>();
+interface Selection extends Dependency {
+  segments: SelectorSegment[];
+  version: number;
+  result: VdomElement[];
+}
 
-/** Clear the selector cache (called by db.clear()). */
-export function clearSelectCache(): void {
-  selectorCache.clear();
+const selections = new Map<string, Selection>();
+
+function refresh(selection: Selection, idx: VdomIndex): boolean {
+  if (selection.version === idx.version) return false;
+  selection.version = idx.version;
+  const next = matchSelector(selection.segments, idx).map((id) => toVdomElement(id, idx));
+  if (sameElements(selection.result, next)) return false;
+  selection.result = next;
+  return true;
+}
+
+/** Re-match every observed selector after a VDOM change; only changed selections wake their effects. */
+function refreshSelections(): void {
+  const idx = vdomIndex!;
+  for (const selection of selections.values()) {
+    if (selection.subscribers.size > 0 && refresh(selection, idx)) markDirty(selection);
+  }
 }
 
 /**
- * Reactive CSS selector query against VDOM facts.
- * Returns VdomElement[] matching the selector. When called inside
- * a MobX tracking context, establishes dependency on the fact map
- * so the context re-runs when VDOM facts change.
+ * Reactive CSS selector query against VDOM facts. Returns the matching
+ * elements; inside an effect the caller re-runs only when that list changes.
  */
 export function select(cssSelector: string): VdomElement[] {
-  let cached = selectorCache.get(cssSelector);
-  if (!cached) {
-    const segments = parseSelector(cssSelector);
-    cached = computed(
-      () => {
-        // Read db.facts.values() — tracks the full map
-        const idx = buildVdomIndex();
-        const entityIds = matchSelector(segments, idx);
-        return entityIds.map((id) => toVdomElement(id, idx));
-      },
-      { equals: comparer.structural },
-    );
-    selectorCache.set(cssSelector, cached);
+  const idx = vdom();
+  let selection = selections.get(cssSelector);
+  if (!selection) {
+    selection = { segments: parseSelector(cssSelector), version: -1, result: [], subscribers: new Set() };
+    selections.set(cssSelector, selection);
   }
-  return cached.get();
+  recordRead(selection);
+  db.drain();
+  refresh(selection, idx);
+  return selection.result;
 }

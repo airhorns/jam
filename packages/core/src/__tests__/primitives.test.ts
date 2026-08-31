@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { autorun } from "mobx";
 import { db } from "../db";
+import { autorun } from "../reactive";
 import {
   $,
   _,
@@ -11,6 +11,7 @@ import {
   when,
   whenever,
   transaction,
+  type Pattern,
 } from "../primitives";
 
 beforeEach(() => {
@@ -65,6 +66,36 @@ describe("when", () => {
     const result = when(["x", $.val]);
     expect(result).toContainEqual({ val: 1 });
     expect(result).toContainEqual({ val: 2 });
+  });
+
+  it("orders rows by when the first pattern's facts were asserted, tracked or not", () => {
+    remember("todo", "b", "title", "B");
+    remember("todo", "b", "done", false);
+    remember("todo", "a", "title", "A");
+    remember("todo", "a", "done", false);
+    const patterns: Pattern[] = [
+      ["todo", $.id, "title", $.title],
+      ["todo", $.id, "done", $.done],
+    ];
+
+    let tracked: string[] = [];
+    const disposer = autorun(() => {
+      tracked = when(...patterns).map((row) => String(row.id));
+    });
+    expect(tracked).toEqual(["b", "a"]);
+
+    replace("todo", "b", "done", true);
+    expect(tracked).toEqual(["b", "a"]);
+    expect(when(...patterns).map((row) => row.id)).toEqual(["b", "a"]);
+
+    replace("todo", "b", "title", "B2");
+    expect(tracked).toEqual(["a", "b"]);
+    expect(when(...patterns).map((row) => row.id)).toEqual(["a", "b"]);
+    disposer();
+
+    remember("session", "s", "workspace", "ws-2");
+    remember("session", "s", "workspace", "ws-1");
+    expect(when(["session", "s", "workspace", $.ws]).map((row) => row.ws)).toEqual(["ws-2", "ws-1"]);
   });
 
   it("reacts to new facts inside autorun", () => {

@@ -5,9 +5,6 @@ export default defineConfig({
     jsxFactory: "h",
     jsxFragment: "Fragment",
   },
-  optimizeDeps: {
-    exclude: ["@electric-sql/pglite"],
-  },
   test: {
     exclude: ["**/e2e/**", "**/node_modules/**"],
     testTimeout: 20000,

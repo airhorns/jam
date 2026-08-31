@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { reaction, runInAction } from "mobx";
 import { db, $ } from "../db";
+import { Effect, transaction, untracked } from "../reactive";
 import { replace, when } from "../primitives";
 import { h, emitVdom, expandRoot, emitExpanded, type VChild } from "../jsx";
 
@@ -11,27 +11,29 @@ beforeEach(() => {
 /** Emit a tree into the fact database and return its sorted VDOM fact keys. */
 function emitted(tree: VChild): string[] {
   db.clear();
-  runInAction(() => emitVdom(tree, "dom", 0));
+  transaction(() => emitVdom(tree, "dom", 0));
   return Array.from(db.facts.keys()).sort();
 }
 
-/** Drive a tree the way mount() does, minus the DOM: track expandRoot, emit in the effect. */
+/** Drive a tree the way mount() does, minus the DOM: track expandRoot, emit untracked under a fresh owner. */
 function drive(root: VChild) {
-  const owner = db.createChildOwner(db.getCurrentOwnerId(), "drive");
+  const parent = db.createChildOwner(db.getCurrentOwnerId(), "drive");
+  let owner: string | null = null;
   let dataRuns = 0;
-  const dispose = reaction(
-    () => {
-      dataRuns++;
-      return expandRoot(root, "dom");
-    },
-    (nodes) => {
-      runInAction(() => {
-        db.revokeOwner(owner);
-        db.withOwnerScope(owner, () => emitExpanded(nodes, "dom", 0));
-      });
-    },
-    { fireImmediately: true, equals: () => false },
-  );
+  const effect = new Effect(() => {
+    dataRuns++;
+    const nodes = expandRoot(root, "dom");
+    untracked(() => {
+      if (owner) db.revokeOwner(owner);
+      owner = db.createChildOwner(parent, "render");
+      db.withOwnerScope(owner, () => emitExpanded(nodes, "dom", 0));
+    });
+  });
+  effect.run();
+  const dispose = () => {
+    effect.dispose();
+    db.revokeOwner(parent);
+  };
   return { dispose, runs: () => dataRuns };
 }
 

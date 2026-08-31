@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { filterIssues, filterStateFromParams, filterStateToParams, sortIssues } from "../filter-state";
+import { beforeEach, describe, expect, it } from "vitest";
+import { db, remember, replace, transaction, type QueryClause } from "@jam/core";
+import { filterStateFromParams, filterStateToParams, issueClauses, orderedIssueClauses, type FilterState } from "../filter-state";
 import type { Issue } from "../types";
 
 describe("filterStateFromParams", () => {
@@ -44,35 +45,55 @@ const ISSUES: (Partial<Issue> & { id: string })[] = [
   { id: "c", title: "Crash on login", description: "", status: "todo", priority: "urgent", created: "2026-01-02" },
 ];
 
-const base = { orderBy: "created", orderDirection: "desc" as const, status: [], priority: [] };
+const base: FilterState = { orderBy: "created", orderDirection: "desc", status: [], priority: [] };
 
-describe("filterIssues", () => {
-  it("keeps everything when no filter is set", () => {
-    expect(filterIssues(ISSUES, base)).toHaveLength(3);
-  });
+function ids(clauses: QueryClause[]): string[] {
+  return db.query(...clauses).map((row) => String(row.id));
+}
 
-  it("matches status and priority membership", () => {
-    expect(filterIssues(ISSUES, { ...base, status: ["todo"] }).map((i) => i.id)).toEqual(["a", "c"]);
-    expect(filterIssues(ISSUES, { ...base, status: ["todo"], priority: ["urgent"] }).map((i) => i.id)).toEqual(["c"]);
-  });
-
-  it("searches title and description case-insensitively", () => {
-    expect(filterIssues(ISSUES, { ...base, query: "LOGIN" }).map((i) => i.id)).toEqual(["a", "c"]);
-    expect(filterIssues(ISSUES, { ...base, query: "sign in" }).map((i) => i.id)).toEqual(["a"]);
-    expect(filterIssues(ISSUES, { ...base, query: "   " })).toHaveLength(3);
+beforeEach(() => {
+  db.clear();
+  transaction(() => {
+    for (const { id, ...columns } of ISSUES) {
+      for (const [column, value] of Object.entries(columns)) remember("issue", id, column, value);
+      remember("issue", id, "project", "web");
+    }
+    remember("issue", "z", "project", "mobile");
+    remember("issue", "z", "title", "Login on mobile");
+    remember("issue", "z", "description", "");
+    remember("issue", "z", "status", "todo");
+    remember("issue", "z", "created", "2026-01-04");
   });
 });
 
-describe("sortIssues", () => {
+describe("issueClauses", () => {
+  it("keeps every issue of the project when no filter is set", () => {
+    expect(ids(issueClauses("web", base)).sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("matches status and priority membership", () => {
+    expect(ids(issueClauses("web", { ...base, status: ["todo"] })).sort()).toEqual(["a", "c"]);
+    expect(ids(issueClauses("web", { ...base, status: ["todo", "done"], priority: ["urgent", "low"] })).sort()).toEqual(["b", "c"]);
+    expect(ids(issueClauses("web", { ...base, status: ["todo"], priority: ["urgent"] }))).toEqual(["c"]);
+  });
+
+  it("searches title and description case-insensitively", () => {
+    expect(ids(issueClauses("web", { ...base, query: "LOGIN" })).sort()).toEqual(["a", "c"]);
+    expect(ids(issueClauses("web", { ...base, query: "sign in" }))).toEqual(["a"]);
+    expect(ids(issueClauses("web", { ...base, query: "   " }))).toHaveLength(3);
+  });
+});
+
+describe("orderedIssueClauses", () => {
   it("orders by the chosen column in either direction", () => {
-    expect(sortIssues(ISSUES, { orderBy: "created", orderDirection: "desc" }).map((i) => i.id)).toEqual(["a", "c", "b"]);
-    expect(sortIssues(ISSUES, { orderBy: "created", orderDirection: "asc" }).map((i) => i.id)).toEqual(["b", "c", "a"]);
-    expect(sortIssues(ISSUES, { orderBy: "title", orderDirection: "asc" }).map((i) => i.id)).toEqual(["c", "b", "a"]);
+    expect(ids(orderedIssueClauses("web", base))).toEqual(["a", "c", "b"]);
+    expect(ids(orderedIssueClauses("web", { ...base, orderDirection: "asc" }))).toEqual(["b", "c", "a"]);
+    expect(ids(orderedIssueClauses("web", { ...base, orderBy: "title", orderDirection: "asc" }))).toEqual(["c", "b", "a"]);
   });
 
   it("breaks ties by id so windows stay stable", () => {
-    const same = ISSUES.map((issue) => ({ ...issue, status: "todo" as const }));
-    expect(sortIssues(same, { orderBy: "status", orderDirection: "asc" }).map((i) => i.id)).toEqual(["a", "b", "c"]);
-    expect(sortIssues(same, { orderBy: "status", orderDirection: "desc" }).map((i) => i.id)).toEqual(["a", "b", "c"]);
+    for (const id of ["a", "b", "c"]) replace("issue", id, "status", "todo");
+    expect(ids(orderedIssueClauses("web", { ...base, orderBy: "status", orderDirection: "asc" }))).toEqual(["a", "b", "c"]);
+    expect(ids(orderedIssueClauses("web", { ...base, orderBy: "status", orderDirection: "desc" }))).toEqual(["a", "b", "c"]);
   });
 });

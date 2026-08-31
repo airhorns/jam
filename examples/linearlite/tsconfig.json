@@ -11,5 +11,5 @@
     "jsxFragmentFactory": "Fragment",
     "types": ["vite/client", "node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts", "db/**/*.ts", "server.ts", "../../packages/core/src/jsx-types.d.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts", "server.ts", "../../packages/core/src/jsx-types.d.ts"]
 }

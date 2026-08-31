@@ -1,35 +1,44 @@
 // Primitives — the public API for interacting with the fact database.
-//
-// Everything lives in one unified fact map. Fine-grained per-pattern
-// indexes prevent circular reactivity: writing a VDOM fact only bumps
-// version counters for patterns that could match it. App-state patterns
-// like ["todo", $.id, "title", $.title] don't match VDOM facts like
-// ["e1", "tag", "div"], so component re-execution doesn't trigger.
 
-import { action, reaction, runInAction, comparer } from "mobx";
-import { db, type Term, type Pattern, type Bindings, _ as wildcard } from "./db";
+import {
+  db,
+  type AggregateClause,
+  type Bindings,
+  type BindingMarker,
+  type ComparisonOp,
+  type LimitClause,
+  type NotClause,
+  type OffsetClause,
+  type OrderClause,
+  type PatternTerm,
+  type QueryClause,
+  type Term,
+  type WhereClause,
+  _ as wildcard,
+} from "./db";
+import { Effect, transaction as batch, untracked } from "./reactive";
 export { $, _ } from "./db";
 export type { Term, Pattern, Bindings } from "./db";
 
 /** Claim a fact into the current ownership scope. */
-export const claim: (...terms: Term[]) => void = action((...terms: Term[]) => {
+export function claim(...terms: Term[]): void {
   db.assert(...terms);
-});
+}
 
 /** Remember a durable fact not bound to the current ownership scope. */
-export const remember: (...terms: Term[]) => void = action((...terms: Term[]) => {
+export function remember(...terms: Term[]): void {
   db.insert(...terms);
-});
+}
 
 /** Forget matching facts immediately from shared state. Supports _ wildcard for bulk removal. */
-export const forget: (...terms: (Term | typeof wildcard)[]) => void = action((...terms: (Term | typeof wildcard)[]) => {
+export function forget(...terms: (Term | typeof wildcard)[]): void {
   db.drop(...terms);
-});
+}
 
 /** Replace the current durable value for a prefix by forgetting prior matches and remembering the new fact. */
-export const replace: (...terms: Term[]) => void = action((...terms: Term[]) => {
+export function replace(...terms: Term[]): void {
   db.replace(...terms);
-});
+}
 
 /**
  * Facts written inside fn belong to the sync partition `scope`. Outside any
@@ -38,59 +47,106 @@ export const replace: (...terms: Term[]) => void = action((...terms: Term[]) => 
  * wrapping an entity's creation is enough to keep all of its facts together.
  */
 export function scoped<T>(scope: string, fn: () => T): T {
-  return db.withScope(scope, () => runInAction(fn));
+  return db.withScope(scope, () => batch(fn));
 }
 
 /**
  * Batch multiple mutations into a single transaction. Reactions only
  * fire once, after the transaction completes, seeing the final state.
- * Use this when you need to forget + remember multiple related facts
- * atomically (e.g. replacing a batch of plan entries).
  */
 export function transaction<T>(fn: () => T): T {
-  return runInAction(fn);
+  return batch(fn);
+}
+
+// --- Query clauses ---
+
+/** Hide rows for which this pattern has a match; variables shared with the patterns join through the row. */
+export function not(...pattern: PatternTerm[]): NotClause {
+  return { __clause: "not", pattern };
 }
 
 /**
- * Reactive query. Returns the current matching Bindings[].
- * When called inside a MobX tracking context (component render,
- * autorun, reaction), establishes fine-grained dependency tracking
- * so the context re-runs when results change.
+ * Keep rows for which the comparison holds. `"in"` accepts a list of values; string
+ * operators (`contains`, `startsWith` and their case-insensitive `i` forms) only match strings.
  */
-export function when(...patterns: Pattern[]): Bindings[] {
-  return db.index(...patterns).get();
+export function where(lhs: BindingMarker, op: ComparisonOp, rhs: Term | BindingMarker): WhereClause;
+export function where(lhs: BindingMarker, op: "in", values: readonly Term[]): WhereClause;
+export function where(lhs: BindingMarker, op: ComparisonOp | "in", rhs: Term | BindingMarker | readonly Term[]): WhereClause {
+  if (op === "in") {
+    const values = rhs as readonly Term[];
+    // An empty list can never hold, which `x != x` says without a special case downstream.
+    const any = values.length === 0 ? [{ lhs, op: "!=" as const, rhs: lhs }] : values.map((v) => ({ lhs, op: "=" as const, rhs: v }));
+    return { __clause: "where", any };
+  }
+  return { __clause: "where", any: [{ lhs, op, rhs: rhs as Term | BindingMarker }] };
+}
+
+/** Keep rows for which any of the clauses holds. */
+where.any = (...clauses: WhereClause[]): WhereClause => ({ __clause: "where", any: clauses.flatMap((c) => c.any) });
+
+/** Sort by a variable; several `orderBy` clauses compose most significant first. Ties keep assertion order. */
+export function orderBy(by: BindingMarker, direction: "asc" | "desc" = "asc"): OrderClause {
+  return { __clause: "order", by, descending: direction === "desc" };
+}
+
+export function offset(count: number): OffsetClause {
+  return { __clause: "offset", count };
+}
+
+export function limit(count: number): LimitClause {
+  return { __clause: "limit", count };
+}
+
+/** Bind `output` to the number of rows, per distinct combination of `group` variables. */
+export function count(output: BindingMarker, ...group: BindingMarker[]): AggregateClause {
+  return { __clause: "aggregate", op: "count", input: null, output, group };
+}
+
+/** Bind `output` to the sum of `input` over the rows of each group. */
+export function sum(input: BindingMarker, output: BindingMarker, ...group: BindingMarker[]): AggregateClause {
+  return { __clause: "aggregate", op: "sum", input, output, group };
+}
+
+/** Bind `output` to the least `input` of each group, in the engine's total order over terms. */
+export function min(input: BindingMarker, output: BindingMarker, ...group: BindingMarker[]): AggregateClause {
+  return { __clause: "aggregate", op: "min", input, output, group };
+}
+
+/** Bind `output` to the greatest `input` of each group, in the engine's total order over terms. */
+export function max(input: BindingMarker, output: BindingMarker, ...group: BindingMarker[]): AggregateClause {
+  return { __clause: "aggregate", op: "max", input, output, group };
 }
 
 /**
- * Reactive rule: when patterns match, run body.
- * Body can claim facts freely.
- * Returns a disposer.
+ * Reactive query. Returns the current matching Bindings[]. Inside a component
+ * render or whenever() the caller re-runs when the result changes.
  */
-export function whenever(
-  patterns: Pattern[],
-  body: (matches: Bindings[]) => void,
-): () => void {
-  const idx = db.index(...patterns);
+export function when(...clauses: QueryClause[]): Bindings[] {
+  return db.index(...clauses).get();
+}
+
+/**
+ * Reactive rule: run body with the current matches now and whenever they change.
+ * Facts the body claims are revoked before the next run. Returns a disposer.
+ */
+export function whenever(clauses: QueryClause[], body: (matches: Bindings[]) => void): () => void {
+  const idx = db.index(...clauses);
   const parentOwner = db.createChildOwner(db.getCurrentOwnerId(), "rule-parent");
   let currentRunOwner: string | null = null;
 
-  const disposer = reaction(
-    () => idx.get(),
-    (matches) => {
-      runInAction(() => {
-        if (currentRunOwner) db.revokeOwner(currentRunOwner);
-        currentRunOwner = db.createChildOwner(parentOwner, "run");
-        db.withOwnerScope(currentRunOwner, () => {
-          body(matches);
-        });
-      });
-    },
-    { fireImmediately: true, equals: comparer.structural },
-  );
+  const effect = new Effect(() => {
+    const matches = idx.get();
+    untracked(() => {
+      if (currentRunOwner) db.revokeOwner(currentRunOwner);
+      currentRunOwner = db.createChildOwner(parentOwner, "run");
+      db.withOwnerScope(currentRunOwner, () => body(matches));
+    });
+  });
+  effect.run();
 
   return () => {
-    disposer();
-    runInAction(() => {
+    effect.dispose();
+    batch(() => {
       if (currentRunOwner) db.revokeOwner(currentRunOwner);
       db.revokeOwner(parentOwner);
     });

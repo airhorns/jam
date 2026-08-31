@@ -1,6 +1,6 @@
 // JSX Factory — converts JSX into VNode objects, then expands and emits them.
 //
-// Rendering happens in two steps that the renderer runs in different MobX
+// Rendering happens in two steps that the renderer runs in different reactive
 // phases:
 //   expandVdom — executes component functions (tracked, so any when() call
 //                inside any component establishes reactivity), computes

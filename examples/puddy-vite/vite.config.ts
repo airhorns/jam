@@ -111,12 +111,6 @@ export default defineConfig({
     jsxFactory: "h",
     jsxFragment: "Fragment",
   },
-  optimizeDeps: {
-    exclude: ["@electric-sql/pglite"],
-  },
-  worker: {
-    format: "es",
-  },
   server: {
     proxy: {
       "/v1": {

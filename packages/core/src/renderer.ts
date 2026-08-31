@@ -1,15 +1,16 @@
 // Renderer — two-phase reactive pipeline over the unified fact database.
 //
-// Phase 1 (expand + emit): a reaction whose tracked data function expands
-//   the whole component tree (executing every component, so when() reads in
-//   nested components are tracked) and whose effect writes the expanded tree
-//   into the fact database as VDOM claims.
+// Phase 1 (expand + emit): an effect expands the whole component tree
+//   (executing every component, so when() reads in nested components are
+//   tracked) and writes the expanded tree into the fact database as VDOM
+//   claims under a fresh owner per run.
 //
-// Phase 2 (patch): autorun reads db.facts directly and reconciles ALL
+// Phase 2 (patch): an effect over the shared VDOM index reconciles ALL
 //   claims (component + external) into real DOM.
 
-import { autorun, reaction, runInAction } from "mobx";
 import { db, type Term } from "./db";
+import { Effect, transaction, untracked } from "./reactive";
+import { vdom } from "./select";
 import { type VChild, type ElementRef, type Cleanup, type ComponentInfo, expandTree, emitExpanded } from "./jsx";
 import { registerMount } from "./mounts";
 
@@ -80,6 +81,7 @@ function attributeName(key: string, svg: boolean): string {
  */
 export function mount(rootVnode: VChild, container: HTMLElement): () => void {
   const mountOwner = db.createChildOwner(db.getCurrentOwnerId(), "mount");
+  let renderOwner: string | null = null;
 
   // Cleanups registered by the components in the latest render, by component id.
   let cleanups = new Map<string, Cleanup[]>();
@@ -100,28 +102,21 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
   }
 
   // --- Phase 1: Expand and emit VDOM claims from component tree ---
-  const emitDisposer = reaction(
-    () => expandTree(rootVnode, "dom"),
-    (expansion) => {
-      // Writes to db.facts but doesn't re-trigger the data function because
-      // reaction separates tracking from effects. Revoking the mount owner
-      // drops the previous render's claims. Components that left the tree
-      // run their cleanups before the DOM is patched.
-      runInAction(() => {
-        db.revokeOwner(mountOwner);
-        db.withOwnerScope(mountOwner, () => emitExpanded(expansion.nodes, "dom", 0));
-        for (const [id, fns] of cleanups) {
-          if (!expansion.cleanups.has(id)) runCleanups(fns);
-        }
-        cleanups = expansion.cleanups;
-        structure.components = expansion.components;
-        structure.owners = expansion.owners;
-      });
-    },
-    // Always fire effect when data function re-runs — expanded trees are new
-    // objects each time so reference equality would always trigger anyway.
-    { fireImmediately: true, equals: () => false },
-  );
+  const emitEffect = new Effect(() => {
+    const expansion = expandTree(rootVnode, "dom");
+    // Components that left the tree run their cleanups before the DOM is patched.
+    untracked(() => {
+      if (renderOwner) db.revokeOwner(renderOwner);
+      renderOwner = db.createChildOwner(mountOwner, "render");
+      db.withOwnerScope(renderOwner, () => emitExpanded(expansion.nodes, "dom", 0));
+      for (const [id, fns] of cleanups) {
+        if (!expansion.cleanups.has(id)) runCleanups(fns);
+      }
+      cleanups = expansion.cleanups;
+      structure.components = expansion.components;
+      structure.owners = expansion.owners;
+    });
+  });
 
   // --- Phase 2: Patch DOM from all VDOM claims ---
   const managed = structure.nodes;
@@ -135,51 +130,14 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
     mountedRefs.delete(entityId);
   }
 
-  const patchDisposer = autorun(() => {
-    const allFacts = Array.from(db.facts.values());
-
-    const tags = new Map<string, string>();
-    const classes = new Map<string, Set<string>>();
-    const props = new Map<string, Map<string, Term>>();
-    const texts = new Map<string, string>();
-    const handlers = new Map<string, Map<string, string>>();
-    const elementRefs = new Map<string, string>();
-    const childModes = new Map<string, string>();
-    const children = new Map<string, [number, string][]>();
-
-    for (const fact of allFacts) {
-      const entity = String(fact[0]);
-      const attr = fact[1];
-
-      if (attr === "tag") {
-        tags.set(entity, String(fact[2]));
-      } else if (attr === "class") {
-        if (!classes.has(entity)) classes.set(entity, new Set());
-        classes.get(entity)!.add(String(fact[2]));
-      } else if (attr === "prop") {
-        if (!props.has(entity)) props.set(entity, new Map());
-        props.get(entity)!.set(String(fact[2]), fact[3]);
-      } else if (attr === "text") {
-        texts.set(entity, String(fact[2]));
-      } else if (attr === "handler") {
-        if (!handlers.has(entity)) handlers.set(entity, new Map());
-        handlers.get(entity)!.set(String(fact[2]), String(fact[3]));
-      } else if (attr === "elementRef") {
-        elementRefs.set(entity, String(fact[2]));
-      } else if (attr === "childMode") {
-        childModes.set(entity, String(fact[2]));
-      } else if (attr === "child") {
-        if (!children.has(entity)) children.set(entity, []);
-        children.get(entity)!.push([fact[2] as number, String(fact[3])]);
-      }
-    }
-
-    for (const [, list] of children) list.sort((a, b) => a[0] - b[0]);
+  const patchEffect = new Effect(() => {
+    const index = vdom();
+    index.track();
 
     const visited = new Set<string>();
 
     function syncElementRef(entityId: string, el: Element) {
-      const refKey = elementRefs.get(entityId);
+      const refKey = index.elementRefs.get(entityId);
       const callback = refKey ? (db.getRef(refKey) as ElementRef | undefined) : undefined;
       if (!refKey || !callback) {
         releaseElementRef(entityId);
@@ -193,12 +151,12 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
     }
 
     function reconcile(entityId: string, inSvg = false): Node | null {
-      const tag = tags.get(entityId);
+      const tag = index.tags.get(entityId);
       if (!tag || visited.has(entityId)) return null;
       visited.add(entityId);
 
       if (tag === "__text") {
-        const text = texts.get(entityId) ?? "";
+        const text = index.texts.get(entityId) ?? "";
         let node = managed.get(entityId);
         if (node instanceof Text) {
           if (node.textContent !== text) node.textContent = text;
@@ -219,14 +177,14 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       }
 
       // Classes — merged from ALL sources
-      const clsSet = classes.get(entityId);
+      const clsSet = index.classes.get(entityId);
       const clsStr = clsSet ? Array.from(clsSet).sort().join(" ") : "";
       if (el.getAttribute("class") !== clsStr) {
         if (clsStr) el.setAttribute("class", clsStr);
         else el.removeAttribute("class");
       }
 
-      const elProps = props.get(entityId);
+      const elProps = index.props.get(entityId);
       const activeAttrs = new Set<string>();
       if (elProps) {
         for (const [key, value] of elProps) {
@@ -257,7 +215,7 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
             continue;
           }
           activeAttrs.add(attr);
-          const strVal = String(value);
+          const strVal = String(value as Term);
           if (el.getAttribute(attr) !== strVal) el.setAttribute(attr, strVal);
         }
       }
@@ -271,29 +229,33 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       }
       (el as any).__attrs = activeAttrs;
 
+      // Listeners look the handler up on each event: a re-render that leaves the
+      // VDOM unchanged still swaps the ref, and this patch does not run for it.
       const oldHandlers: Map<string, EventListener> = (el as any).__handlers ?? new Map();
-      for (const [event, listener] of oldHandlers) el.removeEventListener(event, listener);
       const newHandlers = new Map<string, EventListener>();
-      const elHandlers = handlers.get(entityId);
+      const elHandlers = index.handlers.get(entityId);
       if (elHandlers) {
         for (const [event, refKey] of elHandlers) {
-          const fn = db.getRef(refKey) as EventListener;
-          if (fn) {
-            el.addEventListener(event, fn);
-            newHandlers.set(event, fn);
+          let listener = oldHandlers.get(event);
+          if (listener) {
+            oldHandlers.delete(event);
+          } else {
+            listener = (e) => (db.getRef(refKey) as EventListener | undefined)?.(e);
+            el.addEventListener(event, listener);
           }
+          newHandlers.set(event, listener);
         }
       }
+      for (const [event, listener] of oldHandlers) el.removeEventListener(event, listener);
       (el as any).__handlers = newHandlers;
 
       syncElementRef(entityId, el);
 
       // Imperative hosts own their subtree; leave whatever the callback put there.
-      if (childModes.get(entityId) === "imperative") return el;
+      if (index.childModes.get(entityId) === "imperative") return el;
 
-      const childList = children.get(entityId) ?? [];
       const childNodes: Node[] = [];
-      for (const [, childId] of childList) {
+      for (const childId of index.children(entityId)) {
         const node = reconcile(childId, svg && tag !== "foreignObject");
         if (node) childNodes.push(node);
       }
@@ -312,9 +274,8 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
       return el;
     }
 
-    const rootChildren = children.get("dom") ?? [];
     const rootNodes: Node[] = [];
-    for (const [, childId] of rootChildren) {
+    for (const childId of index.children("dom")) {
       const node = reconcile(childId);
       if (node) rootNodes.push(node);
     }
@@ -341,14 +302,19 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
     }
   });
 
+  transaction(() => {
+    emitEffect.run();
+    patchEffect.run();
+  });
+
   return () => {
-    emitDisposer();
-    runInAction(() => {
+    emitEffect.dispose();
+    transaction(() => {
       for (const fns of cleanups.values()) runCleanups(fns);
       cleanups = new Map();
       db.revokeOwner(mountOwner);
     });
-    patchDisposer();
+    patchEffect.dispose();
     for (const id of Array.from(mountedRefs.keys())) releaseElementRef(id);
     unregisterMount();
   };

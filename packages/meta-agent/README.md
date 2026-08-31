@@ -13,7 +13,7 @@ The package gives apps:
 Program files are stored as `jamProgramFile` facts through `@jam/core`, so the
 files an agent reads and writes are the same files loaded into the running app
 with the program-file loader. When an app uses Jam fact persistence, these file
-facts are persisted in the same browser PGlite database too. No server process is
+facts are persisted in the same browser IndexedDB database too. No server process is
 required. Future ACP/server-backed agents can provide a custom driver while
 keeping the same tools and UI.
 

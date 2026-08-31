@@ -1,13 +1,22 @@
-import { db, $, _, type Bindings, type Pattern, type Term } from "./db";
+import { db, $, _, type Bindings, type QueryClause, type Term } from "./db";
 import {
   claim as baseClaim,
   remember as baseRemember,
   replace as baseReplace,
   forget as baseForget,
+  count,
+  limit,
+  max,
+  min,
+  not,
+  offset,
+  orderBy,
   scoped,
+  sum,
   transaction,
   when,
   whenever as baseWhenever,
+  where,
 } from "./primitives";
 import { Fragment, h, injectVdom } from "./jsx";
 import { mount } from "./renderer";
@@ -21,8 +30,17 @@ export interface ProgramAPI {
   remember: (...terms: Term[]) => void;
   replace: (...terms: Term[]) => void;
   forget: (...terms: (Term | typeof _)[]) => void;
-  when: (...patterns: Pattern[]) => Bindings[];
-  whenever: (patterns: Pattern[], body: (matches: Bindings[]) => void) => () => void;
+  when: (...clauses: QueryClause[]) => Bindings[];
+  whenever: (clauses: QueryClause[], body: (matches: Bindings[]) => void) => () => void;
+  not: typeof not;
+  where: typeof where;
+  orderBy: typeof orderBy;
+  offset: typeof offset;
+  limit: typeof limit;
+  count: typeof count;
+  sum: typeof sum;
+  min: typeof min;
+  max: typeof max;
   scoped: typeof scoped;
   transaction: typeof transaction;
   h: typeof h;
@@ -62,11 +80,20 @@ export function createProgramAPI(extraApi: Record<string, unknown> = {}, dispose
     replace: (...terms) => baseReplace(...terms),
     forget: (...terms) => baseForget(...terms),
     when,
-    whenever: (patterns, body) => {
-      const disposer = baseWhenever(patterns, body);
+    whenever: (clauses, body) => {
+      const disposer = baseWhenever(clauses, body);
       autoDisposers.add(disposer);
       return disposer;
     },
+    not,
+    where,
+    orderBy,
+    offset,
+    limit,
+    count,
+    sum,
+    min,
+    max,
     scoped,
     transaction,
     h,

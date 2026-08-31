@@ -181,8 +181,10 @@ function SyncBadge() {
   );
   if (error) return badge(`Sync error: ${String(error)}`, "red");
   if (status === "standalone") return badge("Local database · no sync configured");
-  if (status === "live") return badge(pending > 0 ? `Syncing ${pending} change${pending === 1 ? "" : "s"}…` : "Synced with Electric", "green");
-  if (status === "syncing") return badge("Loading from Electric…", "blue");
+  if (status === "live") return badge(pending > 0 ? `Syncing ${pending} change${pending === 1 ? "" : "s"}…` : "Synced", "green");
+  if (status === "syncing") return badge("Loading from the server…", "blue");
+  if (status === "connecting") return badge("Connecting…", "blue");
+  if (status === "offline") return badge(pending > 0 ? `Offline · ${pending} change${pending === 1 ? "" : "s"} waiting` : "Offline", "orange");
   return null;
 }
 
@@ -208,6 +210,20 @@ function ThemeToggle() {
         {dark ? "Switch to light" : "Switch to dark"}
       </Tooltip.Content>
     </Tooltip>
+  );
+}
+
+const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+
+function EngineBadge() {
+  const facts = when(["engine", "facts", $.n])[0]?.n;
+  if (facts === undefined) return null;
+  const queries = Number(when(["engine", "queries", $.n])[0]?.n ?? 0);
+  const bytes = Number(when(["engine", "wasmMemoryBytes", $.n])[0]?.n ?? 0);
+  return (
+    <SizableText size="$1" color="$color11" paddingHorizontal="$2.5" fontVariant="tabular-nums" title="Live facts · registered queries · wasm memory" data-testid="engine-badge">
+      {`${compact.format(Number(facts))} facts · ${queries} queries · ${compact.format(bytes / 1_048_576)} MB`}
+    </SizableText>
   );
 }
 
@@ -268,6 +284,7 @@ export function LeftMenu({ route }: { route: Route }) {
       <YStack marginTop="auto" gap="$2">
         <Separator />
         <SyncBadge />
+        <EngineBadge />
       </YStack>
     </ScrollView>
   );
