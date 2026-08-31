@@ -23,9 +23,7 @@ interface PropertyMenuConfig<T extends string> {
 
 /**
  * A single-choice property picker. The open state stays in the app's
- * `["ui","menu","open",id]` fact so `programs/ui` keeps owning "only one menu
- * at a time"; `data-menu` on the trigger and the portalled content is what
- * lets that program's click-away guard still recognise a click as "inside".
+ * `["ui","menu","open",id]` fact so only one menu is ever open.
  */
 function PropertyMenu<T extends string>(config: PropertyMenuConfig<T>, { menu, value, showLabel, bordered, onChange }: PropertyMenuProps<T>) {
   const current = config.options.includes(value as T) ? (value as T) : config.fallback;
@@ -38,7 +36,6 @@ function PropertyMenu<T extends string>(config: PropertyMenuConfig<T>, { menu, v
           variant={bordered ? "outlined" : undefined}
           paddingHorizontal="$2"
           gap="$2"
-          data-menu={menu}
           data-testid={`${config.kind}-menu-trigger`}
           aria-label={`${config.kind}: ${config.display[current]}`}
           title={config.display[current]}
@@ -47,7 +44,7 @@ function PropertyMenu<T extends string>(config: PropertyMenuConfig<T>, { menu, v
           {showLabel && <SizableText size="$2">{config.display[current]}</SizableText>}
         </Button>
       </Menu.Trigger>
-      <Menu.Content data-menu={menu} data-testid="menu-content" minWidth={200}>
+      <Menu.Content data-testid="menu-content" minWidth={200}>
         <Menu.RadioGroup value={current} onValueChange={(next) => onChange(next as T)}>
           <Menu.Label>{config.kind === "status" ? "Status" : "Priority"}</Menu.Label>
           {config.options.map((option) => (

@@ -49,7 +49,7 @@ function submitComment(issueId: string) {
 function Comments({ issueId }: { issueId: string }) {
   const ids = queryRows("comments");
   return (
-    <YStack tag="section" marginTop="$7" paddingTop="$5" gap="$3" flexShrink={0} borderTopWidth={1} borderColor="$borderColor">
+    <YStack tag="section" marginTop="$7" paddingTop="$5" gap="$3" borderTopWidth={1} borderColor="$borderColor">
       <H3 size="$3" margin={0} data-testid="comments-heading">
         Comments{" "}
         <SizableText size="$3" color="$color10" fontWeight="400">
@@ -71,7 +71,7 @@ function Comments({ issueId }: { issueId: string }) {
           data-testid="comment-input"
         />
         <Form.Trigger asChild>
-          <Button size="$3" theme="blue" data-testid="comment-submit">
+          <Button size="$3" theme="blue_accent" data-testid="comment-submit">
             Comment
           </Button>
         </Form.Trigger>
@@ -149,7 +149,7 @@ export function IssuePage({ route }: { route: Route }) {
   }
   return (
     <YStack flex={1} minHeight={0} data-testid="issue-page">
-      <XStack tag="header" alignItems="center" gap="$2.5" height={48} paddingHorizontal="$4" flexShrink={0} borderBottomWidth={1} borderColor="$borderColor">
+      <XStack tag="header" alignItems="center" gap="$2.5" height={48} paddingHorizontal="$4" borderBottomWidth={1} borderColor="$borderColor">
         <Button
           tag="a"
           href={backHref}
@@ -158,7 +158,6 @@ export function IssuePage({ route }: { route: Route }) {
           chromeless
           icon={<BackIcon />}
           color="$color11"
-          textDecorationLine="none"
           data-testid="back-link"
         >
           Back
@@ -205,7 +204,6 @@ export function IssuePage({ route }: { route: Route }) {
         <YStack
           tag="aside"
           width={260}
-          flexShrink={0}
           $max-md={{ display: "none" }}
           paddingVertical="$6"
           paddingHorizontal="$5"

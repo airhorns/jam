@@ -55,6 +55,7 @@ export function NewIssueModal({ route }: { route: Route }) {
               placeholder="Issue title"
               autocomplete="off"
               autofocus="true"
+              required
               aria-label="Issue title"
               data-testid="new-issue-title"
             />
@@ -77,7 +78,7 @@ export function NewIssueModal({ route }: { route: Route }) {
                 </Button>
               </Dialog.Close>
               <Form.Trigger asChild>
-                <Button size="$3" theme="blue" data-testid="save-issue-button">
+                <Button size="$3" theme="blue_accent" data-testid="save-issue-button">
                   Save issue
                 </Button>
               </Form.Trigger>

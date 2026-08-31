@@ -51,7 +51,7 @@ function newProject() {
   if (name) navigate(projectPath(createProject(name)));
 }
 
-/** A sidebar row that navigates: a real anchor, styled as a ListItem. */
+/** A sidebar row that navigates: a real anchor styled as a ListItem. */
 function NavLink({
   href,
   active,
@@ -70,7 +70,6 @@ function NavLink({
   return (
     <ListItem.Frame
       tag="a"
-      role="link"
       href={href}
       onClick={link(href)}
       size={size}
@@ -81,8 +80,6 @@ function NavLink({
       justifyContent="flex-start"
       borderRadius="$3"
       backgroundColor="transparent"
-      cursor="pointer"
-      textDecorationLine="none"
       active={active}
       aria-current={active ? "page" : undefined}
       data-testid={testId}
@@ -115,8 +112,6 @@ function ProjectSwitcher({ route }: { route: Route }) {
           variant="outlined"
           justifyContent="space-between"
           width="100%"
-          flexShrink={0}
-          data-menu={menu}
           data-testid="project-menu-trigger"
           title="Switch project"
         >
@@ -126,7 +121,7 @@ function ProjectSwitcher({ route }: { route: Route }) {
           <ChevronIcon />
         </Button>
       </Menu.Trigger>
-      <Menu.Content data-menu={menu} data-testid="menu-content" minWidth={212}>
+      <Menu.Content data-testid="menu-content" minWidth={212}>
         <Menu.RadioGroup value={route.projectId} onValueChange={(id) => navigate(projectPath(id))}>
           <Menu.Label>Projects</Menu.Label>
           {projects.map((project) => (
@@ -155,7 +150,7 @@ function RecentIssues({ route }: { route: Route }) {
   const recent = when(["recent", $.id, "viewedAt", $.at], ["recent", $.id, "project", $.project]).sort((a, b) => Number(b.at) - Number(a.at));
   if (recent.length === 0) return null;
   return (
-    <YStack gap={1} flexShrink={0}>
+    <YStack gap={1}>
       <SectionHeading>Recent</SectionHeading>
       {recent.map(({ id, project }) => {
         const issueId = String(id);
@@ -224,7 +219,7 @@ export function LeftMenu({ route }: { route: Route }) {
       borderColor="$borderColor"
       data-testid="left-menu"
     >
-      <XStack alignItems="center" gap="$2" paddingHorizontal="$1.5" flexShrink={0}>
+      <XStack alignItems="center" gap="$2" paddingHorizontal="$1.5">
         <Square size={24} borderRadius="$3" backgroundColor="$blue10" alignItems="center" justifyContent="center">
           <SizableText size="$1" fontSize={11} fontWeight="700" color="$blue1">
             jam
@@ -242,9 +237,8 @@ export function LeftMenu({ route }: { route: Route }) {
         <Button
           key="new-issue"
           size="$3"
-          theme="blue"
+          theme="blue_accent"
           icon={<PlusIcon />}
-          flexShrink={0}
           data-testid="new-issue-button"
           onClick={() => openModal(NEW_ISSUE_MODAL)}
         >
@@ -253,7 +247,7 @@ export function LeftMenu({ route }: { route: Route }) {
       )}
 
       {base && (
-        <YStack key="views" gap={1} flexShrink={0}>
+        <YStack key="views" gap={1}>
           <SectionHeading>Issues</SectionHeading>
           {NAV.map((item) => (
             <NavLink key={item.path} href={base + item.path} active={item.matches(route)} icon={item.icon()} label={item.label} testId="nav-link" />
@@ -263,7 +257,7 @@ export function LeftMenu({ route }: { route: Route }) {
 
       <RecentIssues route={route} />
 
-      <YStack marginTop="auto" gap="$2" flexShrink={0}>
+      <YStack marginTop="auto" gap="$2">
         <Separator />
         <SyncBadge />
       </YStack>

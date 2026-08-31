@@ -56,14 +56,14 @@ function FilterMenu({ route }: { route: Route }) {
   return (
     <Menu placement="bottom-end" open={isMenuOpen(menu)} onOpenChange={(next) => (next ? openMenu(menu) : closeMenus())}>
       <Menu.Trigger asChild>
-        <Button size="$2" variant="outlined" gap="$2" data-menu={menu} data-testid="filter-menu-trigger" aria-label="Filter">
+        <Button size="$2" variant="outlined" gap="$2" data-testid="filter-menu-trigger" aria-label="Filter">
           <FilterIcon />
           <SizableText size="$2" whiteSpace="nowrap">
             Filter
           </SizableText>
         </Button>
       </Menu.Trigger>
-      <Menu.Content data-menu={menu} data-testid="menu-content" minWidth={220}>
+      <Menu.Content data-testid="menu-content" minWidth={220}>
         <Menu.Group>
           <Menu.Label>Status</Menu.Label>
           {StatusValues.map((status) => (
@@ -117,14 +117,14 @@ function SortMenu({ route }: { route: Route }) {
   return (
     <Menu placement="bottom-end" open={isMenuOpen(menu)} onOpenChange={(next) => (next ? openMenu(menu) : closeMenus())}>
       <Menu.Trigger asChild>
-        <Button size="$2" variant="outlined" gap="$2" data-menu={menu} data-testid="sort-menu-trigger" aria-label="Sort">
+        <Button size="$2" variant="outlined" gap="$2" data-testid="sort-menu-trigger" aria-label="Sort">
           <SortIcon />
           <SizableText size="$2" whiteSpace="nowrap">
             {`${label} · ${orderDirection === "asc" ? "↑" : "↓"}`}
           </SizableText>
         </Button>
       </Menu.Trigger>
-      <Menu.Content data-menu={menu} data-testid="menu-content" minWidth={200}>
+      <Menu.Content data-testid="menu-content" minWidth={200}>
         <Menu.RadioGroup value={orderBy} onValueChange={(value) => applyFilter(route, { orderBy: value as FilterState["orderBy"] })}>
           <Menu.Label>Sort by</Menu.Label>
           {SORT_OPTIONS.map(([key, name]) => (
@@ -260,12 +260,12 @@ export function TopFilter({ route }: { route: Route }) {
   const total = Number(readValue("stats", "issues", "total") ?? 0);
   const shown = shownCount(route);
   return (
-    <YStack flexShrink={0} borderBottomWidth={1} borderColor="$borderColor" data-testid="top-filter">
+    <YStack borderBottomWidth={1} borderColor="$borderColor" data-testid="top-filter">
       <XStack alignItems="center" gap="$3" height={48} paddingHorizontal="$4">
         <H1 size="$3" margin={0} whiteSpace="nowrap" data-testid="page-title">
           {pageTitle(route)}
         </H1>
-        <SizableText size="$2" color="$color10" whiteSpace="nowrap" data-testid="issue-count">
+        <SizableText size="$2" color="$color10" whiteSpace="nowrap" $max-sm={{ display: "none" }} data-testid="issue-count">
           {shown} of {total} issues
         </SizableText>
         {route.page === "search" && <SearchBox key="search" route={route} />}

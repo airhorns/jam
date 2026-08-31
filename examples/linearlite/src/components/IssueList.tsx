@@ -44,12 +44,13 @@ function IssueRow({ issueId: id }: { issueId: string }) {
         fontWeight="500"
         cursor="pointer"
         textDecorationLine="none"
+        minWidth={48}
         hoverStyle={{ color: "$blue10" }}
         data-testid="issue-row-title"
       >
         {issue.title}
       </ListItem.Title>
-      <SizableText size="$2" width={56} textAlign="right" color="$color10" whiteSpace="nowrap" flexShrink={0}>
+      <SizableText size="$2" width={56} textAlign="right" color="$color10" whiteSpace="nowrap" flexShrink={0} $max-sm={{ display: "none" }}>
         {formatDate(issue.created)}
       </SizableText>
       <Avatar name={issue.username} />
@@ -65,13 +66,12 @@ export function IssueList({ route }: { route: Route }) {
   const below = Math.max(0, meta.total - meta.offset - ids.length) * ROW_HEIGHT;
   return (
     <ScrollView flex={1} key={route.url} onScroll={onScroll} data-testid="issue-list-scroll">
-      {/* flexShrink={0} everywhere: a ScrollView is a flex column with minHeight 0, so children squash instead of scrolling. */}
-      <YStack role="list" aria-label="Issues" flexShrink={0}>
-        <Stack key="above" height={above} flexShrink={0} aria-hidden="true" />
+      <YStack role="list" aria-label="Issues">
+        <Stack key="above" height={above} aria-hidden="true" />
         {ids.map((id) => (
           <IssueRow key={id} issueId={id} />
         ))}
-        <Stack key="below" height={below} flexShrink={0} aria-hidden="true" />
+        <Stack key="below" height={below} aria-hidden="true" />
       </YStack>
       {meta.ready && ids.length === 0 && (
         <Paragraph key="empty" paddingVertical="$10" textAlign="center" color="$color10" data-testid="empty-state">

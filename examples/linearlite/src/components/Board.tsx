@@ -50,7 +50,6 @@ function IssueCard({ issueId: id }: { issueId: string }) {
       bordered
       padded
       gap="$2.5"
-      flexShrink={0}
       backgroundColor="$background"
       cursor="grab"
       pressStyle={{ cursor: "grabbing" }}
@@ -89,7 +88,6 @@ function BoardColumn({ status }: { status: StatusValue }) {
   return (
     <YStack
       width={300}
-      flexShrink={0}
       borderRadius="$4"
       backgroundColor="$color3"
       data-testid="board-column"
@@ -97,7 +95,7 @@ function BoardColumn({ status }: { status: StatusValue }) {
       onDragOver={(event: DragEvent) => event.preventDefault()}
       onDrop={onDrop(status, ids)}
     >
-      <XStack tag="header" alignItems="center" gap="$2" paddingHorizontal="$3" paddingVertical="$2.5" flexShrink={0}>
+      <XStack tag="header" alignItems="center" gap="$2" paddingHorizontal="$3" paddingVertical="$2.5">
         <StatusIcon status={status} />
         <SizableText size="$2" fontWeight="600" data-testid="board-column-title">
           {StatusDisplay[status]}
