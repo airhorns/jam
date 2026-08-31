@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { memoryStorage } from "@jam/engine/storage";
-import { createSyncServer, parseChanges, parseFilter, sqliteStorage, type ServerMessage, type SyncSocket } from "../server";
+import { createSyncServer, parseChanges, parseFilter, sqliteStorage, type ServerMessage, type SyncChange, type SyncSocket } from "../server";
 import { _ } from "../db";
 import { compileFilter } from "../filter";
 
@@ -149,7 +149,7 @@ describe("createSyncServer", () => {
   it("acks pushes after broadcasting them and rejects disallowed scopes", async () => {
     const server = await createSyncServer({
       storage: memoryStorage(),
-      allow: (scope, context) => scope === "" || scope === `user:${String(context)}`,
+      allow: ({ scope }, context) => scope === "" || scope === `user:${String(context)}`,
     });
     const writer = fakeSocket();
     const reader = fakeSocket();
@@ -175,5 +175,92 @@ describe("createSyncServer", () => {
     writer.receive({ type: "push", id: 3, changes: [{ op: "upsert", terms: ["note", 1, "text", "hi"], scope: "user:alice" }] });
     await tick();
     expect(writer.sent[3]).toEqual({ type: "ack", id: 3, seq: 1 });
+  });
+
+  it("asks allow about every change in order and rejects the push whole on the first refusal", async () => {
+    const asked: Array<[SyncChange, unknown]> = [];
+    const server = await createSyncServer({
+      storage: memoryStorage(),
+      allow: (change, context) => {
+        asked.push([change, context]);
+        return change.terms[0] !== "secret";
+      },
+    });
+    const socket = fakeSocket();
+    server.handle(socket, { user: "alice" });
+    socket.receive({
+      type: "push",
+      id: 1,
+      changes: [
+        { op: "upsert", terms: ["note", 1, "text", "hi"], scope: "" },
+        { op: "delete", terms: ["secret", 1], scope: "" },
+        { op: "upsert", terms: ["note", 2, "text", "yo"], scope: "" },
+      ],
+    });
+    await tick();
+    expect(socket.sent[1]).toEqual({ type: "reject", id: 1, error: expect.stringContaining('["secret",1]') });
+    expect(server.facts()).toEqual([]);
+    expect(server.seq).toBe(0);
+    expect(asked).toEqual([
+      [{ op: "upsert", terms: ["note", 1, "text", "hi"], scope: "" }, { user: "alice" }],
+      [{ op: "delete", terms: ["secret", 1], scope: "" }, { user: "alice" }],
+    ]);
+
+    socket.receive({ type: "push", id: 2, changes: [{ op: "upsert", terms: ["note", 1, "text", "hi"], scope: "" }] });
+    await tick();
+    expect(socket.sent[2]).toEqual({ type: "ack", id: 2, seq: 1 });
+  });
+
+  it("denies subscriptions allowRead refuses and never streams to them", async () => {
+    const server = await createSyncServer({
+      storage: memoryStorage(),
+      allowRead: (filter, context) => filter.scope === `user:${String(context)}`,
+    });
+    await server.apply([
+      { op: "upsert", terms: ["note", 1], scope: "user:alice" },
+      { op: "upsert", terms: ["note", 2], scope: "user:bob" },
+    ]);
+    const socket = fakeSocket();
+    server.handle(socket, "alice");
+    socket.receive({ type: "subscribe", id: "mine", filter: { scope: "user:alice" } });
+    socket.receive({ type: "subscribe", id: "theirs", filter: { scope: "user:bob" }, since: 1 });
+    await tick();
+    expect(socket.sent[1]).toEqual({ type: "snapshot", id: "mine", seq: 2, facts: [[["note", 1], "user:alice"]] });
+    expect(socket.sent[2]).toEqual({ type: "denied", id: "theirs", error: expect.stringContaining("user:bob") });
+
+    await server.apply([
+      { op: "upsert", terms: ["note", 3], scope: "user:bob" },
+      { op: "upsert", terms: ["note", 4], scope: "user:alice" },
+    ]);
+    expect(socket.sent[3]).toEqual({ type: "changes", seq: 4, changes: [{ op: "upsert", terms: ["note", 4], scope: "user:alice" }] });
+    expect(socket.sent).toHaveLength(4);
+  });
+
+  it("awaits allowRead and drops a subscription that is denied on a re-subscribe", async () => {
+    const revoked = new Set<string>();
+    const server = await createSyncServer({
+      storage: memoryStorage(),
+      allowRead: async (filter) => {
+        await tick();
+        return !revoked.has(filter.scope ?? "");
+      },
+    });
+    await server.apply([{ op: "upsert", terms: ["n", 1], scope: "p1" }]);
+    const socket = fakeSocket();
+    server.handle(socket);
+    socket.receive({ type: "subscribe", id: "p1", filter: { scope: "p1" } });
+    await tick();
+    await tick();
+    expect(socket.sent[1]).toEqual({ type: "snapshot", id: "p1", seq: 1, facts: [[["n", 1], "p1"]] });
+    await server.apply([{ op: "upsert", terms: ["n", 2], scope: "p1" }]);
+    expect(socket.sent[2]).toEqual({ type: "changes", seq: 2, changes: [{ op: "upsert", terms: ["n", 2], scope: "p1" }] });
+
+    revoked.add("p1");
+    socket.receive({ type: "subscribe", id: "p1", filter: { scope: "p1" }, since: 2 });
+    await tick();
+    await tick();
+    expect(socket.sent[3]).toEqual({ type: "denied", id: "p1", error: expect.stringContaining("p1") });
+    await server.apply([{ op: "upsert", terms: ["n", 3], scope: "p1" }]);
+    expect(socket.sent).toHaveLength(4);
   });
 });

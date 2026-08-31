@@ -123,6 +123,8 @@ interface Subscription {
   resolved: boolean;
   /** Caught up with the server on the current connection. */
   synced: boolean;
+  /** The server refused this filter; it holds nothing until a later subscribe is allowed. */
+  denied: boolean;
 }
 
 /** A filter some tab holds, as tracked by the leader. */
@@ -150,6 +152,7 @@ type TabMessage =
   | { t: "conn"; open: boolean; lost: boolean }
   | { t: "state"; changes: SyncChange[] }
   | { t: "ready"; id: string }
+  | { t: "denied"; id: string; error: string }
   | { t: "error"; message: string | null }
   | { t: "local"; entries: LogEntry[] }
   | { t: "acked"; upTo: number };
@@ -301,7 +304,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   const disconnected = (wasLost: boolean) => {
     connected = false;
     lost = wasLost;
-    for (const sub of subscriptions.values()) sub.synced = false;
+    for (const sub of subscriptions.values()) if (!sub.denied) sub.synced = false;
     updateStatus();
   };
   const postConn = () => post({ t: "conn", open: connected, lost });
@@ -478,7 +481,8 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   let lead: Lead | null = null;
   let disposed = false;
 
-  const markReady = (sub: Subscription) => {
+  /** `ready` resolves and the shape fact is set the first time a subscription settles. */
+  const settle = (sub: Subscription) => {
     sub.synced = true;
     if (!sub.resolved) {
       sub.resolved = true;
@@ -486,6 +490,21 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
       sub.resolveReady();
     }
     updateStatus();
+  };
+
+  const markReady = (sub: Subscription) => {
+    if (sub.denied) {
+      sub.denied = false;
+      transaction(() => db.drop(SYNC_STATUS_FACT, "shape", sub.compiled.id, "error", _));
+    }
+    settle(sub);
+  };
+
+  /** A denied subscription settles like a ready one, holding nothing, and reports why. */
+  const markDenied = (sub: Subscription, error: string) => {
+    sub.denied = true;
+    setStatusFact(SYNC_STATUS_FACT, "shape", sub.compiled.id, "error", error);
+    settle(sub);
   };
 
   const markRemoteReady = (id: string) => {
@@ -585,6 +604,11 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         if (sub && !leading) markReady(sub);
         return;
       }
+      case "denied": {
+        const sub = subscriptions.get(message.id);
+        if (sub && !leading) markDenied(sub, message.error);
+        return;
+      }
       case "error":
         if (!leading) setError(message.message);
         return;
@@ -676,6 +700,14 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         applyChanges(message.changes);
         markRemoteReady(message.id);
         recordSeq(message.seq);
+        return;
+      }
+      case "denied": {
+        // Nothing to resume on the next connection; a later `want` asks again.
+        if (!remote.delete(message.id)) return;
+        post({ t: "denied", id: message.id, error: message.error });
+        const own = subscriptions.get(message.id);
+        if (own) markDenied(own, message.error);
         return;
       }
       case "changes":
@@ -801,7 +833,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     if (!sub) {
       let resolveReady!: () => void;
       const ready = new Promise<void>((resolve) => (resolveReady = resolve));
-      sub = { compiled, refs: 0, ready, resolveReady, resolved: false, synced: false };
+      sub = { compiled, refs: 0, ready, resolveReady, resolved: false, synced: false, denied: false };
       subscriptions.set(id, sub);
       loadFromMirror(sub);
       if (!url) markReady(sub);
@@ -824,7 +856,10 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         if (leading) drop(me, id);
         else post({ t: "drop", tab: me, id });
         unloadOrphans(owned);
-        transaction(() => db.drop(SYNC_STATUS_FACT, "shape", id, "ready", _));
+        transaction(() => {
+          db.drop(SYNC_STATUS_FACT, "shape", id, "ready", _);
+          db.drop(SYNC_STATUS_FACT, "shape", id, "error", _);
+        });
         updateStatus();
         await settled();
       },
