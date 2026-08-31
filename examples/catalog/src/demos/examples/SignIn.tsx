@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
 import { XStack, YStack, H1, Paragraph, SizableText, Button, Input, Label, Separator, Spinner, Card, useStableId } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { GithubIcon, FacebookIcon } from "./icons";
 
@@ -87,9 +87,8 @@ function SignInScreen() {
   );
 }
 
-export const SignInExample: ComponentDemos = {
+export const SignInExample: ExampleDemos = {
   name: "Sign in",
-  group: "Examples",
   description: "A sign-in form: labelled inputs, an accent submit that shows a spinner while signing in, and social sign-in buttons.",
   demos: [
     {

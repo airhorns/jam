@@ -2,7 +2,7 @@
 
 Every component in `src/components/` follows the same shape so the library
 stays consistent. `Button.ts` and `Text.ts` are the reference implementations.
-Read `STYLE-SYSTEM.md` first.
+Read the style system guide (`../../../.agents/skills/jam-ui/style-system.md`) first.
 
 ## Structure
 
@@ -102,8 +102,14 @@ when its state goes through `useControllableState`:
    size resolves to token values, each variant, theme refs become
    `var(--…)`, and every behaviour (toggle, keyboard, dismiss, controlled vs
    uncontrolled, callbacks).
-3. **Docs** in `docs/<Name>.md` following the template below.
-4. **Catalog demo** in `examples/catalog/src/demos/<Name>.tsx`: one demo per
+3. **Docs** in `.agents/skills/jam-ui/components/<Name>.md` (also reachable
+   as `docs/components/<Name>.md`) following the template below. The
+   frontmatter's `group` and `description` place the component in the catalog
+   sidebar and the skill index; run `pnpm skill-index` here to refresh the
+   index in `SKILL.md`. The catalog renders the whole file beneath the demos,
+   so it is the one place a component is explained.
+4. **Catalog demo** in `examples/catalog/src/demos/<Name>.tsx` exporting a
+   `ComponentDemos` (`name` matching the doc, `demos`): one demo per
    variant group plus one interactive demo with `data-testid`s. Run
    `CATALOG_PORT=5176 pnpm shots <Name>` from `examples/catalog` and look at
    both PNGs in `shots/` — fix anything that looks off before moving on.
@@ -114,12 +120,19 @@ when its state goes through `useControllableState`:
 6. `pnpm exec vitest run` and `pnpm typecheck` pass in `packages/ui`,
    `pnpm typecheck` passes in `examples/catalog`.
 
-## Doc template (`docs/<Name>.md`)
+## Doc template (`.agents/skills/jam-ui/components/<Name>.md`)
 
 ```markdown
+---
+name: Name
+group: Forms
+description: One sentence for the sidebar and the skill index.
+---
+
 # Name
 
-One-paragraph description and when to use it.
+One-paragraph description and when to use it. The catalog shows it under the
+page title, so it can assume the reader is looking at the demos.
 
 ## Usage
 

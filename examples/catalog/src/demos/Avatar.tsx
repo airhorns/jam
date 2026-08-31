@@ -10,8 +10,6 @@ const photo =
 
 export const AvatarDemos: ComponentDemos = {
   name: "Avatar",
-  group: "Content",
-  description: "A fixed-size frame that clips its image. The fallback sits behind, so it shows through whenever the image is missing.",
   demos: [
     {
       title: "Sizes",

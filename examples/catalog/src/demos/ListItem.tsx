@@ -4,8 +4,6 @@ import type { ComponentDemos } from "../types";
 
 export const ListItemDemos: ComponentDemos = {
   name: "ListItem",
-  group: "Content",
-  description: "A list row with an optional leading icon, a title/subtitle column and a trailing icon. Announced as a list item, so keep the rows inside a `role=\"list\"` container.",
   demos: [
     {
       title: "In a group",

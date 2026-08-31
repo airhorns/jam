@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { XStack, YStack, H2, H4, Paragraph, SizableText, Button, Popover, Avatar, Separator, ListItem, Square, Circle, Card, rovingFocus } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { Page } from "./shared";
 import {
@@ -363,9 +363,8 @@ function NotificationsScreen() {
   );
 }
 
-export const SlidingPopoverExample: ComponentDemos = {
+export const SlidingPopoverExample: ExampleDemos = {
   name: "Sliding popover",
-  group: "Examples",
   description: "Popovers as menus in an app's top bar: a hover-driven navigation menu, an account menu on an avatar, and a notification tray with a live badge.",
   demos: [
     {

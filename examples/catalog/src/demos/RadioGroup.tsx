@@ -11,8 +11,6 @@ const options = [
 
 export const RadioGroupDemos: ComponentDemos = {
   name: "RadioGroup",
-  group: "Forms",
-  description: "One-of-many selection with native radio keyboard behaviour.",
   demos: [
     {
       title: "Vertical (controlled)",

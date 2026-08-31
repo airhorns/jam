@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
 import { XStack, YStack, H3, H4, Paragraph, SizableText, Button, Card, Select, Tabs, Progress, Avatar, Separator, Toast, useToastController } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { Page } from "./shared";
 import { ArrowDownRightIcon, ArrowUpRightIcon, CalendarIcon, DownloadIcon, InboxIcon, PlusIcon } from "./icons";
@@ -300,9 +300,8 @@ function EmptyState() {
   );
 }
 
-export const DashboardExample: ComponentDemos = {
+export const DashboardExample: ExampleDemos = {
   name: "Dashboard",
-  group: "Examples",
   description: "An analytics overview: stat cards with sparklines, a tabbed bar chart, storage progress and an activity feed, plus a toast and an empty state.",
   demos: [
     {

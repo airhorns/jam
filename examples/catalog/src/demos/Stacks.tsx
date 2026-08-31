@@ -10,9 +10,6 @@ const Box = ({ label, color }: { label: string; color: string }) => (
 
 export const StacksDemos: ComponentDemos = {
   name: "Stacks",
-  group: "Layout",
-  description:
-    "Stack is a flexbox reset; XStack and YStack pin the direction, ZStack layers its children, and ThemeableStack adds the theme-reactive variants everything else extends.",
   demos: [
     {
       title: "XStack",

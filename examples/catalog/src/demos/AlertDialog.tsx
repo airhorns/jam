@@ -5,8 +5,6 @@ import { useDemoState } from "./state";
 
 export const AlertDialogDemos: ComponentDemos = {
   name: "AlertDialog",
-  group: "Overlays",
-  description: "A modal that interrupts the user and requires an explicit response; not dismissed by clicking outside.",
   demos: [
     {
       title: "Confirm destructive action",

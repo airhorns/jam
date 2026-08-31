@@ -5,8 +5,6 @@ import { useDemoState } from "./state";
 
 export const ButtonDemos: ComponentDemos = {
   name: "Button",
-  group: "Forms",
-  description: "Interactive button with size, variant, and theme-aware pseudo states.",
   demos: [
     {
       title: "Sizes",

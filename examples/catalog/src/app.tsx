@@ -1,8 +1,9 @@
 import { h } from "@jam/core/jsx";
 import { $, replace, transaction, when } from "@jam/core";
-import { XStack, YStack, Text, H2, H3, H4, Paragraph, Button, Separator, styled, setTheme } from "@jam/ui";
+import { XStack, YStack, Text, H2, Paragraph, Button, styled, setTheme } from "@jam/ui";
 import { registry, groupOrder, findComponent } from "./registry";
-import type { ComponentDemos, Demo } from "./types";
+import { renderInlineMarkdown, renderMarkdown } from "./markdown";
+import type { CatalogEntry, Demo } from "./types";
 
 // ---- URL <-> fact state ----
 
@@ -192,15 +193,23 @@ function DemoCard({ demo, index }: { demo: Demo; index: number }) {
   );
 }
 
-function ComponentPage({ component, only }: { component: ComponentDemos; only: number | null }) {
+function ComponentPage({ component, only, docs }: { component: CatalogEntry; only: number | null; docs: boolean }) {
   const demos = only != null ? component.demos.filter((_, i) => i === only) : component.demos;
+  const doc = component.doc;
   return (
-    <YStack gap="$space.5" data-component={component.name}>
-      <YStack gap="$space.2">
-        <H2 margin={0}>{component.name}</H2>
-        {component.description ? <Paragraph margin={0} opacity={0.7}>{component.description}</Paragraph> : null}
+    <YStack gap="$space.8">
+      <YStack gap="$space.5" data-component={component.name}>
+        <YStack gap="$space.2">
+          <H2 margin={0}>{doc?.title ?? component.name}</H2>
+          <Paragraph margin={0} opacity={0.7}>{renderInlineMarkdown(doc?.lead ?? component.description)}</Paragraph>
+        </YStack>
+        {demos.map((demo, i) => <DemoCard key={demo.title} demo={demo} index={only ?? i} />)}
       </YStack>
-      {demos.map((demo, i) => <DemoCard key={demo.title} demo={demo} index={only ?? i} />)}
+      {docs && doc ? (
+        <YStack tag="article" gap="$space.4" maxWidth={960} data-docs={component.name} aria-label={`${doc.title} reference`}>
+          {renderMarkdown(doc.body, { onNavigate: (name) => update({ component: name, demo: null }) })}
+        </YStack>
+      ) : null}
     </YStack>
   );
 }
@@ -212,9 +221,9 @@ function Main() {
   return (
     <YStack flex={1} padding="$space.7" $max-sm={{ padding: "$space.3" }} gap="$space.8" minWidth={0} data-testid="main">
       {isAll
-        ? registry.map((c) => <ComponentPage key={c.name} component={c} only={null} />)
+        ? registry.map((c) => <ComponentPage key={c.name} component={c} only={null} docs={false} />)
         : selected
-          ? <ComponentPage component={selected} only={state.demo} />
+          ? <ComponentPage component={selected} only={state.demo} docs={true} />
           : <Text>Unknown component “{state.component}”</Text>}
     </YStack>
   );

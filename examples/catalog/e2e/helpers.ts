@@ -1,11 +1,19 @@
 import type { Page } from "@playwright/test";
+import { DOC_GROUPS } from "@jam/ui/docs";
 import type { DemoGroup, ShotRecipe } from "../src/types";
 
 export type CatalogDemo = { title: string; shot?: ShotRecipe };
-export type CatalogEntry = { name: string; group: DemoGroup; demos: CatalogDemo[] };
+export type CatalogEntry = {
+  name: string;
+  group: DemoGroup;
+  description: string;
+  /** Repo path of the component's reference doc; null for examples. */
+  doc: string | null;
+  demos: CatalogDemo[];
+};
 
 /** Sidebar groups, so sweeps can be split into one test per group; a test checks it matches the registry. */
-export const GROUPS: DemoGroup[] = ["Layout", "Typography", "Forms", "Overlays", "Content", "Feedback", "Navigation", "Utilities", "Examples"];
+export const GROUPS: DemoGroup[] = [...DOC_GROUPS, "Examples"];
 
 /** Load the catalog once and return the registered components. */
 export async function loadRegistry(page: Page): Promise<CatalogEntry[]> {

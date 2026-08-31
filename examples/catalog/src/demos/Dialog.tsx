@@ -5,8 +5,6 @@ import { useDemoState } from "./state";
 
 export const DialogDemos: ComponentDemos = {
   name: "Dialog",
-  group: "Overlays",
-  description: "Modal dialog rendered in a portal with an overlay, focus trap, and Escape/overlay dismissal.",
   demos: [
     {
       title: "Uncontrolled",

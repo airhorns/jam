@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
 import { XStack, YStack, Input, Label, SizableText, Button, XGroup, Select, useStableId } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { AlertCircleIcon, CheckCircleIcon, EyeIcon, EyeOffIcon, SearchIcon, XIcon } from "./icons";
 
@@ -257,9 +257,8 @@ function SizedInputs() {
   );
 }
 
-export const InputsExample: ComponentDemos = {
+export const InputsExample: ExampleDemos = {
   name: "Input patterns",
-  group: "Examples",
   description: "Labelled fields, validation messages, leading and trailing adornments, grouped controls and the size scale — the building blocks of a form.",
   demos: [
     {

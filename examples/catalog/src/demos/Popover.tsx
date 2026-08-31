@@ -4,8 +4,6 @@ import type { ComponentDemos } from "../types";
 
 export const PopoverDemos: ComponentDemos = {
   name: "Popover",
-  group: "Overlays",
-  description: "Non-modal floating content anchored to a trigger, with an arrow and viewport-aware placement.",
   demos: [
     {
       title: "Placements",

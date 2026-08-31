@@ -15,7 +15,7 @@ import {
   SizableText,
   useStableId,
 } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { BellIcon, ClockIcon, GlobeIcon, LogOutIcon, MailIcon, MapPinIcon, MoonIcon, PencilIcon, SunIcon } from "./icons";
 
@@ -230,9 +230,8 @@ function AppearanceSwitch() {
   );
 }
 
-export const SettingsExample: ComponentDemos = {
+export const SettingsExample: ExampleDemos = {
   name: "Settings",
-  group: "Examples",
   description: "A settings screen: a preferences list with switches, a grouped account section with selects and a destructive sign-out confirm, and a large switch with icons in its thumb.",
   demos: [
     {
