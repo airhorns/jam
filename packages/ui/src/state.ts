@@ -44,7 +44,9 @@ export function useControllableState<T extends Term>(
   };
   const reset = (empty: T) => {
     if (options.defaultValue !== undefined) return update(options.defaultValue);
-    if (!mounted.has(id) || read() === undefined) return;
+    if (!mounted.has(id)) return;
+    const current = read();
+    if (current === undefined || current === empty) return;
     options.onChange?.(empty);
     if (!controlled) forget(id, key, _);
   };

@@ -209,6 +209,13 @@ describe("RadioGroup", () => {
     expect(r.all<HTMLElement>("[role=radio]").map((el) => el.tabIndex)).toEqual([0, 0]);
   });
 
+  it("does not report a change when a form reset clears a group that is already empty", () => {
+    const onValueChange = vi.fn();
+    const r = render(h("form", null, h(RadioGroup, { value: "", onValueChange }, h(RadioGroup.Item, { value: "a" }))));
+    r.get<HTMLFormElement>("form").dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
   it("strips the default look when unstyled", () => {
     const r = render(h(RadioGroup, { unstyled: true }, h(RadioGroup.Item, { value: "a", unstyled: true })));
     expect(css(r.root).gap).toBeUndefined();
