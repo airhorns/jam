@@ -2,7 +2,8 @@
 // store is writing facts it read from storage, every store's write side must
 // ignore them or the same change would be written straight back out.
 
-import { runInAction } from "mobx";
+import { db } from "./db";
+import { transaction } from "./reactive";
 
 let depth = 0;
 
@@ -11,13 +12,18 @@ export function isApplying(): boolean {
   return depth > 0;
 }
 
-/** Run `fn` in one MobX action with all write sides muted. Reactions fire after the action, unmuted. */
-export function applyFacts(fn: () => void): void {
-  runInAction(() => {
+/**
+ * Run `fn` with all write sides muted. Listeners hear the changes made inside
+ * before the mute lifts; effects run afterwards, unmuted.
+ */
+export function applyFacts<T>(fn: () => T): T {
+  return transaction(() => {
+    db.drain();
     depth++;
     try {
-      fn();
+      return fn();
     } finally {
+      db.drain();
       depth--;
     }
   });

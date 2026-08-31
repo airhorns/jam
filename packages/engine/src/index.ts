@@ -56,16 +56,41 @@ export type Clause = number[];
  * A registered query's live result set. `rows` maps stable row ids to the
  * bound variable ids in order; `version` bumps whenever a row appears or leaves.
  */
+export type RowListener = (row: Uint32Array, added: boolean) => void;
+
 export class QueryHandle {
   readonly rows = new Map<number, Uint32Array>();
   version = 0;
   released = false;
+  private listeners: RowListener[] = [];
 
   constructor(
     private readonly engine: Engine,
     readonly qid: number,
     readonly nvars: number,
   ) {}
+
+  /** Called for every row that appears or leaves during a flush. */
+  onRow(listener: RowListener): () => void {
+    this.listeners.push(listener);
+    return () => {
+      const i = this.listeners.indexOf(listener);
+      if (i >= 0) this.listeners.splice(i, 1);
+    };
+  }
+
+  /** @internal */
+  applyRow(rid: number, row: Uint32Array | null): void {
+    if (row) {
+      this.rows.set(rid, row);
+      for (const listener of this.listeners) listener(row, true);
+    } else {
+      const old = this.rows.get(rid);
+      if (!old) return;
+      this.rows.delete(rid);
+      for (const listener of this.listeners) listener(old, false);
+    }
+  }
 
   /** Drop one registration; the handle stays live while other registrations share it. */
   release(): void {
@@ -278,10 +303,10 @@ export class Engine {
           const flag = events[i + 1];
           i += 2;
           if (flag === 1) {
-            handle?.rows.set(rid, events.slice(i, i + nvars));
+            handle?.applyRow(rid, events.slice(i, i + nvars));
             i += nvars;
           } else {
-            handle?.rows.delete(rid);
+            handle?.applyRow(rid, null);
           }
         }
         if (handle && n > 0) {

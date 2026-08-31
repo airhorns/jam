@@ -3,7 +3,7 @@
 // These measure the cost of:
 //   - emitVdom: JSX → fact claims in the DB
 //   - select(): CSS selector matching against VDOM facts
-//   - buildVdomIndex: building the tree index from facts
+//   - the incremental VDOM index fed by fact deltas
 //   - Full render cycle: component execution → emit → patch
 
 import { bench, describe, beforeEach } from "vitest";
@@ -11,7 +11,7 @@ import { FactDB, $, _ } from "../db";
 import { db } from "../db";
 import { h, emitVdom } from "../jsx";
 import type { VChild } from "../jsx";
-import { select, buildVdomIndex } from "../select";
+import { select, vdom } from "../select";
 
 // --- Helpers ---
 
@@ -97,20 +97,23 @@ describe("emitVdom — JSX to facts", () => {
 });
 
 // ============================================================================
-// BUILD VDOM INDEX (used by select and renderer)
+// VDOM INDEX (used by select and renderer)
 // ============================================================================
 
-describe("buildVdomIndex", () => {
-  beforeEach(() => db.clear());
+describe("vdom index", () => {
+  beforeEach(() => {
+    db.clear();
+    vdom();
+  });
 
   bench("index 100 elements (~400 facts)", () => {
     populateVdomFacts(100);
-    buildVdomIndex();
+    vdom().track();
   });
 
   bench("index 500 elements (~2000 facts)", () => {
     populateVdomFacts(500);
-    buildVdomIndex();
+    vdom().track();
   });
 });
 

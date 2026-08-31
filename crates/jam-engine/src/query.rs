@@ -276,7 +276,7 @@ impl Query {
         let full_seed = (0..clauses.len())
             .max_by_key(|&i| (literal_mask(&clauses[i]).count_ones(), usize::MAX - i))
             .unwrap_or(0);
-        let full_plan = build_plan(&clauses, full_seed, false);
+        let full_plan = if clauses.is_empty() { Plan { steps: Vec::new() } } else { build_plan(&clauses, full_seed, false) };
         Query { clauses, nvars, delta_plans, full_seed, full_plan, results: ResultSet::default(), refcount: 1 }
     }
 

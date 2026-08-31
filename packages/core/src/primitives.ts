@@ -1,35 +1,29 @@
 // Primitives — the public API for interacting with the fact database.
-//
-// Everything lives in one unified fact map. Fine-grained per-pattern
-// indexes prevent circular reactivity: writing a VDOM fact only bumps
-// version counters for patterns that could match it. App-state patterns
-// like ["todo", $.id, "title", $.title] don't match VDOM facts like
-// ["e1", "tag", "div"], so component re-execution doesn't trigger.
 
-import { action, reaction, runInAction, comparer } from "mobx";
 import { db, type Term, type Pattern, type Bindings, _ as wildcard } from "./db";
+import { Effect, transaction as batch, untracked } from "./reactive";
 export { $, _ } from "./db";
 export type { Term, Pattern, Bindings } from "./db";
 
 /** Claim a fact into the current ownership scope. */
-export const claim: (...terms: Term[]) => void = action((...terms: Term[]) => {
+export function claim(...terms: Term[]): void {
   db.assert(...terms);
-});
+}
 
 /** Remember a durable fact not bound to the current ownership scope. */
-export const remember: (...terms: Term[]) => void = action((...terms: Term[]) => {
+export function remember(...terms: Term[]): void {
   db.insert(...terms);
-});
+}
 
 /** Forget matching facts immediately from shared state. Supports _ wildcard for bulk removal. */
-export const forget: (...terms: (Term | typeof wildcard)[]) => void = action((...terms: (Term | typeof wildcard)[]) => {
+export function forget(...terms: (Term | typeof wildcard)[]): void {
   db.drop(...terms);
-});
+}
 
 /** Replace the current durable value for a prefix by forgetting prior matches and remembering the new fact. */
-export const replace: (...terms: Term[]) => void = action((...terms: Term[]) => {
+export function replace(...terms: Term[]): void {
   db.replace(...terms);
-});
+}
 
 /**
  * Facts written inside fn belong to the sync partition `scope`. Outside any
@@ -38,59 +32,47 @@ export const replace: (...terms: Term[]) => void = action((...terms: Term[]) => 
  * wrapping an entity's creation is enough to keep all of its facts together.
  */
 export function scoped<T>(scope: string, fn: () => T): T {
-  return db.withScope(scope, () => runInAction(fn));
+  return db.withScope(scope, () => batch(fn));
 }
 
 /**
  * Batch multiple mutations into a single transaction. Reactions only
  * fire once, after the transaction completes, seeing the final state.
- * Use this when you need to forget + remember multiple related facts
- * atomically (e.g. replacing a batch of plan entries).
  */
 export function transaction<T>(fn: () => T): T {
-  return runInAction(fn);
+  return batch(fn);
 }
 
 /**
- * Reactive query. Returns the current matching Bindings[].
- * When called inside a MobX tracking context (component render,
- * autorun, reaction), establishes fine-grained dependency tracking
- * so the context re-runs when results change.
+ * Reactive query. Returns the current matching Bindings[]. Inside a component
+ * render or whenever() the caller re-runs when the result changes.
  */
 export function when(...patterns: Pattern[]): Bindings[] {
   return db.index(...patterns).get();
 }
 
 /**
- * Reactive rule: when patterns match, run body.
- * Body can claim facts freely.
- * Returns a disposer.
+ * Reactive rule: run body with the current matches now and whenever they change.
+ * Facts the body claims are revoked before the next run. Returns a disposer.
  */
-export function whenever(
-  patterns: Pattern[],
-  body: (matches: Bindings[]) => void,
-): () => void {
+export function whenever(patterns: Pattern[], body: (matches: Bindings[]) => void): () => void {
   const idx = db.index(...patterns);
   const parentOwner = db.createChildOwner(db.getCurrentOwnerId(), "rule-parent");
   let currentRunOwner: string | null = null;
 
-  const disposer = reaction(
-    () => idx.get(),
-    (matches) => {
-      runInAction(() => {
-        if (currentRunOwner) db.revokeOwner(currentRunOwner);
-        currentRunOwner = db.createChildOwner(parentOwner, "run");
-        db.withOwnerScope(currentRunOwner, () => {
-          body(matches);
-        });
-      });
-    },
-    { fireImmediately: true, equals: comparer.structural },
-  );
+  const effect = new Effect(() => {
+    const matches = idx.get();
+    untracked(() => {
+      if (currentRunOwner) db.revokeOwner(currentRunOwner);
+      currentRunOwner = db.createChildOwner(parentOwner, "run");
+      db.withOwnerScope(currentRunOwner, () => body(matches));
+    });
+  });
+  effect.run();
 
   return () => {
-    disposer();
-    runInAction(() => {
+    effect.dispose();
+    batch(() => {
       if (currentRunOwner) db.revokeOwner(currentRunOwner);
       db.revokeOwner(parentOwner);
     });

@@ -2,7 +2,7 @@
 //! to the store, keeps owners and scopes consistent, propagates every change
 //! through the registered queries and reports what changed as packed events.
 
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 
 use crate::owner::Owners;
 use crate::query::{adhoc, evaluate, Clause, Queries, QueryId};
@@ -343,16 +343,17 @@ impl Engine {
         out
     }
 
-    /// One-off evaluation: `nvars nrows (vals…)…`, rows with multiplicity.
+    /// One-off evaluation: `nvars nrows (vals…)…`, each distinct binding tuple once.
     pub fn query(&mut self, clauses: Vec<Clause>) -> Vec<u32> {
         let query = adhoc(&mut self.store, clauses);
         let mut out = vec![query.nvars as u32, 0];
-        let mut n = 0u32;
+        let mut seen: HashSet<Box<[TermId]>> = HashSet::new();
         evaluate(&self.store, &query, &mut |row| {
-            n += 1;
-            out.extend_from_slice(row);
+            if seen.insert(row.into()) {
+                out.extend_from_slice(row);
+            }
         });
-        out[1] = n;
+        out[1] = seen.len() as u32;
         out
     }
 

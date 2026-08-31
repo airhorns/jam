@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { isObservableArray, runInAction } from "mobx";
 import { FactDB, $, _, matchPattern, type Fact, type FactChange, type FactChangeInfo } from "../db";
+import { transaction } from "../reactive";
 
 describe("matchPattern", () => {
   it("matches exact facts", () => {
@@ -185,22 +185,37 @@ describe("FactDB", () => {
       db.observe((type, key, fact) => log.push([type, key, fact]));
     });
 
-    it("fires add synchronously with a plain array once the db is consistent", () => {
+    it("fires add with a plain array once the db is consistent", () => {
       let seenInside = 0;
       db.observe((type, _key, fact) => {
         if (type === "add") seenInside = db.query(fact).length;
       });
-      runInAction(() => {
-        db.insert("todo", 1, "title", "A");
-        expect(log).toHaveLength(1);
-      });
+      db.insert("todo", 1, "title", "A");
+      expect(log).toHaveLength(1);
       const [type, key, fact] = log[0];
       expect(type).toBe("add");
       expect(key).toBe(JSON.stringify(["todo", 1, "title", "A"]));
       expect(fact).toEqual(["todo", 1, "title", "A"]);
-      expect(isObservableArray(fact)).toBe(false);
       expect(() => structuredClone(fact)).not.toThrow();
       expect(seenInside).toBe(1);
+    });
+
+    it("delivers changes made inside a transaction when it ends", () => {
+      transaction(() => {
+        db.insert("todo", 1, "title", "A");
+        db.insert("todo", 2, "title", "B");
+        expect(log).toHaveLength(0);
+      });
+      expect(log.map(([t, , f]) => [t, f[1]])).toEqual([["add", 1], ["add", 2]]);
+    });
+
+    it("reports the scope of each change", () => {
+      const scopes: string[] = [];
+      db.observe((_type, _key, _fact, info) => scopes.push(info.scope));
+      db.withScope("project:p1", () => db.insert("issue", "i1", "title", "A"));
+      db.insert("issue", "i2", "title", "B");
+      db.drop("issue", "i1", "title", "A");
+      expect(scopes).toEqual(["project:p1", "", "project:p1"]);
     });
 
     it("does not fire for a duplicate insert", () => {
@@ -237,16 +252,13 @@ describe("FactDB", () => {
       expect(db.query(["todo", 1, "title", $.t])).toEqual([{ t: "A" }]);
     });
 
-    it("deleteByKey and clear emit one delete per fact", () => {
+    it("clear() drops every fact without notifying", () => {
       db.insert("a", 1);
       db.insert("b", 2);
-      db.insert("c", 3);
-      log = [];
-      db.deleteByKey(JSON.stringify(["a", 1]));
-      expect(log).toEqual([["delete", JSON.stringify(["a", 1]), ["a", 1]]]);
       log = [];
       db.clear();
-      expect(log.map(([t, , f]) => [t, ...f]).sort()).toEqual([["delete", "b", 2], ["delete", "c", 3]]);
+      expect(db.facts.size).toBe(0);
+      expect(log).toEqual([]);
     });
 
     it("unsubscribe stops notifications", () => {
@@ -316,7 +328,7 @@ describe("FactDB", () => {
       db.observe((type) => log.push(type));
       db.withScope("a", () => db.insert("issue", "i1", "title", "A"));
       log.length = 0;
-      db.setScope(JSON.stringify(["issue", "i1", "title", "A"]), "b");
+      db.setScope(["issue", "i1", "title", "A"], "b");
       expect(log).toEqual([]);
       expect(db.scopeOf("issue", "i1", "title", "A")).toBe("b");
       db.insert("issue", "i1", "status", "todo");
@@ -339,51 +351,44 @@ describe("FactDB", () => {
       db.observe((type, _key, fact, info) => log.push([type, fact, info]));
     });
 
-    it("insert() and drop() are durable", () => {
+    it("insert() and drop() are reported", () => {
       db.insert("todo", 1, "title", "A");
       db.drop("todo", 1, "title", "A");
-      expect(log.map(([t, , i]) => [t, i.durable])).toEqual([["add", true], ["delete", true]]);
+      expect(log.map(([t]) => t)).toEqual(["add", "delete"]);
     });
 
-    it("assert() and owner revocation are not durable", () => {
+    it("assert() and owner revocation are silent", () => {
       const owner = db.createChildOwner(db.getCurrentOwnerId(), "scope");
       db.withOwnerScope(owner, () => db.assert("todo", 1, "class", "done"));
       db.revokeOwner(owner);
-      expect(log.map(([t, , i]) => [t, i.durable])).toEqual([["add", false], ["delete", false]]);
+      expect(log).toEqual([]);
     });
 
-    it("insert() of an already claimed fact emits a durable add, and revoking the claim keeps it", () => {
+    it("insert() of an already claimed fact emits an add, and revoking the claim keeps it", () => {
       const owner = db.createChildOwner(db.getCurrentOwnerId(), "scope");
       db.withOwnerScope(owner, () => db.assert("todo", 1, "class", "done"));
       db.insert("todo", 1, "class", "done");
       db.insert("todo", 1, "class", "done");
       db.revokeOwner(owner);
-      expect(log.map(([t, , i]) => [t, i.durable])).toEqual([["add", false], ["add", true]]);
+      expect(log.map(([t]) => t)).toEqual(["add"]);
       expect(db.query(["todo", 1, "class", $.c])).toEqual([{ c: "done" }]);
     });
 
-    it("dropping a claimed-only fact is not durable", () => {
+    it("dropping a claimed-only fact is silent", () => {
       const owner = db.createChildOwner(db.getCurrentOwnerId(), "scope");
       db.withOwnerScope(owner, () => db.assert("todo", 1, "class", "done"));
       db.drop("todo", 1, "class", "done");
-      expect(log[1]).toEqual(["delete", ["todo", 1, "class", "done"], { durable: false }]);
+      expect(log).toEqual([]);
     });
 
-    it("replace() flags its add and emits plain durable deletes for the replaced facts", () => {
+    it("replace() flags its add and emits plain deletes for the replaced facts", () => {
       db.insert("todo", 1, "title", "A");
       log = [];
       db.replace("todo", 1, "title", "B");
       expect(log).toEqual([
-        ["delete", ["todo", 1, "title", "A"], { durable: true }],
-        ["add", ["todo", 1, "title", "B"], { durable: true, replace: true }],
+        ["delete", ["todo", 1, "title", "A"], { scope: "" }],
+        ["add", ["todo", 1, "title", "B"], { scope: "", replace: true }],
       ]);
-    });
-
-    it("clear() deletes are not durable", () => {
-      db.insert("a", 1);
-      log = [];
-      db.clear();
-      expect(log).toEqual([["delete", ["a", 1], { durable: false }]]);
     });
   });
 });

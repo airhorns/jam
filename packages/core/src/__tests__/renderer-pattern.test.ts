@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { autorun, reaction, runInAction } from "mobx";
 import { db, $ } from "../db";
+import { autorun, reaction, transaction } from "../reactive";
 import { claim, remember, when, whenever } from "../primitives";
 
 describe("fine-grained per-pattern reactivity", () => {
@@ -36,7 +36,7 @@ describe("fine-grained per-pattern reactivity", () => {
         return items;
       },
       () => {
-        runInAction(() => {
+        transaction(() => {
           db.insert("e1", "tag", "div");
           db.insert("e2", "tag", "span");
           db.insert("e3", "text", "hello");

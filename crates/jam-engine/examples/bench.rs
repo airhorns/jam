@@ -62,7 +62,7 @@ fn main() {
         e.apply(&[OP_REPLACE, ROOT_OWNER, NONE, 4, issue, id, title, if i % 2 == 0 { new_title } else { titles[i % issues] }])
             .unwrap();
         let ev = e.drain();
-        debug_assert!(ev.len() > 0);
+        debug_assert!(!ev.is_empty());
     }
     let per = t.elapsed() / iterations as u32;
     println!("replace title (2 queries affected): {per:?} per op");

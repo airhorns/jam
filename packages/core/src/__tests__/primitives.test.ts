@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { autorun } from "mobx";
 import { db } from "../db";
+import { autorun } from "../reactive";
 import {
   $,
   _,

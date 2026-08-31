@@ -2,7 +2,6 @@
 // and the full reactive chain from state mutation → index recompute → observer.
 
 import { bench, describe, beforeEach } from "vitest";
-import { autorun } from "mobx";
 import { FactDB, $, _ } from "../db";
 import {
   claim,
@@ -13,6 +12,7 @@ import {
   transaction,
 } from "../primitives";
 import { db } from "../db";
+import { autorun } from "../reactive";
 
 // ============================================================================
 // WHEN (reactive query)
@@ -32,7 +32,7 @@ describe("when() — reactive query", () => {
     when(["todo", $.id, "title", $.title]);
   });
 
-  bench("when() repeated reads (MobX cached)", () => {
+  bench("when() repeated reads (cached)", () => {
     for (let i = 0; i < 50; i++) {
       db.insert("todo", i, "title", `Task ${i}`);
     }
