@@ -55,6 +55,13 @@ client keeps live: the four-clause list join, the every-title query and one
 | | `drop-wildcard+reassert` | `[issue _ priority 3]` dropped (a fifth of the issues) and reasserted |
 | `revoke` | `reclaim-1000` | revoking an owner of 1000 `dom` facts and reasserting under a fresh one |
 | | `tree-100x10` | the same through 100 child owners of 10 facts each |
+| `features` | `query/list-page` | one-shot linearlite list page: one project's issues at priority ≥ 3, ordered by `created` desc then id, `limit 100` |
+| | `query/search` | one project's titles containing "99", case-insensitively |
+| | `query/not-renamed` | open issues with no `renamed` fact (a negation over half the issues) |
+| | `query/count-by-project-status` | `count` grouped by `(project, status)` over every issue |
+| | `register/list-page`, `register/count-by-project-status` | `register` + `drain` + `release` of the same |
+| | `churn/replace-{status,priority,created}` | one `replace` with four list pages, the search, the negation and the counts live — each attribute hits a different stage (join, filter, window key) |
+| | `rows/list-page` | `rows` of a registered list page |
 
 Throughputs are per fact (or per row for queries), so `M/s` columns compare directly across sizes.
 
@@ -87,6 +94,27 @@ as indicative. "Before" is the engine as first merged; "after" is the store desc
 | churn/batch-1000-titles | 66 µs → 77 µs | 97 µs → 98 µs | 248 µs → 220 µs |
 | churn/drop-wildcard+reassert | 1.08 ms → 76 µs | 12.5 ms → 894 µs | 164 ms → 30.6 ms |
 | revoke/reclaim-1000 | 690 µs → 233 µs | | |
+
+The `features` group has no "before": these queries used to be JS bodies re-filtering and
+re-sorting every row of a project on each change.
+
+| bench | 10k | 100k | 1M |
+|---|---|---|---|
+| features/query/list-page | 28.6 µs | 896 µs | 58.6 ms |
+| features/query/search | 17.5 µs | 199 µs | 18.2 ms |
+| features/query/not-renamed | 53.7 µs | 714 µs | 62.3 ms |
+| features/query/count-by-project-status | 235 µs | 3.3 ms | 166 ms |
+| features/register/list-page | 28.2 µs | 942 µs | 21.1 ms |
+| features/register/count-by-project-status | 267 µs | 8.8 ms | 79 ms |
+| features/churn/replace-status | 126 ns | 456 ns | 283 ns |
+| features/churn/replace-priority | 120 ns | 446 ns | 248 ns |
+| features/churn/replace-created | 88 ns | 499 ns | 337 ns |
+| features/rows/list-page | 1.2 µs | 4.5 µs | 3.0 µs |
+
+A `replace` under seven registered feature queries stays in the hundreds of nanoseconds at every
+size because a fact only reaches the stages of the queries it routes to, and a window only
+reports rows that cross its edges. Registering a page costs one evaluation of its join over the
+project's issues; reading it afterwards (`rows/list-page`) is a few microseconds for 100 rows.
 
 What moved the big numbers, in the order it was found by profiling (`samply record` over a
 release build with `CARGO_PROFILE_RELEASE_STRIP=false CARGO_PROFILE_RELEASE_DEBUG=true`):

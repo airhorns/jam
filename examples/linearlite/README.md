@@ -39,7 +39,7 @@ sync server: SQLite ◀── engine ──▶ per-connection filters ──chan
 There is no app-specific storage code. `src/sync.ts` calls `sync()` with the storage, the server URL and an `exclude` for the app's ephemeral facts; `src/programs/subscriptions.ts` keeps two subscriptions open — `{ scope: "" }` for projects and `{ scope: "project:<id>" }` for the current project — and disposes the previous project's subscription only after the next one is ready, so the screen never empties on a switch. Everything else is facts:
 
 - `createIssue` and `addComment` write inside `scoped(projectScope(id), …)`, so a new entity lands in its project's partition; later `replace`/`forget` calls inherit the scope from the entity.
-- `src/programs/queries.ts` derives each view in memory with `whenever`: filter, sort and search over the project's issue facts, then emit a window of `["query", name, "row", index, id]` facts (100 rows for the list, moved by `["ui", "list", "scrollTop"]`; 50 per board column; the issue and its comments on a detail page). Components render from those with `when()`.
+- `src/programs/queries.ts` derives each view with `whenever` over one engine query per view: `src/filter-state.ts` turns the route's filter into `where`/`orderBy` clauses (status and priority sets, case-insensitive search over title and description, the sort column), and the engine maintains the count and the window — `offset`/`limit` for the list (100 rows, moved by `["ui", "list", "scrollTop"]`), `limit(50)` per board column, the issue and its comments on a detail page. Each run emits `["query", name, "row", index, id]` plus total/offset/limit facts, and components render from those with `when()`.
 - The server is `createSyncServer` from `@jam/core/server` over `sqliteStorage`, with a `ws` `WebSocketServer` handing each connection to `server.handle`.
 
 ### Fact schema
@@ -59,7 +59,7 @@ Routes carry the project: `/:projectId`, `/:projectId/board`, `/:projectId/searc
 
 - `src/config.ts` — where the facts come from: `?sync=` / `VITE_SYNC_URL`, or a local seed.
 - `src/sync.ts` — the one `sync()` call; `src/programs/subscriptions.ts` — which scopes are loaded.
-- `src/programs/` — router, in-memory queries, UI state, recent issues.
+- `src/programs/` — router, view queries, UI state, recent issues.
 - `src/components/` — the UI. Every component returns exactly one root element.
 - `src/mutations.ts` — `createProject`, `createIssue`, `updateIssue`, `deleteIssue`, `moveIssue` (fractional indexing for the board), `addComment`.
 - `src/seed.ts` — deterministic seed as `{ terms, scope }` facts, written into IndexedDB in standalone mode and applied to the server on first boot.

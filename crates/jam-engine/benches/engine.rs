@@ -6,7 +6,10 @@ use std::time::{Duration, Instant};
 
 use criterion::{BatchSize, BenchmarkId, Criterion, SamplingMode, Throughput, criterion_group, criterion_main};
 use jam_engine::wire::*;
-use jam_engine::{Clause, Engine, Interner, NONE, QueryId, ROOT_OWNER, TermId, VAR_BASE, WILD};
+use jam_engine::{
+    AggOp, Aggregate, Clause, Engine, Interner, NONE, Op, Operand, Predicate, QueryId, ROOT_OWNER, Sort, Spec, TermId,
+    VAR_BASE, WILD,
+};
 
 const SIZES: &[usize] = &[10_000, 100_000, 1_000_000];
 const PROJECTS: usize = 16;
@@ -141,12 +144,12 @@ impl World {
         let join4 = self.join4();
         let v = &self.v;
         let mut queries = vec![
-            self.engine.register(join4),
-            self.engine.register(vec![vec![v.issue, var(0), v.title, var(1)]]),
+            self.engine.register(join4).unwrap(),
+            self.engine.register(vec![vec![v.issue, var(0), v.title, var(1)]]).unwrap(),
         ];
         for &p in &v.projects {
             let clauses = vec![vec![v.issue, var(0), v.project, p], vec![v.issue, var(0), v.status, var(1)]];
-            queries.push(self.engine.register(clauses));
+            queries.push(self.engine.register(clauses).unwrap());
         }
         self.engine.drain();
         queries
@@ -155,6 +158,65 @@ impl World {
     fn apply(&mut self, ops: &[u32]) -> Vec<u32> {
         self.engine.apply(ops).unwrap();
         self.engine.drain()
+    }
+
+    /// `[issue $id project p0] [issue $id priority $p] [issue $id created $c]`: one project's issues with their sort columns.
+    fn project_columns(&self) -> Vec<Clause> {
+        let v = &self.v;
+        vec![
+            vec![v.issue, var(0), v.project, v.projects[0]],
+            vec![v.issue, var(0), v.priority, var(1)],
+            vec![v.issue, var(0), v.created, var(2)],
+        ]
+    }
+
+    /// The linearlite list: one project's issues at priority ≥ 3, newest first, one page of 100.
+    fn list_page(&mut self, offset: u32) -> Spec {
+        let three = held_num(&mut self.engine.interner, 3.0);
+        Spec {
+            patterns: self.project_columns(),
+            filters: vec![vec![Predicate { lhs: 1, op: Op::Ge, rhs: Operand::Lit(three) }]],
+            order: vec![Sort { var: 2, descending: true }, Sort { var: 0, descending: false }],
+            offset,
+            limit: Some(100),
+            ..Spec::default()
+        }
+    }
+
+    /// Titles of one project mentioning "99", case-insensitively.
+    fn search(&mut self) -> Spec {
+        let needle = held(&mut self.engine.interner, "99");
+        let v = &self.v;
+        Spec {
+            patterns: vec![vec![v.issue, var(0), v.project, v.projects[0]], vec![v.issue, var(0), v.title, var(1)]],
+            filters: vec![vec![Predicate { lhs: 1, op: Op::ContainsCi, rhs: Operand::Lit(needle) }]],
+            ..Spec::default()
+        }
+    }
+
+    /// Open issues without a `renamed` fact.
+    fn not_renamed(&self) -> Spec {
+        let v = &self.v;
+        Spec {
+            patterns: vec![vec![v.issue, var(0), v.status, v.open]],
+            negations: vec![vec![v.issue, var(0), v.renamed, WILD]],
+            ..Spec::default()
+        }
+    }
+
+    /// Issues per (project, status).
+    fn count_by_project_status(&self) -> Spec {
+        let v = &self.v;
+        Spec {
+            patterns: vec![vec![v.issue, var(0), v.project, var(1)], vec![v.issue, var(0), v.status, var(2)]],
+            aggregate: Some(Aggregate { op: AggOp::Count, input: None, group: vec![1, 2] }),
+            ..Spec::default()
+        }
+    }
+
+    /// Ops flipping the status of issue `i` to `status`.
+    fn set_status(&self, i: usize, status: TermId) -> Vec<u32> {
+        vec![OP_REPLACE, ROOT_OWNER, NONE, 4, self.v.issue, self.ids[i], self.v.status, status]
     }
 }
 
@@ -280,7 +342,7 @@ fn query(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("entity", facts), |b| {
             b.iter(|| {
                 i = (i + 1) % n;
-                black_box(engine.query(vec![vec![v.issue, ids[i], v.title, var(0)]]))
+                black_box(engine.query(vec![vec![v.issue, ids[i], v.title, var(0)]]).unwrap())
             });
         });
         group.throughput(Throughput::Elements((n / PROJECTS / 2) as u64));
@@ -288,16 +350,16 @@ fn query(c: &mut Criterion) {
             b.iter(|| {
                 let clauses =
                     vec![vec![v.issue, var(0), v.project, v.projects[0]], vec![v.issue, var(0), v.status, v.open]];
-                black_box(engine.query(clauses))
+                black_box(engine.query(clauses).unwrap())
             });
         });
         group.throughput(Throughput::Elements(n as u64));
         group.bench_function(BenchmarkId::new("join-3", facts), |b| {
-            b.iter(|| black_box(engine.query(join3.clone())));
+            b.iter(|| black_box(engine.query(join3.clone()).unwrap()));
         });
         group.throughput(Throughput::Elements((n / 2) as u64));
         group.bench_function(BenchmarkId::new("join-4", facts), |b| {
-            b.iter(|| black_box(engine.query(join4.clone())));
+            b.iter(|| black_box(engine.query(join4.clone()).unwrap()));
         });
     }
     group.finish();
@@ -314,7 +376,7 @@ fn register(c: &mut Criterion) {
         group.throughput(Throughput::Elements(n as u64));
         group.bench_function(BenchmarkId::new("titles", facts), |b| {
             b.iter(|| {
-                let q = world.engine.register(titles.clone());
+                let q = world.engine.register(titles.clone()).unwrap();
                 black_box(world.engine.drain());
                 world.engine.release(q)
             });
@@ -322,12 +384,12 @@ fn register(c: &mut Criterion) {
         group.throughput(Throughput::Elements((n / 2) as u64));
         group.bench_function(BenchmarkId::new("join-4", facts), |b| {
             b.iter(|| {
-                let q = world.engine.register(join4.clone());
+                let q = world.engine.register(join4.clone()).unwrap();
                 black_box(world.engine.drain());
                 world.engine.release(q)
             });
         });
-        let q = world.engine.register(join4.clone());
+        let q = world.engine.register(join4.clone()).unwrap();
         world.engine.drain();
         group.bench_function(BenchmarkId::new("rows/join-4", facts), |b| {
             b.iter(|| black_box(world.engine.rows(q)));
@@ -428,7 +490,7 @@ fn revoke(c: &mut Criterion) {
     let tag = held(&mut world.engine.interner, "tag");
     let div = held(&mut world.engine.interner, "div");
     let nodes: Vec<TermId> = (0..1000).map(|i| held(&mut world.engine.interner, &format!("n{i}"))).collect();
-    world.engine.register(vec![vec![dom, var(0), tag, var(1)]]);
+    world.engine.register(vec![vec![dom, var(0), tag, var(1)]]).unwrap();
     world.engine.drain();
 
     let mut owner = world.engine.create_owner(ROOT_OWNER).unwrap();
@@ -461,5 +523,91 @@ fn revoke(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, load, lookup, scan, query, register, churn, revoke);
+/// Filters, negation, aggregates and ordered windows: evaluated once, registered, and maintained under churn.
+fn features(c: &mut Criterion) {
+    let mut group = c.benchmark_group("features");
+    group.sampling_mode(SamplingMode::Flat);
+    for &facts in SIZES {
+        let mut world = World::loaded(facts);
+        let n = world.issues();
+        let per_project = n / PROJECTS;
+        let (list, search, not_renamed, counts) =
+            (world.list_page(0), world.search(), world.not_renamed(), world.count_by_project_status());
+
+        group.throughput(Throughput::Elements(per_project as u64));
+        group.bench_function(BenchmarkId::new("query/list-page", facts), |b| {
+            b.iter(|| black_box(world.engine.query(list.clone()).unwrap()));
+        });
+        group.bench_function(BenchmarkId::new("query/search", facts), |b| {
+            b.iter(|| black_box(world.engine.query(search.clone()).unwrap()));
+        });
+        group.throughput(Throughput::Elements((n / 2) as u64));
+        group.bench_function(BenchmarkId::new("query/not-renamed", facts), |b| {
+            b.iter(|| black_box(world.engine.query(not_renamed.clone()).unwrap()));
+        });
+        group.throughput(Throughput::Elements(n as u64));
+        group.bench_function(BenchmarkId::new("query/count-by-project-status", facts), |b| {
+            b.iter(|| black_box(world.engine.query(counts.clone()).unwrap()));
+        });
+
+        group.throughput(Throughput::Elements(per_project as u64));
+        group.bench_function(BenchmarkId::new("register/list-page", facts), |b| {
+            b.iter(|| {
+                let q = world.engine.register(list.clone()).unwrap();
+                black_box(world.engine.drain());
+                world.engine.release(q)
+            });
+        });
+        group.throughput(Throughput::Elements(n as u64));
+        group.bench_function(BenchmarkId::new("register/count-by-project-status", facts), |b| {
+            b.iter(|| {
+                let q = world.engine.register(counts.clone()).unwrap();
+                black_box(world.engine.drain());
+                world.engine.release(q)
+            });
+        });
+
+        let mut pages = Vec::new();
+        for page in 0..4 {
+            let spec = world.list_page(page * 100);
+            pages.push(world.engine.register(spec).unwrap());
+        }
+        for spec in [search, not_renamed, counts] {
+            world.engine.register(spec).unwrap();
+        }
+        world.engine.drain();
+        let mut i = 0;
+        group.throughput(Throughput::Elements(1));
+        group.bench_function(BenchmarkId::new("churn/replace-status", facts), |b| {
+            b.iter(|| {
+                i = (i + 1) % n;
+                let status = if i.is_multiple_of(2) { world.v.closed } else { world.v.open };
+                let ops = world.set_status(i, status);
+                black_box(world.apply(&ops))
+            });
+        });
+        group.bench_function(BenchmarkId::new("churn/replace-priority", facts), |b| {
+            b.iter(|| {
+                i = (i + 1) % n;
+                let priority = world.engine.interner.intern_num(((i / 7) % 5) as f64);
+                let ops = [OP_REPLACE, ROOT_OWNER, NONE, 4, world.v.issue, world.ids[i], world.v.priority, priority];
+                black_box(world.apply(&ops))
+            });
+        });
+        group.bench_function(BenchmarkId::new("churn/replace-created", facts), |b| {
+            b.iter(|| {
+                i = (i + 1) % n;
+                let created = world.engine.interner.intern_num((n + i) as f64);
+                let ops = [OP_REPLACE, ROOT_OWNER, NONE, 4, world.v.issue, world.ids[i], world.v.created, created];
+                black_box(world.apply(&ops))
+            });
+        });
+        group.bench_function(BenchmarkId::new("rows/list-page", facts), |b| {
+            b.iter(|| black_box(world.engine.rows(pages[0])));
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, load, lookup, scan, query, register, churn, revoke, features);
 criterion_main!(benches);

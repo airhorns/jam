@@ -4,17 +4,34 @@
 // into the reactive scheduler.
 
 import {
+  AGG_COUNT,
+  AGG_MAX,
+  AGG_MIN,
+  AGG_SUM,
   Engine,
   NONE,
+  PRED_CONTAINS,
+  PRED_CONTAINS_CI,
+  PRED_EQ,
+  PRED_GE,
+  PRED_GT,
+  PRED_LE,
+  PRED_LT,
+  PRED_NE,
+  PRED_STARTS_WITH,
+  PRED_STARTS_WITH_CI,
   ROOT_OWNER,
   VAR_BASE,
   WILD,
   _,
-  compareRows,
+  compareTerms,
   factKey,
   type Clause,
   type EngineStats,
+  type Predicate,
   type QueryHandle,
+  type QuerySpec,
+  type Sort,
 } from "@jam/engine";
 import { isTracking, markDirty, onWrite, recordRead, registerDrainer, type Dependency, type Effect } from "./reactive";
 
@@ -90,15 +107,84 @@ export function matchPattern(pattern: Pattern, fact: Fact): Bindings | null {
   return bindings;
 }
 
-function patternsKey(patterns: Pattern[]): string {
-  return JSON.stringify(
-    patterns.map((p) => p.map((t) => (t === _ ? "__WILD__" : isBinding(t) ? `__BIND__${t.name}` : t))),
+// --- Query clauses ---
+
+export type ComparisonOp = "=" | "!=" | "<" | "<=" | ">" | ">=" | "contains" | "startsWith" | "icontains" | "istartsWith";
+
+export interface PredicateSpec {
+  lhs: BindingMarker;
+  op: ComparisonOp;
+  rhs: Term | BindingMarker;
+}
+
+/** Rows for which `pattern` has a match are hidden. */
+export interface NotClause {
+  __clause: "not";
+  pattern: Pattern;
+}
+
+/** A row passes when any alternative holds; several `where` clauses all have to pass. */
+export interface WhereClause {
+  __clause: "where";
+  any: PredicateSpec[];
+}
+
+export interface OrderClause {
+  __clause: "order";
+  by: BindingMarker;
+  descending: boolean;
+}
+
+export interface OffsetClause {
+  __clause: "offset";
+  count: number;
+}
+
+export interface LimitClause {
+  __clause: "limit";
+  count: number;
+}
+
+export type AggregateOp = "count" | "sum" | "min" | "max";
+
+/** Folds the rows into one `output` value per distinct `group`; the result rows are `group…, output`. */
+export interface AggregateClause {
+  __clause: "aggregate";
+  op: AggregateOp;
+  input: BindingMarker | null;
+  output: BindingMarker;
+  group: BindingMarker[];
+}
+
+export type QueryClause = Pattern | NotClause | WhereClause | OrderClause | OffsetClause | LimitClause | AggregateClause;
+
+const PRED_CODES: Record<ComparisonOp, number> = {
+  "=": PRED_EQ,
+  "!=": PRED_NE,
+  "<": PRED_LT,
+  "<=": PRED_LE,
+  ">": PRED_GT,
+  ">=": PRED_GE,
+  contains: PRED_CONTAINS,
+  startsWith: PRED_STARTS_WITH,
+  icontains: PRED_CONTAINS_CI,
+  istartsWith: PRED_STARTS_WITH_CI,
+};
+
+const AGG_CODES: Record<AggregateOp, number> = { count: AGG_COUNT, sum: AGG_SUM, min: AGG_MIN, max: AGG_MAX };
+
+function queryKey(clauses: QueryClause[]): string {
+  return JSON.stringify(clauses, (_key, value: unknown) =>
+    value === _ ? "__WILD__" : isBinding(value) ? `__BIND__${value.name}` : value,
   );
 }
 
-interface CompiledPatterns {
-  clauses: Clause[];
+/** @internal */
+export interface CompiledQuery {
+  spec: QuerySpec;
+  /** One name per output column. */
   names: string[];
+  order: Sort[];
 }
 
 export const ROOT_OWNER_ID = "__root__";
@@ -114,12 +200,12 @@ class Index implements Dependency, IndexHandle {
   private version = -1;
   private cached: Bindings[] = [];
   /** Valid while `handle` is registered; literal ids are re-interned on each attach. */
-  private compiled: CompiledPatterns | null = null;
+  private compiled: CompiledQuery | null = null;
 
   constructor(
     private readonly db: FactDB,
     readonly key: string,
-    private readonly patterns: Pattern[],
+    private readonly clauses: QueryClause[],
   ) {}
 
   get(): Bindings[] {
@@ -127,19 +213,19 @@ class Index implements Dependency, IndexHandle {
       recordRead(this);
       this.ensureHandle();
     }
-    if (!this.handle || !this.compiled) return this.db.evaluate(this.db.compile(this.patterns));
+    if (!this.handle || !this.compiled) return this.db.evaluate(this.db.compile(this.clauses));
     this.db.drain();
     if (this.version !== this.handle.version) {
       this.version = this.handle.version;
-      this.cached = this.db.decodeRows(this.handle.rows.values(), this.compiled.names);
+      this.cached = this.db.decodeRows(this.handle.rows.values(), this.compiled);
     }
     return this.cached;
   }
 
   private ensureHandle(): void {
     if (this.handle) return;
-    this.compiled = this.db.compile(this.patterns);
-    this.handle = this.db.attach(this, this.compiled.clauses);
+    this.compiled = this.db.compile(this.clauses);
+    this.handle = this.db.attach(this, this.compiled.spec);
     this.version = -1;
   }
 
@@ -368,17 +454,17 @@ export class FactDB {
   }
 
   /** Point-in-time query, never tracked. */
-  query(...patterns: Pattern[]): Bindings[] {
-    if (patterns.length === 0) return [];
-    return this.evaluate(this.compile(patterns));
+  query(...clauses: QueryClause[]): Bindings[] {
+    if (clauses.length === 0) return [];
+    return this.evaluate(this.compile(clauses));
   }
 
-  /** A maintained query for these patterns; `get()` inside an effect subscribes it. */
-  index(...patterns: Pattern[]): IndexHandle {
-    const key = patternsKey(patterns);
+  /** A maintained query for these clauses; `get()` inside an effect subscribes it. */
+  index(...clauses: QueryClause[]): IndexHandle {
+    const key = queryKey(clauses);
     let index = this.indexes.get(key);
     if (!index) {
-      index = new Index(this, key, patterns);
+      index = new Index(this, key, clauses);
       this.indexes.set(key, index);
     }
     return index;
@@ -388,12 +474,12 @@ export class FactDB {
    * Subscribe a dependency to raw row changes of several maintained queries.
    * Effects reading `dep` re-run when any of them changes; `onRow` sees each row as it appears or leaves.
    */
-  watch(patternSets: Pattern[][], onRow: (set: number, row: Uint32Array, added: boolean) => void): { dep: Dependency; dispose(): void } {
+  watch(queries: QueryClause[][], onRow: (set: number, row: Uint32Array, added: boolean) => void): { dep: Dependency; dispose(): void } {
     const dep: Dependency = { subscribers: new Set() };
     const handles: QueryHandle[] = [];
     const unsubscribes: (() => void)[] = [];
-    patternSets.forEach((patterns, set) => {
-      const handle = this.engine.register(this.compile(patterns).clauses);
+    queries.forEach((clauses, set) => {
+      const handle = this.engine.register(this.compile(clauses).spec);
       handles.push(handle);
       for (const row of handle.rows.values()) onRow(set, row, true);
       unsubscribes.push(handle.onRow((row, added) => onRow(set, row, added)));
@@ -410,37 +496,122 @@ export class FactDB {
     };
   }
 
-  /** @internal literal ids are only good until the next flush unless a registered query holds them */
-  compile(patterns: Pattern[]): CompiledPatterns {
+  /**
+   * @internal Variables are numbered by first appearance in the positive patterns; every
+   * other clause has to refer to one of them. Literal ids are only good until the next flush
+   * unless a registered query holds them.
+   */
+  compile(clauses: QueryClause[]): CompiledQuery {
     const names: string[] = [];
-    const clauses = patterns.map((pattern) =>
-      pattern.map((t) => {
-        if (t === _) return WILD;
-        if (isBinding(t)) {
+    const patterns: Clause[] = [];
+    for (const clause of clauses) {
+      if (!Array.isArray(clause)) continue;
+      patterns.push(
+        clause.map((t) => {
+          if (t === _) return WILD;
+          if (!isBinding(t)) return this.engine.id(t);
           let i = names.indexOf(t.name);
           if (i < 0) i = names.push(t.name) - 1;
           return VAR_BASE + i;
-        }
-        return this.engine.id(t);
-      }),
-    );
-    return { clauses, names };
+        }),
+      );
+    }
+    const lookup = (marker: BindingMarker): number => {
+      const i = names.indexOf(marker.name);
+      return i < 0 ? WILD : VAR_BASE + i;
+    };
+    const bound = (marker: BindingMarker, what: string): number => {
+      const word = lookup(marker);
+      if (word === WILD) throw new Error(`${what} $.${marker.name} is not bound by a pattern`);
+      return word;
+    };
+    const spec: QuerySpec = { patterns };
+    const not: Clause[] = [];
+    const where: Predicate[][] = [];
+    const order: OrderClause[] = [];
+    let aggregate: AggregateClause | undefined;
+    for (const clause of clauses) {
+      if (Array.isArray(clause)) continue;
+      switch (clause.__clause) {
+        case "not":
+          not.push(clause.pattern.map((t) => (t === _ ? WILD : isBinding(t) ? lookup(t) : this.engine.id(t))));
+          break;
+        case "where":
+          where.push(
+            clause.any.map(({ lhs, op, rhs }) => ({
+              lhs: bound(lhs, "predicate variable"),
+              op: PRED_CODES[op],
+              rhs: isBinding(rhs) ? bound(rhs, "predicate variable") : this.engine.id(rhs),
+            })),
+          );
+          break;
+        case "order":
+          order.push(clause);
+          break;
+        case "offset":
+          spec.offset = clause.count;
+          break;
+        case "limit":
+          spec.limit = clause.count;
+          break;
+        case "aggregate":
+          if (aggregate) throw new Error("a query has at most one aggregate");
+          aggregate = clause;
+          spec.aggregate = {
+            op: AGG_CODES[clause.op],
+            input: clause.input ? bound(clause.input, "aggregate input") : WILD,
+            group: clause.group.map((g) => bound(g, "group key")),
+          };
+          break;
+      }
+    }
+    if (not.length > 0) spec.not = not;
+    if (where.length > 0) spec.where = where;
+    const output = aggregate ? [...aggregate.group.map((g) => g.name), aggregate.output.name] : names;
+    if (aggregate && new Set(output).size !== output.length) {
+      throw new Error(`aggregate output $.${aggregate.output.name} repeats a group key`);
+    }
+    const sorts = order.map(({ by, descending }) => {
+      const column = output.indexOf(by.name);
+      if (column < 0) throw new Error(`order key $.${by.name} is not in the query's output`);
+      return { column, descending };
+    });
+    if (sorts.length > 0) spec.order = sorts;
+    return { spec, names: output, order: sorts };
   }
 
-  /** @internal one-off evaluation; the engine returns rows already in result order */
-  evaluate(compiled: CompiledPatterns): Bindings[] {
-    const { nvars, data, count } = this.engine.query(compiled.clauses);
+  /** @internal one-off evaluation; the engine returns rows in assertion order, so ordered queries sort here */
+  evaluate(compiled: CompiledQuery): Bindings[] {
+    const { arity, data, count } = this.engine.query(compiled.spec);
+    const { names, order } = compiled;
     const out = new Array<Bindings>(count);
-    for (let r = 0; r < count; r++) out[r] = this.bindingsOf(data, r * nvars, compiled.names);
+    if (order.length === 0) {
+      for (let r = 0; r < count; r++) out[r] = this.bindingsOf(data, r * arity, names);
+      return out;
+    }
+    const rows = Array.from({ length: count }, (_row, r) => r);
+    rows.sort((a, b) => {
+      for (const { column, descending } of order) {
+        const x = data[a * arity + column];
+        const y = data[b * arity + column];
+        if (x === y) continue;
+        const c = compareTerms(this.engine.term(x), this.engine.term(y));
+        if (c !== 0) return descending ? -c : c;
+      }
+      return a - b;
+    });
+    for (let r = 0; r < count; r++) out[r] = this.bindingsOf(data, rows[r] * arity, names);
     return out;
   }
 
   /**
-   * @internal Rows of a maintained query in result order: the order the facts matching the
-   * first pattern were asserted, so a list keyed by entity keeps its order when other attributes change.
+   * @internal Rows of a maintained query in result order: the query's sort keys, then the order
+   * the facts matching the first pattern were asserted, so a list keyed by entity keeps its
+   * order when other attributes change.
    */
-  decodeRows(rows: Iterable<Uint32Array>, names: string[]): Bindings[] {
-    const sorted = Array.from(rows).sort(compareRows(names.length));
+  decodeRows(rows: Iterable<Uint32Array>, compiled: CompiledQuery): Bindings[] {
+    const { names, order } = compiled;
+    const sorted = Array.from(rows).sort(this.engine.rowComparator(names.length, order));
     const out = new Array<Bindings>(sorted.length);
     for (let r = 0; r < sorted.length; r++) out[r] = this.bindingsOf(sorted[r], 0, names);
     return out;
@@ -453,8 +624,8 @@ export class FactDB {
   }
 
   /** @internal */
-  attach(index: Index, clauses: Clause[]): QueryHandle {
-    const handle = this.engine.register(clauses);
+  attach(index: Index, spec: QuerySpec): QueryHandle {
+    const handle = this.engine.register(spec);
     let set = this.indexesByHandle.get(handle);
     if (!set) this.indexesByHandle.set(handle, (set = new Set()));
     set.add(index);

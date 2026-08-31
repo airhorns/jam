@@ -5,7 +5,8 @@
 use hashbrown::HashMap;
 
 use crate::owner::Owners;
-use crate::query::{Clause, Queries, QueryId, Row, adhoc, evaluate, row_order};
+use crate::query::{Queries, QueryId, Row, RowId, adhoc, evaluate, row_order};
+use crate::spec::Spec;
 use crate::store::{FactId, Mask, OwnerId, ROOT_OWNER, Store, Terms, scan_mask};
 use crate::term::{EMPTY, Interner, NONE, TermId, VAR_BASE, WILD};
 use crate::wire::*;
@@ -185,33 +186,39 @@ impl Engine {
             out.append(&mut self.events);
             out
         };
-        let store = &self.store;
+        let (store, interner) = (&self.store, &mut self.interner);
         for qid in self.queries.take_dirty() {
             let Some(query) = self.queries.get_mut(qid) else {
                 continue;
             };
-            if !query.results.is_dirty() {
+            if !query.is_dirty() {
                 continue;
             }
             let header = out.len();
-            out.extend_from_slice(&[EV_QUERY, qid, query.nvars as u32, 0]);
+            out.extend_from_slice(&[EV_QUERY, qid, query.arity as u32, 0]);
             let mut n = 0u32;
-            let clauses = &query.clauses;
-            query.results.drain(|id, row, before, after| {
-                let (was, is) = (before > 0, after > 0);
-                if was == is {
-                    return;
-                }
+            let mut emit = |id: RowId, row: &[TermId], visible: bool, order: u64| {
                 n += 1;
                 out.push(id);
-                if is {
+                if visible {
                     out.push(1);
                     out.extend_from_slice(row);
-                    push_order(&mut out, row_order(store, clauses, row));
+                    push_order(&mut out, order);
                 } else {
                     out.push(0);
                 }
-            });
+            };
+            query.advance(store, interner);
+            let patterns = &query.spec.patterns;
+            match &mut query.stages {
+                None => query.results.drain(|id, row, visible| {
+                    emit(id, row, visible, if visible { row_order(store, patterns, row) } else { 0 });
+                }),
+                Some(stages) => {
+                    let (output, order) = stages.parts();
+                    output.drain(|id, row, visible| emit(id, row, visible, if visible { order(row) } else { 0 }));
+                }
+            }
             if n == 0 {
                 out.truncate(header);
             } else {
@@ -251,13 +258,13 @@ impl Engine {
         self.owners.attach(owner, fid);
         self.retain_terms(terms, scope);
         self.record_entity_scope(terms, scope);
-        self.queries.propagate(&self.store, fid, terms, 1);
+        self.queries.propagate(&self.store, &self.interner, fid, terms, 1);
         let durable = if owner == ROOT_OWNER { FACT_DURABLE } else { 0 };
         self.emit_fact(FACT_ADDED | durable | replace_flag, scope, terms);
     }
 
     fn remove_fact(&mut self, fid: FactId) {
-        self.queries.propagate(&self.store, fid, &self.store.get(fid).terms, -1);
+        self.queries.propagate(&self.store, &self.interner, fid, &self.store.get(fid).terms, -1);
         let record = self.store.remove(fid);
         for &owner in &record.owners {
             self.owners.detach(owner, fid);
@@ -455,62 +462,87 @@ impl Engine {
 
     // --- queries ---
 
+    /// Normalize a spec and make sure every literal it mentions is a live term.
+    fn check_spec(&self, spec: Spec) -> Result<Spec, String> {
+        let spec = spec.normalize()?;
+        if let Some(t) = spec.literals().find(|&t| !self.interner.is_live(t)) {
+            return Err(format!("unknown term id {t}"));
+        }
+        Ok(spec)
+    }
+
     /// Register (or share) a maintained query; its literal terms stay interned while it lives.
-    pub fn register(&mut self, clauses: Vec<Clause>) -> QueryId {
-        let (id, created) = self.queries.register(&mut self.store, clauses);
+    pub fn register(&mut self, spec: impl Into<Spec>) -> Result<QueryId, String> {
+        let spec = self.check_spec(spec.into())?;
+        let (id, created) = self.queries.register(&mut self.store, &mut self.interner, spec);
         if created {
-            for t in self.queries.get(id).expect("just registered").clauses.iter().flatten() {
-                if *t < VAR_BASE {
-                    self.interner.retain(*t);
-                }
+            let literals: Vec<TermId> = self.queries.get(id).expect("just registered").spec.literals().collect();
+            for t in literals {
+                self.interner.retain(t);
             }
         }
-        id
+        Ok(id)
     }
 
     /// Drop one reference to a query; true when that removed it.
     pub fn release(&mut self, id: QueryId) -> bool {
-        let Some(clauses) = self.queries.release(id) else {
+        let Some(mut query) = self.queries.release(id) else {
             return false;
         };
-        for t in clauses.iter().flatten() {
-            if *t < VAR_BASE {
-                self.interner.release(*t);
-            }
+        for t in query.spec.literals() {
+            self.interner.release(t);
+        }
+        if let Some(stages) = &mut query.stages {
+            stages.release(&mut self.interner);
         }
         true
     }
 
-    /// Current rows of a registered query: `nvars nrows (rowid vals… order_hi order_lo)…`.
-    pub fn rows(&self, id: QueryId) -> Vec<u32> {
-        let Some(query) = self.queries.get(id) else {
+    /// Current rows of a registered query: `arity nrows (rowid vals… order_hi order_lo)…`.
+    pub fn rows(&mut self, id: QueryId) -> Vec<u32> {
+        let Some(query) = self.queries.get_mut(id) else {
             return vec![0, 0];
         };
-        let mut out = vec![query.nvars as u32, 0];
+        query.advance(&self.store, &mut self.interner);
+        let mut out = vec![query.arity as u32, 0];
         let mut n = 0u32;
-        for (rid, row, _) in query.results.rows() {
+        for (rid, row, order) in query.output(&self.store) {
             n += 1;
             out.push(rid);
             out.extend_from_slice(row);
-            push_order(&mut out, row_order(&self.store, &query.clauses, row));
+            push_order(&mut out, order);
         }
         out[1] = n;
         out
     }
 
-    /// One-off evaluation: `nvars nrows (vals…)…`, each distinct binding tuple once, in result order.
-    pub fn query(&mut self, clauses: Vec<Clause>) -> Vec<u32> {
-        let mut query = adhoc(&mut self.store, clauses);
+    /// One-off evaluation: `arity nrows (vals…)…`, each distinct row once, in result order.
+    pub fn query(&mut self, spec: impl Into<Spec>) -> Result<Vec<u32>, String> {
+        let spec = self.check_spec(spec.into())?;
+        let mut query = adhoc(&mut self.store, &self.interner, spec);
+        let store = &self.store;
         let mut rows: Vec<(u64, Row)> = Vec::new();
-        let (store, clauses) = (&self.store, query.clauses.clone());
-        evaluate(store, &mut query, &mut |row| rows.push((row_order(store, &clauses, row), row.into())));
+        if query.stages.is_some() {
+            query.seed_results(store, &self.interner);
+            query.advance(store, &mut self.interner);
+            let mut stages = query.stages.take().expect("checked above");
+            rows.extend(stages.output.rows().map(|(_, row)| (stages.order_of(row), Row::from(row))));
+            stages.release(&mut self.interner);
+        } else {
+            let patterns = query.spec.patterns.clone();
+            evaluate(store, &self.interner, &mut query, &mut |row, blocked| {
+                if blocked == 0 {
+                    rows.push((row_order(store, &patterns, row), row.into()));
+                }
+            });
+        }
         rows.sort_unstable();
         rows.dedup();
-        let mut out = vec![query.nvars as u32, rows.len() as u32];
+        let mut out = vec![query.arity as u32, rows.len() as u32];
         for (_, row) in &rows {
             out.extend_from_slice(row);
         }
-        out
+        Ok(out)
     }
 
     /// Facts, optionally restricted to a scope and/or a pattern of literals and wildcards: `n (scope len t…)…`.

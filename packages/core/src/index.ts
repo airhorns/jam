@@ -2,8 +2,42 @@ export { db, GLOBAL_SCOPE } from "./db";
 export type { DBStats, EngineStats, Fact, FactChange, FactChangeInfo, FactListener } from "./db";
 export { publishStats, ENGINE_STATS_FACT } from "./stats";
 export type { PublishStatsOptions } from "./stats";
-export { $, _, claim, remember, replace, forget, when, whenever, scoped, transaction } from "./primitives";
+export {
+  $,
+  _,
+  claim,
+  remember,
+  replace,
+  forget,
+  when,
+  whenever,
+  not,
+  where,
+  orderBy,
+  offset,
+  limit,
+  count,
+  sum,
+  min,
+  max,
+  scoped,
+  transaction,
+} from "./primitives";
 export type { Term, Pattern, Bindings } from "./primitives";
+export type {
+  QueryClause,
+  PatternTerm,
+  BindingMarker,
+  ComparisonOp,
+  AggregateOp,
+  PredicateSpec,
+  NotClause,
+  WhereClause,
+  OrderClause,
+  OffsetClause,
+  LimitClause,
+  AggregateClause,
+} from "./db";
 export { autorun, reaction, untracked } from "./reactive";
 export type { ReactionOptions } from "./reactive";
 export { h, Fragment, ImperativeHost, injectVdom, createContext, useContext, useComponentId, Portal } from "./jsx";

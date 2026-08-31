@@ -1,13 +1,49 @@
 import { describe, expect, it } from "vitest";
 
-import { Engine, FACT_EVENTS_ALL, NONE, ROOT_OWNER, VAR_BASE, WILD, _, compareRows, rowOrder, type FactEvent, type QueryHandle } from "../index";
+import {
+  AGG_COUNT,
+  AGG_MAX,
+  AGG_SUM,
+  CLAUSE_AGGREGATE,
+  CLAUSE_LIMIT,
+  CLAUSE_NOT,
+  CLAUSE_OFFSET,
+  CLAUSE_ORDER,
+  CLAUSE_PATTERN,
+  CLAUSE_WHERE,
+  Engine,
+  FACT_EVENTS_ALL,
+  NONE,
+  PRED_CONTAINS_CI,
+  PRED_EQ,
+  PRED_GE,
+  PRED_LT,
+  ROOT_OWNER,
+  VAR_BASE,
+  WILD,
+  _,
+  compareRows,
+  compareTerms,
+  packSpec,
+  rowOrder,
+  specArity,
+  type FactEvent,
+  type QueryHandle,
+  type QuerySpec,
+  type Sort,
+} from "../index";
 
 const v = (i: number) => VAR_BASE + i;
 
-const decodeRows = (e: Engine, q: QueryHandle) =>
+const decodeRows = (e: Engine, q: QueryHandle, order: readonly Sort[] = []) =>
   Array.from(q.rows.values())
-    .sort(compareRows(q.nvars))
-    .map((row) => e.decodeTerms(row, 0, q.nvars));
+    .sort(e.rowComparator(q.arity, order))
+    .map((row) => e.decodeTerms(row, 0, q.arity));
+
+const decodeQuery = (e: Engine, spec: QuerySpec) => {
+  const { arity, count, data } = e.query(spec);
+  return Array.from({ length: count }, (_row, r) => e.decodeTerms(data, r * arity, (r + 1) * arity));
+};
 
 describe("Engine", () => {
   it("interns terms by value and type", () => {
@@ -63,7 +99,7 @@ describe("Engine", () => {
     e.flush();
     const ids = () => decodeRows(e, q).map((row) => row[0]);
     expect(ids()).toEqual(["b", "a", "c"]);
-    const orders = Array.from(q.rows.values(), (row) => rowOrder(row, q.nvars));
+    const orders = Array.from(q.rows.values(), (row) => rowOrder(row, q.arity));
     expect(orders).toEqual([...orders].sort((x, y) => x - y));
 
     e.replace(ROOT_OWNER, NONE, ["todo", "a", "done", true]);
@@ -78,7 +114,7 @@ describe("Engine", () => {
       [todo, v(0), e.id("title"), v(1)],
       [todo, v(0), e.id("done"), v(2)],
     ]);
-    const freshIds = Array.from({ length: fresh.count }, (_, r) => e.term(fresh.data[r * fresh.nvars]));
+    const freshIds = Array.from({ length: fresh.count }, (_, r) => e.term(fresh.data[r * fresh.arity]));
     expect(freshIds).toEqual(["a", "c", "b"]);
   });
 
@@ -149,8 +185,134 @@ describe("Engine", () => {
 
   it("rejects malformed clauses", () => {
     const e = new Engine();
-    expect(() => e.register([])).not.toThrow();
-    expect(() => e.raw.register(new Uint32Array([1, 5, WILD]))).toThrow();
+    e.register([]).release();
+    expect(() => e.raw.register(new Uint32Array([1, CLAUSE_PATTERN, 0]))).toThrow(/bad pattern length 0/);
+    expect(() => e.register({ patterns: [[e.id("a"), v(0)]], where: [[{ lhs: v(1), op: PRED_EQ, rhs: e.id("x") }]] })).toThrow(
+      /unbound variable 1/,
+    );
+    expect(() => e.query({ patterns: [[e.id("a"), v(0)]], order: [{ column: 1, descending: false }] })).toThrow(/outside the output row/);
+    expect(e.stats().queries).toBe(0);
+  });
+
+  it("packs specs clause by clause", () => {
+    const spec: QuerySpec = {
+      patterns: [[10, v(0)]],
+      not: [[11, v(0)]],
+      where: [[{ lhs: v(0), op: PRED_LT, rhs: 12 }, { lhs: v(0), op: PRED_EQ, rhs: v(1) }]],
+      aggregate: { op: AGG_COUNT, input: WILD, group: [v(0)] },
+      order: [{ column: 1, descending: true }],
+      offset: 3,
+      limit: 5,
+    };
+    expect(Array.from(packSpec(spec))).toEqual([
+      7,
+      CLAUSE_PATTERN, 2, 10, v(0),
+      CLAUSE_NOT, 2, 11, v(0),
+      CLAUSE_WHERE, 6, v(0), PRED_LT, 12, v(0), PRED_EQ, v(1),
+      CLAUSE_AGGREGATE, 3, AGG_COUNT, WILD, v(0),
+      CLAUSE_ORDER, 2, v(1), 1,
+      CLAUSE_OFFSET, 1, 3,
+      CLAUSE_LIMIT, 1, 5,
+    ]);
+    expect(Array.from(packSpec([[10, v(0), v(1)]]))).toEqual([1, CLAUSE_PATTERN, 3, 10, v(0), v(1)]);
+    expect(specArity(spec)).toBe(2);
+    expect(specArity([[10, v(0), v(1)]])).toBe(2);
+    expect(specArity({ patterns: [[10, v(0), v(1)]], offset: 0 })).toBe(2);
+  });
+
+  it("hides rows a negation matches", () => {
+    const e = new Engine();
+    const [issue, status, archived] = e.termIds(["issue", "status", "archived"]);
+    const q = e.register({ patterns: [[issue, v(0), status, v(1)]], not: [[issue, v(0), archived, WILD]] });
+    e.assert(ROOT_OWNER, NONE, ["issue", "i1", "status", "open"]);
+    e.assert(ROOT_OWNER, NONE, ["issue", "i2", "status", "open"]);
+    e.assert(ROOT_OWNER, NONE, ["issue", "i2", "archived", true]);
+    e.flush();
+    expect(decodeRows(e, q)).toEqual([["i1", "open"]]);
+    e.drop(["issue", "i2", "archived", _]);
+    e.flush();
+    expect(decodeRows(e, q)).toEqual([["i1", "open"], ["i2", "open"]]);
+    e.assert(ROOT_OWNER, NONE, ["issue", "i1", "archived", "yes"]);
+    expect(e.flush()).toEqual([q]);
+    expect(decodeRows(e, q)).toEqual([["i2", "open"]]);
+  });
+
+  it("filters rows by predicates over their bindings", () => {
+    const e = new Engine();
+    const [issue, title, priority] = e.termIds(["issue", "title", "priority"]);
+    const spec: QuerySpec = {
+      patterns: [
+        [issue, v(0), title, v(1)],
+        [issue, v(0), priority, v(2)],
+      ],
+      where: [[{ lhs: v(2), op: PRED_GE, rhs: e.id(2) }], [{ lhs: v(1), op: PRED_CONTAINS_CI, rhs: e.id("bug") }]],
+    };
+    const q = e.register(spec);
+    e.assert(ROOT_OWNER, NONE, ["issue", "i1", "title", "Login BUG"]);
+    e.assert(ROOT_OWNER, NONE, ["issue", "i1", "priority", 3]);
+    e.assert(ROOT_OWNER, NONE, ["issue", "i2", "title", "Bug in search"]);
+    e.assert(ROOT_OWNER, NONE, ["issue", "i2", "priority", 1]);
+    e.assert(ROOT_OWNER, NONE, ["issue", "i3", "title", "Feature"]);
+    e.assert(ROOT_OWNER, NONE, ["issue", "i3", "priority", 4]);
+    e.flush();
+    expect(decodeRows(e, q)).toEqual([["i1", "Login BUG", 3]]);
+    expect(decodeQuery(e, spec)).toEqual([["i1", "Login BUG", 3]]);
+    e.replace(ROOT_OWNER, NONE, ["issue", "i2", "priority", 2]);
+    e.flush();
+    expect(decodeRows(e, q).map((row) => row[0])).toEqual(["i1", "i2"]);
+  });
+
+  it("aggregates per group and orders windows by their keys", () => {
+    const e = new Engine();
+    const [issue, status, points] = e.termIds(["issue", "status", "points"]);
+    const patterns = [
+      [issue, v(0), status, v(1)],
+      [issue, v(0), points, v(2)],
+    ];
+    const count = e.register({ patterns, aggregate: { op: AGG_COUNT, input: WILD, group: [v(1)] } });
+    const total = e.register({ patterns, aggregate: { op: AGG_SUM, input: v(2), group: [] } });
+    const top = e.register({ patterns, aggregate: { op: AGG_MAX, input: v(2), group: [v(1)] } });
+    const order: Sort[] = [{ column: 2, descending: true }, { column: 0, descending: false }];
+    const page = e.register({ patterns, order, offset: 1, limit: 2 });
+    expect(count.arity).toBe(2);
+    expect(total.arity).toBe(1);
+    expect(page.arity).toBe(3);
+    const rows: [string, string, number][] = [
+      ["i1", "todo", 3],
+      ["i2", "todo", 5],
+      ["i3", "done", 5],
+      ["i4", "done", 1],
+    ];
+    for (const [id, s, p] of rows) {
+      e.assert(ROOT_OWNER, NONE, ["issue", id, "status", s]);
+      e.assert(ROOT_OWNER, NONE, ["issue", id, "points", p]);
+    }
+    e.flush();
+    expect(decodeRows(e, count)).toEqual([["todo", 2], ["done", 2]]);
+    expect(decodeRows(e, total)).toEqual([[14]]);
+    expect(decodeRows(e, top)).toEqual([["todo", 5], ["done", 5]]);
+    expect(decodeRows(e, page, order)).toEqual([["i3", "done", 5], ["i1", "todo", 3]]);
+    expect(decodeQuery(e, { patterns, order, offset: 1, limit: 2 }).map((row) => row[0]).sort()).toEqual(["i1", "i3"]);
+
+    e.replace(ROOT_OWNER, NONE, ["issue", "i4", "status", "todo"]);
+    e.flush();
+    expect(decodeRows(e, count)).toEqual([["todo", 3], ["done", 1]]);
+    expect(decodeRows(e, top)).toEqual([["todo", 5], ["done", 5]]);
+    e.drop(["issue", "i3", _, _]);
+    e.flush();
+    expect(decodeRows(e, count)).toEqual([["todo", 3]]);
+    expect(decodeRows(e, total)).toEqual([[9]]);
+    expect(decodeRows(e, page, order)).toEqual([["i1", "todo", 3], ["i4", "todo", 1]]);
+  });
+
+  it("orders terms as the engine does", () => {
+    const sorted = ["b", 2, true, "a", Number.NaN, false, 1, "ä", "\u{1F600}", "�"].sort(compareTerms);
+    expect(sorted).toEqual([false, true, 1, 2, Number.NaN, "a", "b", "ä", "�", "\u{1F600}"]);
+    expect(compareTerms(Number.NaN, Number.NaN)).toBe(0);
+    expect(compareTerms("ab", "a")).toBeGreaterThan(0);
+    expect(compareTerms("\u{1F600}", "�")).toBeGreaterThan(0);
+    expect(compareTerms("�", "\u{1F600}")).toBeLessThan(0);
+    expect(compareTerms("\u{1F600}", "\u{1F601}")).toBeLessThan(0);
   });
 
   it("forgets freed terms so reused ids resolve to their new value", () => {

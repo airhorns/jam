@@ -13,8 +13,11 @@ export class JamEngine {
     intern_str(s: string): number;
     constructor();
     owner_exists(owner: number): boolean;
-    query(clauses: Uint32Array): Uint32Array;
-    register(clauses: Uint32Array): number;
+    query(spec: Uint32Array): Uint32Array;
+    /**
+     * `spec` is a packed query spec (see `jam_engine::wire`).
+     */
+    register(spec: Uint32Array): number;
     release(id: number): boolean;
     rows(id: number): Uint32Array;
     scope_of(terms: Uint32Array): number;

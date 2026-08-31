@@ -116,13 +116,13 @@ export class JamEngine {
         return ret !== 0;
     }
     /**
-     * @param {Uint32Array} clauses
+     * @param {Uint32Array} spec
      * @returns {Uint32Array}
      */
-    query(clauses) {
+    query(spec) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passArray32ToWasm0(clauses, wasm.__wbindgen_export);
+            const ptr0 = passArray32ToWasm0(spec, wasm.__wbindgen_export);
             const len0 = WASM_VECTOR_LEN;
             wasm.jamengine_query(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -140,13 +140,14 @@ export class JamEngine {
         }
     }
     /**
-     * @param {Uint32Array} clauses
+     * `spec` is a packed query spec (see `jam_engine::wire`).
+     * @param {Uint32Array} spec
      * @returns {number}
      */
-    register(clauses) {
+    register(spec) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            const ptr0 = passArray32ToWasm0(clauses, wasm.__wbindgen_export);
+            const ptr0 = passArray32ToWasm0(spec, wasm.__wbindgen_export);
             const len0 = WASM_VECTOR_LEN;
             wasm.jamengine_register(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);

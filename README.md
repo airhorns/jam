@@ -113,6 +113,35 @@ const todos = when(
 
 Inside a component or any tracked context (`autorun`, `whenever`), `when` is reactive — the component re-renders when matching facts change. Facts that don't match the pattern (like VDOM facts) won't trigger a re-render.
 
+Patterns can be followed by clauses that shape the result. The engine maintains all of them incrementally, so a filtered, sorted page or a count is one query whose rows only change when they need to:
+
+```typescript
+import { $, _, count, limit, not, offset, orderBy, when, where } from "@jam/core";
+
+// Open todos nobody has snoozed, matching a search, newest first, second page of 50
+when(
+  ["todo", $.id, "done", false],
+  ["todo", $.id, "title", $.title],
+  ["todo", $.id, "created", $.created],
+  not("todo", $.id, "snoozedUntil", _),
+  where($.title, "icontains", search),
+  orderBy($.created, "desc"),
+  offset(50),
+  limit(50),
+);
+
+// How many todos each list has
+when(["todo", $.id, "list", $.list], count($.n, $.list));
+// → [{ list: "home", n: 3 }, { list: "work", n: 7 }]
+```
+
+- `not(...pattern)` hides rows for which the pattern has a match; variables shared with the patterns join through the row.
+- `where(x, op, y)` compares a bound variable with a value or another variable: `=`, `!=`, `<`, `<=`, `>`, `>=`, `contains`, `startsWith`, `icontains`, `istartsWith`. `where(x, "in", values)` matches any of a list, and `where.any(...)` is a disjunction of comparisons; several `where` clauses conjoin.
+- `orderBy(x, "asc" | "desc")` sorts (several compose, most significant first; ties keep assertion order), `offset(n)` and `limit(n)` window the sorted rows.
+- `count(out, ...group)`, `sum(input, out, ...group)`, `min(...)` and `max(...)` fold rows into one row per distinct combination of the group variables; the output row is the group keys plus `out`.
+
+Comparisons and sorting use one total order over terms — booleans, then numbers, then strings — so mixed types compare rather than fail.
+
 ### Components and rendering
 
 Components are plain functions that return JSX. Use `when` to read state:

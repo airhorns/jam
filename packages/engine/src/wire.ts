@@ -20,6 +20,30 @@ export const FACT_EVENTS_NONE = 0;
 export const FACT_EVENTS_DURABLE = 1;
 export const FACT_EVENTS_ALL = 2;
 
+export const CLAUSE_PATTERN = 0;
+export const CLAUSE_NOT = 1;
+export const CLAUSE_WHERE = 2;
+export const CLAUSE_ORDER = 3;
+export const CLAUSE_OFFSET = 4;
+export const CLAUSE_LIMIT = 5;
+export const CLAUSE_AGGREGATE = 6;
+
+export const PRED_EQ = 0;
+export const PRED_NE = 1;
+export const PRED_LT = 2;
+export const PRED_LE = 3;
+export const PRED_GT = 4;
+export const PRED_GE = 5;
+export const PRED_CONTAINS = 6;
+export const PRED_STARTS_WITH = 7;
+export const PRED_CONTAINS_CI = 8;
+export const PRED_STARTS_WITH_CI = 9;
+
+export const AGG_COUNT = 0;
+export const AGG_SUM = 1;
+export const AGG_MIN = 2;
+export const AGG_MAX = 3;
+
 export const STAT_FACTS = 0;
 export const STAT_FACT_SLOTS = 1;
 export const STAT_TERMS = 2;

@@ -3,31 +3,12 @@
 //! `packages/engine` owns the term mirror and the typed API.
 
 use jam_engine::term::Term;
-use jam_engine::{Clause, Engine, NONE};
+use jam_engine::{Engine, NONE, Spec};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct JamEngine {
     inner: Engine,
-}
-
-/// `n (len t…)…` → clauses, or a message naming what was malformed.
-fn unpack_clauses(packed: &[u32]) -> Result<Vec<Clause>, String> {
-    let mut clauses = Vec::new();
-    let mut i = 0;
-    let n = *packed.first().ok_or("empty clause list")? as usize;
-    i += 1;
-    for _ in 0..n {
-        let len = *packed.get(i).ok_or("truncated clause list")? as usize;
-        i += 1;
-        let end = i + len;
-        if end > packed.len() {
-            return Err("truncated clause".to_string());
-        }
-        clauses.push(packed[i..end].to_vec());
-        i = end;
-    }
-    Ok(clauses)
 }
 
 fn js_error(message: String) -> JsError {
@@ -111,20 +92,21 @@ impl JamEngine {
 
     // --- queries ---
 
-    pub fn register(&mut self, clauses: &[u32]) -> Result<u32, JsError> {
-        Ok(self.inner.register(unpack_clauses(clauses).map_err(js_error)?))
+    /// `spec` is a packed query spec (see `jam_engine::wire`).
+    pub fn register(&mut self, spec: &[u32]) -> Result<u32, JsError> {
+        self.inner.register(Spec::unpack(spec).map_err(js_error)?).map_err(js_error)
     }
 
     pub fn release(&mut self, id: u32) -> bool {
         self.inner.release(id)
     }
 
-    pub fn rows(&self, id: u32) -> Vec<u32> {
+    pub fn rows(&mut self, id: u32) -> Vec<u32> {
         self.inner.rows(id)
     }
 
-    pub fn query(&mut self, clauses: &[u32]) -> Result<Vec<u32>, JsError> {
-        Ok(self.inner.query(unpack_clauses(clauses).map_err(js_error)?))
+    pub fn query(&mut self, spec: &[u32]) -> Result<Vec<u32>, JsError> {
+        self.inner.query(Spec::unpack(spec).map_err(js_error)?).map_err(js_error)
     }
 
     pub fn facts(&mut self, scope: u32, pattern: &[u32]) -> Vec<u32> {

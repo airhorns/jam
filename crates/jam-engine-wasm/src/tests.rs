@@ -5,7 +5,7 @@ use jam_engine::wire::*;
 use jam_engine::{NONE, ROOT_OWNER, VAR_BASE, WILD};
 use pretty_assertions::assert_eq;
 
-use super::{JamEngine, unpack_clauses};
+use super::JamEngine;
 
 fn v(i: u32) -> u32 {
     VAR_BASE + i
@@ -13,15 +13,6 @@ fn v(i: u32) -> u32 {
 
 fn stat(e: &JamEngine, position: usize) -> u32 {
     e.stats()[position]
-}
-
-#[test]
-fn unpacks_clause_lists() {
-    assert_eq!(unpack_clauses(&[0]), Ok(vec![]));
-    assert_eq!(unpack_clauses(&[2, 2, 7, 8, 1, 9]), Ok(vec![vec![7, 8], vec![9]]));
-    assert_eq!(unpack_clauses(&[]), Err("empty clause list".to_string()));
-    assert_eq!(unpack_clauses(&[2, 1, 7]), Err("truncated clause list".to_string()));
-    assert_eq!(unpack_clauses(&[1, 3, 7, 8]), Err("truncated clause".to_string()));
 }
 
 #[test]
@@ -58,7 +49,7 @@ fn transactions_queries_and_views_pass_through() {
     assert!(e.owner_exists(owner));
     assert_eq!(e.create_owner(9999), NONE, "unknown parents yield NONE");
 
-    let q = e.register(&[1, 4, todo, v(0), title, v(1)]).unwrap();
+    let q = e.register(&[1, CLAUSE_PATTERN, 4, todo, v(0), title, v(1)]).unwrap();
     e.apply(&[OP_ASSERT, ROOT_OWNER, NONE, 4, todo, one, title, milk]).unwrap();
     e.apply(&[OP_ASSERT, owner, NONE, 4, todo, two, title, eggs]).unwrap();
     let events = e.drain();
@@ -66,7 +57,11 @@ fn transactions_queries_and_views_pass_through() {
     assert!(events.contains(&EV_QUERY));
 
     assert_eq!(e.rows(q)[..2], [2, 2]);
-    assert_eq!(e.query(&[1, 4, todo, v(0), title, v(1)]).unwrap()[..2], [2, 2]);
+    assert_eq!(e.query(&[1, CLAUSE_PATTERN, 4, todo, v(0), title, v(1)]).unwrap()[..2], [2, 2]);
+    let count = e
+        .query(&[2, CLAUSE_PATTERN, 4, todo, v(0), title, v(1), CLAUSE_AGGREGATE, 2, AGG_COUNT, WILD])
+        .unwrap();
+    assert_eq!((count[0], count[1], e.term_num(count[2])), (1, 1, 2.0));
     assert_eq!(e.facts(NONE, &[])[0], 2);
     assert_eq!(e.facts(NONE, &[todo, one, WILD, WILD])[0], 1);
     assert!(e.has_fact(&[todo, one, title, milk]));

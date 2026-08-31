@@ -8,7 +8,10 @@ use crate::store::{OwnerId, ROOT_OWNER};
 use crate::term::{EMPTY, FALSE, Interner, NONE, TRUE, Term, TermId, VAR_BASE, WILD};
 use crate::wire::*;
 
-/// Terms written as strings: `$x` is a variable, `_` a wildcard, anything else a literal.
+mod features;
+
+/// Terms written as strings: `$x` is a variable, `_` a wildcard, `#n` a number, `true`/`false`
+/// a boolean and anything else a string.
 struct Harness {
     e: Engine,
     vars: Vec<String>,
@@ -22,7 +25,14 @@ impl Harness {
     }
 
     fn lit(&mut self, s: &str) -> TermId {
-        self.e.interner.intern_str(s)
+        match s {
+            "true" => TRUE,
+            "false" => FALSE,
+            _ => match s.strip_prefix('#') {
+                Some(n) => self.e.interner.intern_num(n.parse().unwrap()),
+                None => self.e.interner.intern_str(s),
+            },
+        }
     }
 
     fn terms(&mut self, terms: &[&str]) -> Vec<TermId> {
@@ -54,7 +64,7 @@ impl Harness {
     fn register(&mut self, clauses: &[&[&str]]) -> QueryId {
         self.vars.clear();
         let clauses: Vec<Clause> = clauses.iter().map(|c| self.pattern(c)).collect();
-        self.e.register(clauses)
+        self.e.register(clauses).unwrap()
     }
 
     fn assert(&mut self, owner: OwnerId, terms: &[&str]) {
@@ -91,7 +101,7 @@ impl Harness {
         self.e.apply(&[OP_REVOKE, owner]).unwrap();
     }
 
-    fn rows(&self, qid: QueryId) -> BTreeSet<Vec<TermId>> {
+    fn rows(&mut self, qid: QueryId) -> BTreeSet<Vec<TermId>> {
         let packed = self.e.rows(qid);
         let nvars = packed[0] as usize;
         let n = packed[1] as usize;
@@ -106,7 +116,7 @@ impl Harness {
     }
 
     /// Rows of a registered query in result order.
-    fn ordered(&self, qid: QueryId) -> Vec<Vec<String>> {
+    fn ordered(&mut self, qid: QueryId) -> Vec<Vec<String>> {
         let packed = self.e.rows(qid);
         let nvars = packed[0] as usize;
         let n = packed[1] as usize;
@@ -135,20 +145,20 @@ impl Harness {
     fn fresh_ordered(&mut self, clauses: &[&[&str]]) -> Vec<Vec<String>> {
         self.vars.clear();
         let clauses: Vec<Clause> = clauses.iter().map(|c| self.pattern(c)).collect();
-        let packed = self.e.query(clauses);
+        let packed = self.e.query(clauses).unwrap();
         let nvars = packed[0] as usize;
         let n = packed[1] as usize;
         (0..n).map(|r| self.resolve(&packed[2 + r * nvars..2 + (r + 1) * nvars])).collect()
     }
 
-    fn rows_str(&self, qid: QueryId) -> BTreeSet<Vec<String>> {
+    fn rows_str(&mut self, qid: QueryId) -> BTreeSet<Vec<String>> {
         self.rows(qid).into_iter().map(|row| self.resolve(&row)).collect()
     }
 
     fn fresh(&mut self, clauses: &[&[&str]]) -> BTreeSet<Vec<TermId>> {
         self.vars.clear();
         let clauses: Vec<Clause> = clauses.iter().map(|c| self.pattern(c)).collect();
-        let packed = self.e.query(clauses);
+        let packed = self.e.query(clauses).unwrap();
         let nvars = packed[0] as usize;
         let n = packed[1] as usize;
         let mut out = BTreeSet::new();
@@ -792,9 +802,9 @@ fn repeated_variables_within_a_clause_join_on_equality() {
 #[test]
 fn empty_and_wildcard_only_queries() {
     let mut h = Harness::new();
-    let q = h.e.register(vec![]);
+    let q = h.e.register(vec![]).unwrap();
     assert_eq!(h.e.rows(q), vec![0, 0]);
-    assert_eq!(h.e.query(vec![]), vec![0, 0]);
+    assert_eq!(h.e.query(vec![]).unwrap(), vec![0, 0]);
     h.assert(ROOT_OWNER, &["a", "1"]);
     assert!(decode(&h.e.drain()).iter().all(|e| matches!(e, Event::Fact { .. })));
     assert_eq!(h.e.rows(q), vec![0, 0]);
@@ -835,7 +845,9 @@ fn numbers_and_booleans_are_terms_too() {
         e.interner.intern_str("count"),
     );
     let (one, two) = (e.interner.intern_num(1.0), e.interner.intern_num(2.0));
-    let q = e.register(vec![vec![todo, VAR_BASE, done, TRUE], vec![todo, VAR_BASE, count, VAR_BASE + 1]]);
+    let q = e
+        .register(vec![vec![todo, VAR_BASE, done, TRUE], vec![todo, VAR_BASE, count, VAR_BASE + 1]])
+        .unwrap();
     e.apply(&[OP_ASSERT, ROOT_OWNER, NONE, 4, todo, one, done, TRUE]).unwrap();
     e.apply(&[OP_ASSERT, ROOT_OWNER, NONE, 4, todo, one, count, two]).unwrap();
     e.apply(&[OP_ASSERT, ROOT_OWNER, NONE, 4, todo, two, done, FALSE]).unwrap();
@@ -1036,7 +1048,7 @@ fn engine_agrees_with_a_naive_model_under_random_ops() {
     for spec in &spec_refs {
         h.vars.clear();
         let clauses: Vec<Clause> = spec.iter().map(|c| h.pattern(c)).collect();
-        qids.push(h.e.register(clauses.clone()));
+        qids.push(h.e.register(clauses.clone()).unwrap());
         compiled.push(clauses);
     }
     let mut rng = Rng(0x2545_F491_4F6C_DD1D);
@@ -1249,7 +1261,7 @@ fn churning_values_do_not_grow_the_term_table() {
     let mut e = Engine::new();
     e.set_fact_events(FACT_EVENTS_NONE);
     let (pos, y) = (e.interner.intern_str("pos"), e.interner.intern_str("y"));
-    e.register(vec![vec![pos, y, VAR_BASE]]);
+    e.register(vec![vec![pos, y, VAR_BASE]]).unwrap();
     let mut peak = 0;
     for i in 0..10_000 {
         let value = e.interner.intern_num(f64::from(i) * 0.5);

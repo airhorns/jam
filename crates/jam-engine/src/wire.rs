@@ -36,6 +36,38 @@ pub const FACT_EVENTS_NONE: u32 = 0;
 pub const FACT_EVENTS_DURABLE: u32 = 1;
 pub const FACT_EVENTS_ALL: u32 = 2;
 
+/// Query specs cross as `n (kind len words…)…`; the kinds and their words:
+/// `PATTERN t…` a positive pattern.
+pub const CLAUSE_PATTERN: u32 = 0;
+/// `NOT t…` — rows for which the pattern has a match are hidden.
+pub const CLAUSE_NOT: u32 = 1;
+/// `WHERE (lhs op rhs)…` — alternatives; `lhs` is a variable, `rhs` a variable or literal.
+pub const CLAUSE_WHERE: u32 = 2;
+/// `ORDER var descending` — one sort key; several compose most significant first.
+pub const CLAUSE_ORDER: u32 = 3;
+/// `OFFSET n`
+pub const CLAUSE_OFFSET: u32 = 4;
+/// `LIMIT n`
+pub const CLAUSE_LIMIT: u32 = 5;
+/// `AGGREGATE op input group…` — `input` is `WILD` for count.
+pub const CLAUSE_AGGREGATE: u32 = 6;
+
+pub const PRED_EQ: u32 = 0;
+pub const PRED_NE: u32 = 1;
+pub const PRED_LT: u32 = 2;
+pub const PRED_LE: u32 = 3;
+pub const PRED_GT: u32 = 4;
+pub const PRED_GE: u32 = 5;
+pub const PRED_CONTAINS: u32 = 6;
+pub const PRED_STARTS_WITH: u32 = 7;
+pub const PRED_CONTAINS_CI: u32 = 8;
+pub const PRED_STARTS_WITH_CI: u32 = 9;
+
+pub const AGG_COUNT: u32 = 0;
+pub const AGG_SUM: u32 = 1;
+pub const AGG_MIN: u32 = 2;
+pub const AGG_MAX: u32 = 3;
+
 /// Word positions of `Engine::stats()` when packed as one array.
 pub const STAT_FACTS: usize = 0;
 pub const STAT_FACT_SLOTS: usize = 1;

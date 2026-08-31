@@ -10,6 +10,13 @@
 
 import { JamEngine, wasmMemory } from "./wasm";
 import {
+  CLAUSE_AGGREGATE,
+  CLAUSE_LIMIT,
+  CLAUSE_NOT,
+  CLAUSE_OFFSET,
+  CLAUSE_ORDER,
+  CLAUSE_PATTERN,
+  CLAUSE_WHERE,
   EV_FACT,
   EV_FREE,
   EV_QUERY,
@@ -70,33 +77,136 @@ export type FactEventListener = (event: FactEvent) => void;
 /** One clause of a query: interned term ids, `VAR_BASE + i` for variable `i`, or `WILD`. */
 export type Clause = number[];
 
+/** `lhs` is a variable word, `op` a `PRED_*` code, `rhs` a variable word or term id. */
+export interface Predicate {
+  lhs: number;
+  op: number;
+  rhs: number;
+}
+
+/** `op` is an `AGG_*` code; `input` is a variable word, or `WILD` for count; `group` are variable words. */
+export interface Aggregate {
+  op: number;
+  input: number;
+  group: readonly number[];
+}
+
+/** `column` is a position in the output row, which for aggregates is `group…, value`. */
+export interface Sort {
+  column: number;
+  descending: boolean;
+}
+
+/**
+ * A query: rows are the variable bindings satisfying every positive pattern, with
+ * no match for any `not` pattern and at least one alternative of every `where`
+ * filter holding, optionally folded by one aggregate and cut to an ordered window.
+ */
+export interface QuerySpec {
+  patterns: readonly Clause[];
+  not?: readonly Clause[];
+  where?: readonly (readonly Predicate[])[];
+  aggregate?: Aggregate;
+  order?: readonly Sort[];
+  offset?: number;
+  limit?: number;
+}
+
+export function isSpec(query: QuerySpec | readonly Clause[]): query is QuerySpec {
+  return !Array.isArray(query);
+}
+
+/** Encode a spec as `n (kind len words…)…`, the form `jam_engine::Spec::unpack` reads. */
+export function packSpec(query: QuerySpec | readonly Clause[]): Uint32Array {
+  const spec: QuerySpec = isSpec(query) ? query : { patterns: query };
+  const words: number[] = [0];
+  let n = 0;
+  const clause = (kind: number, body: readonly number[]) => {
+    words.push(kind, body.length, ...body);
+    n++;
+  };
+  for (const p of spec.patterns) clause(CLAUSE_PATTERN, p);
+  for (const p of spec.not ?? []) clause(CLAUSE_NOT, p);
+  for (const filter of spec.where ?? []) {
+    const body: number[] = [];
+    for (const { lhs, op, rhs } of filter) body.push(lhs, op, rhs);
+    clause(CLAUSE_WHERE, body);
+  }
+  if (spec.aggregate) clause(CLAUSE_AGGREGATE, [spec.aggregate.op, spec.aggregate.input, ...spec.aggregate.group]);
+  for (const { column, descending } of spec.order ?? []) clause(CLAUSE_ORDER, [VAR_BASE + column, descending ? 1 : 0]);
+  if (spec.offset) clause(CLAUSE_OFFSET, [spec.offset]);
+  if (spec.limit !== undefined) clause(CLAUSE_LIMIT, [spec.limit]);
+  words[0] = n;
+  return Uint32Array.from(words);
+}
+
+/** Width of the rows a query reports: its group keys plus the aggregate value, or every variable. */
+export function specArity(query: QuerySpec | readonly Clause[]): number {
+  if (isSpec(query) && query.aggregate) return query.aggregate.group.length + 1;
+  return Engine.nvars(isSpec(query) ? query.patterns : query);
+}
+
 export type RowListener = (row: Uint32Array, added: boolean) => void;
 
 /**
- * Where a row sits in result order: the assertion sequence of the fact matching the
- * query's first clause, carried as two words after the row's `nvars` values.
+ * Where a row sits in result order — the assertion sequence of the fact matching the
+ * query's first clause, or of a group's first row, or of a window entry — carried as
+ * two words after the row's `arity` values. Ordered queries sort by their keys first.
  */
-export function rowOrder(row: Uint32Array, nvars: number): number {
-  return row[nvars] * 0x1_0000_0000 + row[nvars + 1];
+export function rowOrder(row: Uint32Array, arity: number): number {
+  return row[arity] * 0x1_0000_0000 + row[arity + 1];
 }
 
-/** Sort rows into result order; ties (only possible with wildcards in the first clause) fall back to the values. */
-export function compareRows(nvars: number): (a: Uint32Array, b: Uint32Array) => number {
+/** Sort rows by their order key; ties (only possible with wildcards in the first clause) fall back to the values. */
+export function compareRows(arity: number): (a: Uint32Array, b: Uint32Array) => number {
   return (a, b) => {
-    const hi = a[nvars] - b[nvars];
+    const hi = a[arity] - b[arity];
     if (hi !== 0) return hi;
-    const lo = a[nvars + 1] - b[nvars + 1];
+    const lo = a[arity + 1] - b[arity + 1];
     if (lo !== 0) return lo;
-    for (let i = 0; i < nvars; i++) {
+    for (let i = 0; i < arity; i++) {
       if (a[i] !== b[i]) return a[i] - b[i];
     }
     return 0;
   };
 }
 
+/** The engine's total order over terms: booleans, then numbers (NaN last), then strings by code point. */
+export function compareTerms(a: Term, b: Term): number {
+  if (typeof a !== typeof b) return rank(a) - rank(b);
+  if (typeof a === "string") return compareStrings(a, b as string);
+  if (typeof a === "number") {
+    const y = b as number;
+    if (a < y) return -1;
+    if (a > y) return 1;
+    if (a === y) return 0;
+    return Number(Number.isNaN(a)) - Number(Number.isNaN(y));
+  }
+  return Number(a) - Number(b);
+}
+
+function rank(term: Term): number {
+  return typeof term === "boolean" ? 0 : typeof term === "number" ? 1 : 2;
+}
+
+function compareStrings(a: string, b: string): number {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const x = a.charCodeAt(i);
+    const y = b.charCodeAt(i);
+    if (x === y) continue;
+    const xs = x >= 0xd800 && x <= 0xdfff;
+    const ys = y >= 0xd800 && y <= 0xdfff;
+    if (xs && !ys && y >= 0xe000) return 1;
+    if (ys && !xs && x >= 0xe000) return -1;
+    return x - y;
+  }
+  return a.length - b.length;
+}
+
 /**
- * A registered query's live result set. `rows` maps stable row ids to the bound
- * variable ids followed by the row's order key (see `rowOrder`); `version` bumps
+ * A registered query's live result set. `rows` maps stable row ids to the `arity`
+ * output values followed by the row's order key (see `rowOrder`); `version` bumps
  * whenever a row appears or leaves.
  */
 export class QueryHandle {
@@ -108,7 +218,7 @@ export class QueryHandle {
   constructor(
     private readonly engine: Engine,
     readonly qid: number,
-    readonly nvars: number,
+    readonly arity: number,
   ) {}
 
   /** Called for every row that appears or leaves during a flush. */
@@ -141,8 +251,8 @@ export class QueryHandle {
 }
 
 export interface QueryResult {
-  nvars: number;
-  /** `nrows * nvars` variable ids, row-major, already in result order. */
+  arity: number;
+  /** `count * arity` term ids, row-major, in assertion order of the rows' first-clause facts. */
   data: Uint32Array;
   count: number;
 }
@@ -373,7 +483,7 @@ export class Engine {
         i += len;
       } else if (code === EV_QUERY) {
         const qid = events[i + 1];
-        const nvars = events[i + 2];
+        const arity = events[i + 2];
         const n = events[i + 3];
         i += 4;
         const entry = this.handles.get(qid);
@@ -383,8 +493,8 @@ export class Engine {
           const flag = events[i + 1];
           i += 2;
           if (flag === 1) {
-            handle?.applyRow(rid, events.slice(i, i + nvars + 2));
-            i += nvars + 2;
+            handle?.applyRow(rid, events.slice(i, i + arity + 2));
+            i += arity + 2;
           } else {
             handle?.applyRow(rid, null);
           }
@@ -422,46 +532,52 @@ export class Engine {
 
   // --- queries ---
 
-  private packClauses(clauses: readonly Clause[]): Uint32Array {
-    let size = 1;
-    for (const c of clauses) size += 1 + c.length;
-    const packed = new Uint32Array(size);
-    packed[0] = clauses.length;
-    let i = 1;
-    for (const c of clauses) {
-      packed[i++] = c.length;
-      packed.set(c, i);
-      i += c.length;
-    }
-    return packed;
-  }
-
   static nvars(clauses: readonly Clause[]): number {
     let max = -1;
     for (const c of clauses) for (const p of c) if (p >= VAR_BASE && p < WILD && p - VAR_BASE > max) max = p - VAR_BASE;
     return max + 1;
   }
 
-  /** Register (or share) a maintained query; call `release()` on the handle when done. */
-  register(clauses: readonly Clause[]): QueryHandle {
+  /**
+   * Register (or share) a maintained query; call `release()` on the handle when done.
+   * Throws when the spec is malformed or references an unbound variable.
+   */
+  register(query: QuerySpec | readonly Clause[]): QueryHandle {
     this.applyPending();
-    const qid = this.raw.register(this.packClauses(clauses));
+    const qid = this.raw.register(packSpec(query));
     const existing = this.handles.get(qid);
     if (existing) {
       existing.refs++;
       return existing.handle;
     }
-    const handle = new QueryHandle(this, qid, Engine.nvars(clauses));
     const packed = this.raw.rows(qid);
-    const nvars = packed[0];
+    const arity = packed[0];
+    const handle = new QueryHandle(this, qid, arity);
     const n = packed[1];
     let i = 2;
     for (let r = 0; r < n; r++) {
-      handle.rows.set(packed[i], packed.slice(i + 1, i + 3 + nvars));
-      i += 3 + nvars;
+      handle.rows.set(packed[i], packed.slice(i + 1, i + 3 + arity));
+      i += 3 + arity;
     }
     this.handles.set(qid, { handle, refs: 1 });
     return handle;
+  }
+
+  /**
+   * Sort rows of a query with `order` keys: by each key's term in the engine's total
+   * order, then by the rows' order keys. Without `order` this is `compareRows`.
+   */
+  rowComparator(arity: number, order: readonly Sort[] = []): (a: Uint32Array, b: Uint32Array) => number {
+    const bySeq = compareRows(arity);
+    if (order.length === 0) return bySeq;
+    return (a, b) => {
+      for (const { column, descending } of order) {
+        if (a[column] === b[column]) continue;
+        const c = compareTerms(this.term(a[column]), this.term(b[column]));
+        if (c !== 0) return descending ? -c : c;
+      }
+      return bySeq(a, b);
+    };
   }
 
   releaseHandle(handle: QueryHandle): void {
@@ -475,11 +591,11 @@ export class Engine {
     }
   }
 
-  /** Evaluate once without registering. */
-  query(clauses: readonly Clause[]): QueryResult {
+  /** Evaluate once without registering. Rows of an ordered query still need sorting by their keys. */
+  query(query: QuerySpec | readonly Clause[]): QueryResult {
     this.applyPending();
-    const packed = this.raw.query(this.packClauses(clauses));
-    return { nvars: packed[0], count: packed[1], data: packed.subarray(2) };
+    const packed = this.raw.query(packSpec(query));
+    return { arity: packed[0], count: packed[1], data: packed.subarray(2) };
   }
 
   /** Every fact, optionally within a scope and/or matching a pattern of terms and wildcards. */

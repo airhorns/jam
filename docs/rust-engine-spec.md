@@ -135,13 +135,13 @@ Goals
 - A WebSocket sync protocol between a client engine and a server engine
   replacing Electric shapes and the outbox POST endpoint, with per-filter
   subscriptions, an authorisation policy, and an exact acknowledgement fence.
+- Queries with negation, predicates, aggregates and ordered windows maintained
+  in the engine, so a list page, a search or a count is one registered query
+  instead of a JS body re-filtering every row.
 
 Non-goals (for this iteration)
 
-- Aggregates, negation, arithmetic or recursion inside queries. Bodies do
-  that in JS as today.
-- Multi-tab coordination through locks. Each tab runs its own engine and
-  connection; storage writes are idempotent.
+- Arithmetic or recursion inside queries. Bodies do that in JS as today.
 - Migrating existing PGlite data. Pre-1.0: schemas change outright.
 
 ## 4. Engine design (`crates/jam-engine`)
@@ -199,24 +199,55 @@ the first time a plan needs them (§4.4) by one pass over the facts of that
 length and maintained on every insert/remove afterwards; in practice a jam app
 settles on a handful.
 
-### 4.3 Queries (`query.rs`)
+### 4.3 Queries (`query.rs`, `spec.rs`, `stage.rs`)
 
-A query is `Vec<Clause>`, a clause is `Vec<u32>` of literal ids, variables
-and wildcards. Variables are numbered by first appearance across the clauses
-(the JS side owns the names). Results live in a `ResultSet`: `row → RowId`,
-`slots[RowId] = (row, weight, weight before this transaction, touched)` and a
-`touched: Vec<RowId>` list of the rows this transaction changed. Row ids are
+A query is a `Spec`: positive `patterns` joined on their shared variables,
+plus the optional `negations`, `filters`, `aggregate`, `order`, `offset` and
+`limit` layered over them. A clause is `Vec<u32>` of literal ids, variables
+and wildcards; variables are numbered by first appearance across the positive
+patterns (the JS side owns the names) and every other part of the spec refers
+to them by number. The whole `Spec` is the identity of a registered query, so
+two `whenever`s over the same clauses share one query and two that differ only
+in a `limit` do not.
+
+The base rows — the joined, negated and filtered bindings — live in a
+`ResultSet`: `row → RowId`, `slots[RowId] = (row, weight, blocked, visible
+before this transaction, touched)` and a `touched: Vec<RowId>` list of the
+rows this transaction changed. A row is visible while its weight is positive
+and `blocked`, the number of negation matches hiding it, is zero. Row ids are
 stable while a row has non-zero weight and are recycled after it is drained, so
 the JS side can keep `Map<RowId, Bindings>` without hashing rows.
 
-Result order is the order in which the facts matching the *first* clause were
-asserted: every fact carries a monotonically increasing `seq`, and a row's
-order key is the `seq` of the fact the first clause binds to (the smallest
-one when that clause has wildcards). A list keyed by entity therefore keeps
-its order when other attributes are replaced, a single-clause query over a
-multi-valued attribute lists values oldest to newest, and replacing the first
-clause's own attribute moves the entity to the end — the same order the
-Map-based store produced before the engine.
+- **Negations** are patterns over the row's variables (unshared positions are
+  wildcards) that hide a row while any fact matches them. A new row counts its
+  matches once; afterwards a fact that starts or stops matching a negation
+  adjusts `blocked` on every row it unifies with, found by running a plan over
+  the positive patterns from the negation's bindings.
+- **Filters** are conjunctions of disjunctions: each `Filter` is a list of
+  `Predicate { lhs: var, op, rhs: var | literal }` alternatives and a row
+  passes when every filter has one alternative that holds. Plans check a filter
+  at the earliest step that binds all of its variables, so a `where` over the
+  seed clause prunes the join instead of the result.
+- **Stages** (`stage.rs`) sit over the base rows when the spec has an aggregate
+  or a window. An aggregate (`count`, `sum`, `min`, `max`) folds the rows
+  sharing its `group` variables into one output row of group values plus the
+  aggregate, interning the reported number; a window keeps every row it is
+  given sorted by the `order` keys (engine term order, then assertion order)
+  and reports the ranks in `offset..offset+limit`. Each stage turns a batch of
+  row transitions into the transitions of its own rows, and the last stage's
+  `ResultSet` is what the query reports. Ties inside a stage, and the order of
+  aggregate groups, follow first appearance.
+
+Result order for plain queries is the order in which the facts matching the
+*first* pattern were asserted: every fact carries a monotonically increasing
+`seq`, and a row's order key is the `seq` of the fact the first pattern binds
+to (the smallest one when that pattern has wildcards). A list keyed by entity
+therefore keeps its order when other attributes are replaced, a single-clause
+query over a multi-valued attribute lists values oldest to newest, and
+replacing the first pattern's own attribute moves the entity to the end — the
+same order the Map-based store produced before the engine. Staged queries
+report the stage's sequence instead, and the JS side sorts windows by their
+keys before that sequence, so a `whenever` sees its rows in query order.
 
 Registering a query builds:
 
@@ -228,8 +259,11 @@ Registering a query builds:
   primary table.
 - `delta_plans[i]`, one per clause, built the same way with clause `i` as the
   seed; steps for clauses `< i` are marked `exclude_seed`.
+- `negation_plans[i]`, one per negation, over every positive pattern from the
+  negation's bindings, to find the rows a negation fact hides or reveals.
 
-All `(len, mask)` pairs the plans probe are ensured as indexes.
+All `(len, mask)` pairs the plans and negation probes need are ensured as
+indexes.
 
 ### 4.4 Incremental maintenance
 
@@ -258,7 +292,16 @@ removals produce exactly the negation of the additions that created a row.
 
 Changes inside a transaction are applied one at a time, each fully propagated
 before the next, so the store is always the correct "integrated input" for
-the delta being computed.
+the delta being computed. A fact routed to a negation instead runs that
+negation's plan and adjusts `blocked` on each row found, ±1 per match.
+
+Stages are advanced lazily: `drain`, `rows` and `query` first push the base
+rows' pending visibility changes (with the seq of the first pattern's fact)
+through the aggregate and window, then read the last stage's `ResultSet`. A
+row moving inside a window is a leave plus an enter, a group whose aggregate
+changes retracts its old output row and asserts the new one, and rows that
+only shuffle ranks outside the window produce nothing — so a paged list over
+a busy table reports exactly the rows that entered or left the page.
 
 ### 4.5 Ownership (`owner.rs`)
 
@@ -296,17 +339,33 @@ The JS side packs a transaction into one `Uint32Array` of ops:
 then `drain()` returns one `Uint32Array` of events:
 
     FREE  n id…                     (term ids freed since the previous drain; always first)
-    QUERY qid nvars nrows (rowid flag [values… order_hi order_lo])…
+    QUERY qid arity nrows (rowid flag [values… order_hi order_lo])…
     FACT  flags scope len t…        (flags: added/removed, durable, replace)
 
 Values and the 64-bit order key are included only for rows that appeared in
-this transaction (`flag` 1); `flag` 0 means the row left. Fact events
-are emitted at the requested level (none / durable only / all) so the render
-path pays nothing for observers that only care about durable facts.
+this transaction (`flag` 1); `flag` 0 means the row left. `arity` is the
+output row's width: the number of variables, or group keys plus one for an
+aggregate. Fact events are emitted at the requested level (none / durable only
+/ all) so the render path pays nothing for observers that only care about
+durable facts.
+
+A spec crosses the wire as `n (kind len words…)…`, one entry per clause:
+
+    PATTERN   len t…                (t: term id, VAR_BASE + var, or WILD)
+    NOT       len t…
+    WHERE     (lhs op rhs)…         (alternatives; lhs a var, rhs a var or term)
+    ORDER     var descending
+    OFFSET    n
+    LIMIT     n
+    AGGREGATE op input group…       (input WILD for count)
+
+`Spec::unpack` rejects malformed entries — bad lengths, a predicate or
+aggregate over a variable no pattern binds, an order key outside the output
+row, a second aggregate — with a message the JS side throws.
 
 Owner creation (`create_owner(parent) → id`), query registration
-(`register(clauses) → qid`, `release(qid)`), interning and result reads
-(`rows(qid)`, `query(clauses)` for one-off evaluation, `facts_matching(filter)`)
+(`register(spec) → qid`, `release(qid)`), interning and result reads
+(`rows(qid)`, `query(spec)` for one-off evaluation, `facts_matching(filter)`)
 are direct calls.
 
 `stats()` reports the engine's size as one array laid out by the `STAT_*`
@@ -319,7 +378,16 @@ watches, listeners and refs, and `publishStats()` republishes those numbers as
 `["engine", name, value]` facts on an interval so programs and UI can watch
 them.
 
-### 4.8 Filters (`filter.rs`)
+### 4.8 Predicates (`filter.rs`) and sync filters
+
+Query predicates compare two terms of a bound row: `=` and `!=` are id
+compares; `<`, `<=`, `>`, `>=` use the engine's total order over terms —
+booleans, then numbers (NaN last), then strings by code point — so mixed-type
+comparisons are well defined rather than errors; `contains`, `startsWith` and
+their case-insensitive forms hold only for two strings, with the lowercased
+needle of a literal computed once when the query is compiled. `min`, `max` and
+`orderBy` use the same order, and `@jam/engine` mirrors it in `compareTerms`
+so JS-side sorting agrees with the engine.
 
 A sync filter is `{ scope?: TermId, pattern?: Clause }` (pattern literals only;
 variables act as wildcards). `matches(fact)` is a scope compare plus a literal
@@ -340,7 +408,11 @@ pattern's literal mask when present.
 - `Engine` (TS) owns the term mirror, packs ops, decodes events, and exposes
   `QueryHandle { rows(): Bindings[]; changed: boolean; delta }` objects that
   apply drained deltas to `Map<RowId, {bindings, weight}>` and rebuild the
-  array lazily.
+  array lazily. `register` and `query` take either a list of pattern clauses or
+  a `QuerySpec { patterns, not?, where?, aggregate?, order?, offset?, limit? }`
+  over variable numbers, which `packSpec` encodes clause by clause; `arity`
+  is the output width and `rowComparator(arity, order)` orders decoded rows
+  by their keys (`compareTerms`) and then their engine sequence.
 - `storage/`: `FactStorage` interface — `load()`, `write({upserts, deletes,
   log, meta})`, `getMeta`, `readLog/logHead/trimLog`, `close()` — with
   `memoryStorage()`, `indexedDBStorage(name)` and `sqliteStorage(path)`
@@ -359,6 +431,17 @@ pattern's literal mask when present.
   withScope/scopeOf/setScope/clear/facts/refs`. Owner names stay strings at
   this layer (mapped to engine ids). `db.facts` is a read-only Map view built
   on demand for debugging and tests.
+- Queries are lists of clauses: patterns plus `not(...pattern)`,
+  `where(lhs, op, rhs)` (with `where(x, "in", values)` and
+  `where.any(...)` for disjunctions), `orderBy(var, direction)`,
+  `offset(n)`, `limit(n)` and one of `count(out, ...group)` /
+  `sum|min|max(input, out, ...group)`. `compile` numbers the variables of the
+  positive patterns, resolves every other clause against them and throws with
+  the variable's name when a predicate, aggregate or order key is unbound or
+  outside the output; an aggregate's output row is its group keys followed by
+  the aggregate variable. Maintained indexes are keyed by the whole clause
+  list, so `when` and `whenever` calls with equal clauses share one engine
+  query.
 - `reactive.ts` replaces MobX: a tracker stack (`when()` records the query it
   read), `effect(fn)` objects subscribed to queries, and a scheduler that
   flushes pending ops, drains dirty queries, runs affected effects, and

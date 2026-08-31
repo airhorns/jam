@@ -13,7 +13,7 @@
 //   descendant: .sidebar .session-row
 //   child:      .sidebar > button
 
-import { db, $, type Pattern, type Term } from "./db";
+import { db, $, type QueryClause, type Term } from "./db";
 import { markDirty, recordRead, registerDrainer, type Dependency } from "./reactive";
 
 // --- Public types ---
@@ -27,7 +27,7 @@ export interface VdomElement {
 
 // --- VDOM index ---
 
-const VDOM_PATTERNS: Pattern[][] = [
+const VDOM_PATTERNS: QueryClause[][] = [
   [[$.e, "tag", $.v]],
   [[$.e, "class", $.v]],
   [[$.e, "prop", $.k, $.v]],

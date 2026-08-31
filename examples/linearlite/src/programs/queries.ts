@@ -1,14 +1,14 @@
 // Queries — derived views over the facts in memory. The route picks which
-// views to derive; each is a whenever() over the entity facts it needs that
-// claims ["query", name, "row", index, id] plus total/offset/limit/ready meta,
-// so components only ever read facts. Only the current project's facts are in
-// memory (see subscriptions.ts), which keeps these passes small.
+// views to derive; each is a whenever() over an engine query that filters,
+// sorts, windows or counts the entity facts it needs, and claims
+// ["query", name, "row", index, id] plus total/offset/limit/ready meta, so
+// components only ever read facts. Only the current project's facts are in
+// memory (see subscriptions.ts), which keeps the maintained queries small.
 
-import { $, claim, compileFilter, replace, whenever } from "@jam/core";
-import { collect } from "../facts";
-import { filterIssues, sortIssues, type FilterState } from "../filter-state";
+import { $, claim, compileFilter, count, db, limit, offset, orderBy, reaction, replace, when, whenever, type Bindings } from "@jam/core";
+import { issueClauses, orderedIssueClauses, type FilterState } from "../filter-state";
 import { projectScope } from "../projects";
-import { StatusValues, type Comment, type Issue } from "../types";
+import { StatusValues } from "../types";
 import { parseRoute, type Route } from "./router";
 
 export const ROW_HEIGHT = 36;
@@ -23,48 +23,77 @@ export function windowFor(scrollTop: number): { offset: number; limit: number } 
   return { offset, limit: LIST_WINDOW };
 }
 
-const ISSUE = ["issue", $.id, $.col, $.val] as const;
-const COMMENT = ["comment", $.id, $.col, $.val] as const;
+function claimRows(name: string, rows: Bindings[], from: number, size: number): void {
+  claim("query", name, "offset", from);
+  claim("query", name, "limit", size);
+  rows.forEach((row, index) => claim("query", name, "row", index, String(row.id)));
+}
 
-function emitRows(name: string, ids: string[], total: number, offset = 0, limit = ids.length): void {
-  claim("query", name, "total", total);
-  claim("query", name, "offset", offset);
-  claim("query", name, "limit", limit);
-  ids.forEach((id, index) => claim("query", name, "row", index, id));
+function claimTotal(name: string, rows: Bindings[]): void {
+  claim("query", name, "total", Number(rows[0]?.n ?? 0));
+}
+
+/**
+ * Run `start` with the value of `read` now and again whenever it changes, disposing
+ * the previous run first. Rules started later still belong to the owner active now.
+ */
+function rederive<T>(read: () => T, equals: (a: T, b: T) => boolean, start: (value: T) => () => void): () => void {
+  const ownerId = db.getCurrentOwnerId();
+  let stop = () => {};
+  const stopReaction = reaction(
+    read,
+    (value) => {
+      stop();
+      stop = db.withOwnerScope(ownerId, () => start(value));
+    },
+    { fireImmediately: true, equals },
+  );
+  return () => {
+    stopReaction();
+    stop();
+  };
 }
 
 function startList(projectId: string, filter: FilterState): () => void {
-  return whenever([[...ISSUE], ["ui", "list", "scrollTop", $.y]], (matches) => {
-    const issues = collect<Issue>(matches).filter((issue) => issue.project === projectId);
-    const ordered = sortIssues(filterIssues(issues, filter), filter);
-    const { offset, limit } = windowFor(Number(matches[0]?.y ?? 0));
-    const ids = ordered.slice(offset, offset + limit).map((issue) => issue.id);
-    emitRows("list", ids, ordered.length, offset, limit);
-  });
+  const stopTotal = whenever([...issueClauses(projectId, filter), count($.n)], (rows) => claimTotal("list", rows));
+  const stopWindow = rederive(
+    () => windowFor(Number(when(["ui", "list", "scrollTop", $.y])[0]?.y ?? 0)),
+    (a, b) => a.offset === b.offset && a.limit === b.limit,
+    (window) =>
+      whenever([...orderedIssueClauses(projectId, filter), offset(window.offset), limit(window.limit)], (rows) =>
+        claimRows("list", rows, window.offset, window.limit),
+      ),
+  );
+  return () => {
+    stopTotal();
+    stopWindow();
+  };
 }
 
 function startBoard(projectId: string, filter: FilterState): () => void {
-  return whenever([[...ISSUE]], (matches) => {
-    const issues = collect<Issue>(matches).filter((issue) => issue.project === projectId);
-    for (const status of StatusValues) {
-      const column = { ...filter, status: [status], orderBy: "kanbanorder", orderDirection: "asc" as const };
-      const ordered = sortIssues(filterIssues(issues, column), column);
-      emitRows(`board:${status}`, ordered.slice(0, BOARD_PAGE).map((issue) => issue.id), ordered.length, 0, BOARD_PAGE);
-    }
+  const stops = StatusValues.flatMap((status) => {
+    const name = `board:${status}`;
+    const column: FilterState = { ...filter, status: [status], orderBy: "kanbanorder", orderDirection: "asc" };
+    return [
+      whenever([...issueClauses(projectId, column), count($.n)], (rows) => claimTotal(name, rows)),
+      whenever([...orderedIssueClauses(projectId, column), limit(BOARD_PAGE)], (rows) => claimRows(name, rows, 0, BOARD_PAGE)),
+    ];
   });
+  return () => stops.forEach((stop) => stop());
 }
 
 function startDetail(projectId: string, issueId: string): () => void {
-  const stopDetail = whenever([["issue", issueId, "project", $.project]], ([match]) => {
-    const present = match?.project === projectId;
-    emitRows("detail", present ? [issueId] : [], present ? 1 : 0);
+  const stopDetail = whenever([["issue", issueId, "project", projectId]], (rows) => {
+    claim("query", "detail", "total", rows.length);
+    claimRows("detail", rows.length > 0 ? [{ id: issueId }] : [], 0, rows.length);
   });
-  const stopComments = whenever([[...COMMENT]], (matches) => {
-    const comments = collect<Comment>(matches)
-      .filter((comment) => comment.issue === issueId)
-      .sort((a, b) => String(a.created ?? "").localeCompare(String(b.created ?? "")) || a.id.localeCompare(b.id));
-    emitRows("comments", comments.map((comment) => comment.id), comments.length);
-  });
+  const stopComments = whenever(
+    [["comment", $.id, "issue", issueId], ["comment", $.id, "created", $.created], orderBy($.created), orderBy($.id)],
+    (rows) => {
+      claim("query", "comments", "total", rows.length);
+      claimRows("comments", rows, 0, rows.length);
+    },
+  );
   return () => {
     stopDetail();
     stopComments();
@@ -80,8 +109,8 @@ function startReadiness(projectId: string, names: string[]): () => void {
 }
 
 function startStats(projectId: string): () => void {
-  return whenever([["issue", $.id, "project", projectId]], (matches) => {
-    claim("stats", "issues", "total", matches.length);
+  return whenever([["issue", $.id, "project", projectId], count($.n)], (rows) => {
+    claim("stats", "issues", "total", Number(rows[0]?.n ?? 0));
   });
 }
 

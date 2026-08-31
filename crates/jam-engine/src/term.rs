@@ -200,6 +200,27 @@ fn num_key(n: f64) -> u64 {
     if n == 0.0 { 0 } else { n.to_bits() }
 }
 
+impl Term {
+    /// The total order predicates and sort keys use: booleans, then numbers
+    /// (NaN last), then strings by their bytes.
+    pub fn compare(&self, other: &Term) -> std::cmp::Ordering {
+        match (self, other) {
+            (Term::Bool(a), Term::Bool(b)) => a.cmp(b),
+            (Term::Num(a), Term::Num(b)) => a.partial_cmp(b).unwrap_or_else(|| a.is_nan().cmp(&b.is_nan())),
+            (Term::Str(a), Term::Str(b)) => a.cmp(b),
+            _ => self.rank().cmp(&other.rank()),
+        }
+    }
+
+    fn rank(&self) -> u8 {
+        match self {
+            Term::Bool(_) => 0,
+            Term::Num(_) => 1,
+            Term::Str(_) => 2,
+        }
+    }
+}
+
 impl std::fmt::Display for Term {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
