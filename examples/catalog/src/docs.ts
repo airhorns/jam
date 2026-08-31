@@ -1,4 +1,5 @@
-import { docNameFromPath, parseComponentDoc, type ComponentDoc } from "@jam/ui/docs";
+import { docNameFromPath, parseComponentDoc, parseDocPage, type ComponentDoc, type DocPage } from "@jam/ui/docs";
+import styleSystem from "../../../.agents/skills/jam-ui/style-system.md?raw";
 
 // The reference docs are the jam-ui skill's markdown files, bundled as strings.
 const sources = import.meta.glob("../../../.agents/skills/jam-ui/components/*.md", {
@@ -15,4 +16,15 @@ export const componentDocs: ComponentDoc[] = Object.entries(sources).map(([path,
 
 export function findDoc(name: string): ComponentDoc | undefined {
   return componentDocs.find((doc) => doc.name === name);
+}
+
+/** A skill guide that is not about one component; `slug` is its `?c=` value and file name. */
+export type Guide = DocPage & { slug: string; path: string };
+
+export const guides: Guide[] = [
+  { slug: "style-system", path: ".agents/skills/jam-ui/style-system.md", ...parseDocPage(styleSystem, "style-system.md") },
+];
+
+export function findGuide(slug: string): Guide | undefined {
+  return guides.find((guide) => guide.slug === slug.toLowerCase());
 }

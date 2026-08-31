@@ -12,6 +12,8 @@ export type CatalogEntry = {
   demos: CatalogDemo[];
 };
 
+export type CatalogGuide = { name: string; title: string; doc: string };
+
 /** Sidebar groups, so sweeps can be split into one test per group; a test checks it matches the registry. */
 export const GROUPS: DemoGroup[] = [...DOC_GROUPS, "Examples"];
 
@@ -20,6 +22,13 @@ export async function loadRegistry(page: Page): Promise<CatalogEntry[]> {
   await page.goto("/?c=Button&chrome=0");
   await page.waitForSelector("[data-component]");
   return page.evaluate(() => (window as any).__catalog.components as CatalogEntry[]);
+}
+
+/** The guides the catalog renders beside the component pages. */
+export async function loadGuides(page: Page): Promise<CatalogGuide[]> {
+  await page.goto("/?c=Button&chrome=0");
+  await page.waitForSelector("[data-component]");
+  return page.evaluate(() => (window as any).__catalog.guides as CatalogGuide[]);
 }
 
 /** Navigate to one component page without the sidebar. */

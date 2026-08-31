@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { loadRegistry, showComponent, trackErrors } from "./helpers";
+import { loadGuides, loadRegistry, showComponent, trackErrors } from "./helpers";
 
 /**
  * Every documented component page renders its reference doc from the jam-ui
@@ -59,6 +59,41 @@ test.describe("catalog docs", () => {
     await page.locator('[data-docs] a[href="?c=Dialog"]').first().click();
     await page.waitForSelector('[data-component="Dialog"]');
     expect(new URLSearchParams(await page.evaluate(() => location.search)).get("c")).toBe("Dialog");
+  });
+
+  test("list items keep their bullets and numbers", async ({ page }) => {
+    await showComponent(page, "Stacks");
+    const items = page.locator("[data-docs] li");
+    expect(await items.count()).toBeGreaterThan(0);
+    const displays = await items.evaluateAll((els) => els.map((el) => getComputedStyle(el).display));
+    expect(new Set(displays)).toEqual(new Set(["list-item"]));
+  });
+
+  test("guides render from the skill's markdown and are reachable from the docs", async ({ page }) => {
+    const errors = trackErrors(page);
+    const guides = await loadGuides(page);
+    expect(guides.map((guide) => guide.name)).toEqual(["style-system"]);
+
+    for (const guide of guides) {
+      const source = readFileSync(`${repoRoot}${guide.doc}`, "utf8");
+      await page.goto(`/?c=${guide.name}&chrome=0`);
+      const article = page.locator(`[data-docs="${guide.name}"]`);
+      await expect(article).toHaveCount(1);
+      await expect(page.locator(`[data-guide="${guide.name}"] h2`)).toHaveText(guide.title);
+      const headings = await article.locator("h3").allInnerTexts();
+      for (const heading of source.match(/^## (.+)$/gm)?.map((line) => line.slice(3).replace(/`/g, "").trim()) ?? []) {
+        expect(headings, `${guide.name}: section "${heading}"`).toContain(heading);
+      }
+      expect(await article.locator("pre").count()).toBe((source.match(/^```/gm)?.length ?? 0) / 2);
+    }
+
+    // Stacks.md links up to the guide; the guide links down to a component doc.
+    await showComponent(page, "Stacks");
+    await page.locator('[data-docs] a[href="?c=style-system"]').first().click();
+    await page.waitForSelector('[data-guide="style-system"]');
+    await page.locator('[data-docs] a[href="?c=Slot"]').first().click();
+    await page.waitForSelector('[data-component="Slot"]');
+    expect(errors, errors.join("\n")).toEqual([]);
   });
 
   test("the all-components view shows demos without the docs", async ({ page }) => {

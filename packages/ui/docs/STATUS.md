@@ -418,8 +418,14 @@ escaping a clipped card; a card as a `Popover.Trigger`, a standalone merge and
 a hand-rolled `asChild`). The catalog renders the doc beneath a component's
 demos through Jam components rather than `innerHTML` — headings, paragraphs,
 `<pre>`, tables and lists via `marked`'s lexer — so the docs are themed like
-the demos, legible to `describeUI()`, and `./Other.md` links navigate within
-the site. `docs.test.ts` in `packages/ui` checks every doc's frontmatter, lead
-and Usage section and that the committed index in `SKILL.md` matches
-`pnpm skill-index`; the catalog's `docs.spec.ts` checks every page renders
-every section, code block and table of its file.
+the demos, legible to `describeUI()`, and relative links between skill files
+navigate within the site — `style-system.md` is a page too, under "Guides",
+so `Stacks.md`'s link up to it resolves. `docs.test.ts` in `packages/ui`
+checks every doc's frontmatter, lead and Usage section, that every relative
+link points at a file in the skill, and that the committed index in
+`SKILL.md` matches `pnpm skill-index`; the catalog's `docs.spec.ts` checks
+every page renders every section, code block and table of its file, that list
+items keep their markers, and that the guide is reachable from the docs. The
+site is built by the `Pages` workflow on every push to `main` and published at
+https://harry.me/jam/; pull requests run the same production build, which is
+what surfaced that `@jam/engine`'s top-level `await` needs an es2022 target.

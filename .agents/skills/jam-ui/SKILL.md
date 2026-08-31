@@ -60,9 +60,10 @@ atomic classes at render time:
 
 The catalog is published at https://harry.me/jam/ and served locally by
 `pnpm dev:ui` at http://localhost:5175 — one page per component with
-interactive demos followed by the same reference doc as below
-(`?c=Button&theme=dark`, `&chrome=0` hides the sidebar). The
-`jam-ui-visual-review` skill covers screenshots and browser inspection.
+interactive demos followed by the same reference doc as below, plus the
+style system guide (`?c=Button&theme=dark`, `?c=style-system`, `&chrome=0`
+hides the sidebar). The `jam-ui-visual-review` skill covers screenshots and
+browser inspection.
 
 ## Components
 

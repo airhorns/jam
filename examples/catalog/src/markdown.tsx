@@ -7,8 +7,8 @@ import { Anchor, H3, H4, H5, Paragraph, Separator, YStack, styled } from "@jam/u
 // innerHTML, so the docs are themed like the demos and legible to describeUI().
 
 export type MarkdownOptions = {
-  /** Called for `./Name.md` links instead of navigating; the link still carries an `?c=Name` href. */
-  onNavigate?: (component: string) => void;
+  /** Called for links to other skill docs instead of navigating; the link still carries an `?c=<page>` href. */
+  onNavigate?: (page: string) => void;
 };
 
 const Pre = styled("pre", {
@@ -78,14 +78,19 @@ const Td = styled("td", {
   },
 });
 
+// Lists stay block-level so each `li` keeps its `::marker`; the items space themselves.
 const List = styled("ul", {
   name: "DocList",
   defaultProps: {
     margin: 0,
     paddingLeft: 22,
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
+  },
+});
+
+const ListItem = styled("li", {
+  name: "DocListItem",
+  defaultProps: {
+    paddingVertical: 2,
   },
 });
 
@@ -105,7 +110,14 @@ export function slugify(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
-const DOC_LINK = /^\.\/([A-Za-z]+)\.md$/;
+// A relative link to another file in the skill: `./Dialog.md` or `../style-system.md`
+// from a component doc, `./components/Slot.md` from a guide. Each is a catalog page.
+const DOC_LINK = /^(?:\.\.?\/)+(?:components\/)?([A-Za-z][A-Za-z-]*)\.md$/;
+
+/** The `?c=` page a skill-relative doc link points at, or null for any other href. */
+export function docLinkTarget(href: string): string | null {
+  return DOC_LINK.exec(href)?.[1] ?? null;
+}
 
 function renderInline(tokens: Token[] | undefined, options: MarkdownOptions): VChild[] {
   if (!tokens) return [];
@@ -127,16 +139,16 @@ function renderInline(tokens: Token[] | undefined, options: MarkdownOptions): VC
         return <br key={i} />;
       case "link": {
         const link = token as Tokens.Link;
-        const doc = DOC_LINK.exec(link.href);
-        if (doc) {
+        const page = docLinkTarget(link.href);
+        if (page) {
           return (
             <Anchor
               key={i}
-              href={`?c=${doc[1]}`}
+              href={`?c=${page}`}
               onClick={(event: Event) => {
                 if (!options.onNavigate) return;
                 event.preventDefault();
-                options.onNavigate(doc[1]);
+                options.onNavigate(page);
               }}
             >
               {renderInline(link.tokens, options)}
@@ -189,7 +201,7 @@ function renderBlock(token: Token, key: number, options: MarkdownOptions): VChil
       const list = token as Tokens.List;
       return (
         <List key={key} tag={list.ordered ? "ol" : "ul"} start={list.ordered && list.start !== "" && list.start !== 1 ? list.start : undefined}>
-          {list.items.map((item, i) => <li key={i}>{renderListItemChildren(item, options)}</li>)}
+          {list.items.map((item, i) => <ListItem key={i}>{renderListItemChildren(item, options)}</ListItem>)}
         </List>
       );
     }

@@ -2,6 +2,7 @@ import { h } from "@jam/core/jsx";
 import { $, replace, transaction, when } from "@jam/core";
 import { XStack, YStack, Text, H2, Paragraph, Button, styled, setTheme } from "@jam/ui";
 import { registry, groupOrder, findComponent } from "./registry";
+import { findGuide, guides, type Guide } from "./docs";
 import { renderInlineMarkdown, renderMarkdown } from "./markdown";
 import type { CatalogEntry, Demo } from "./types";
 
@@ -119,6 +120,19 @@ const DemoBody = styled("div", {
   },
 });
 
+const GroupLabel = styled(Text, {
+  name: "GroupLabel",
+  defaultProps: {
+    fontSize: 11,
+    fontWeight: "600",
+    opacity: 0.5,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    paddingHorizontal: 10,
+    paddingBottom: 4,
+  },
+});
+
 function Sidebar() {
   const state = useCatalogState();
   return (
@@ -152,14 +166,29 @@ function Sidebar() {
       <NavLink href="?c=all" active={state.component === "all" ? "true" : "false"} onClick={(e: Event) => { e.preventDefault(); update({ component: "all" }); }}>
         All components
       </NavLink>
+      <YStack gap={1} paddingTop="$space.3">
+        <GroupLabel>Guides</GroupLabel>
+        {guides.map((guide) => (
+          <NavLink
+            key={guide.slug}
+            href={`?c=${guide.slug}`}
+            active={state.component.toLowerCase() === guide.slug ? "true" : "false"}
+            onClick={(e: Event) => {
+              e.preventDefault();
+              update({ component: guide.slug, demo: null });
+            }}
+            data-nav={guide.slug}
+          >
+            {guide.title}
+          </NavLink>
+        ))}
+      </YStack>
       {groupOrder.map((group) => {
         const items = registry.filter((c) => c.group === group);
         if (items.length === 0) return null;
         return (
           <YStack key={group} gap={1} paddingTop="$space.3">
-            <Text fontSize={11} fontWeight="600" opacity={0.5} textTransform="uppercase" letterSpacing={0.5} paddingHorizontal={10} paddingBottom={4}>
-              {group}
-            </Text>
+            <GroupLabel>{group}</GroupLabel>
             {items.map((c) => (
               <NavLink
                 key={c.name}
@@ -207,9 +236,27 @@ function ComponentPage({ component, only, docs }: { component: CatalogEntry; onl
       </YStack>
       {docs && doc ? (
         <YStack tag="article" gap="$space.4" maxWidth={960} data-docs={component.name} aria-label={`${doc.title} reference`}>
-          {renderMarkdown(doc.body, { onNavigate: (name) => update({ component: name, demo: null }) })}
+          {renderMarkdown(doc.body, { onNavigate: navigateToDoc })}
         </YStack>
       ) : null}
+    </YStack>
+  );
+}
+
+function navigateToDoc(page: string): void {
+  update({ component: page, demo: null });
+}
+
+function GuidePage({ guide }: { guide: Guide }) {
+  return (
+    <YStack gap="$space.5" maxWidth={960} data-guide={guide.slug}>
+      <YStack gap="$space.2">
+        <H2 margin={0}>{guide.title}</H2>
+        <Paragraph margin={0} opacity={0.7}>{renderInlineMarkdown(guide.lead, { onNavigate: navigateToDoc })}</Paragraph>
+      </YStack>
+      <YStack tag="article" gap="$space.4" data-docs={guide.slug} aria-label={`${guide.title} guide`}>
+        {renderMarkdown(guide.body, { onNavigate: navigateToDoc })}
+      </YStack>
     </YStack>
   );
 }
@@ -218,13 +265,16 @@ function Main() {
   const state = useCatalogState();
   const isAll = state.component === "all";
   const selected = isAll ? null : findComponent(state.component);
+  const guide = isAll || selected ? null : findGuide(state.component);
   return (
     <YStack flex={1} padding="$space.7" $max-sm={{ padding: "$space.3" }} gap="$space.8" minWidth={0} data-testid="main">
       {isAll
         ? registry.map((c) => <ComponentPage key={c.name} component={c} only={null} docs={false} />)
         : selected
           ? <ComponentPage component={selected} only={state.demo} docs={true} />
-          : <Text>Unknown component “{state.component}”</Text>}
+          : guide
+            ? <GuidePage guide={guide} />
+            : <Text>Unknown component “{state.component}”</Text>}
     </YStack>
   );
 }

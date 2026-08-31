@@ -20,6 +20,9 @@ export type ComponentDoc = {
   body: string;
 };
 
+/** A guide such as style-system.md: an H1, a lead paragraph and the rest. */
+export type DocPage = Pick<ComponentDoc, "title" | "lead" | "body">;
+
 export class DocParseError extends Error {}
 
 function parseFrontmatter(source: string, where: string): { fields: Record<string, string>; rest: string } {
@@ -38,6 +41,18 @@ function parseFrontmatter(source: string, where: string): { fields: Record<strin
   return { fields, rest: source.slice(match[0].length) };
 }
 
+/** Split markdown that starts with an H1 into title, lead paragraph and body. */
+export function parseDocPage(markdown: string, where = "doc"): DocPage {
+  const heading = /^# (.+)\r?\n/.exec(markdown.trimStart());
+  if (!heading) throw new DocParseError(`${where}: the markdown must start with an H1`);
+  const afterHeading = markdown.trimStart().slice(heading[0].length).trimStart();
+  const leadEnd = afterHeading.search(/\r?\n\s*\r?\n/);
+  const lead = (leadEnd === -1 ? afterHeading : afterHeading.slice(0, leadEnd)).replace(/\s*\r?\n\s*/g, " ").trim();
+  if (lead.startsWith("#") || lead.startsWith("```")) throw new DocParseError(`${where}: the H1 must be followed by a lead paragraph`);
+  const body = leadEnd === -1 ? "" : afterHeading.slice(leadEnd).trim();
+  return { title: heading[1].trim(), lead, body };
+}
+
 /** Parse one component doc. `where` names the file in error messages. */
 export function parseComponentDoc(source: string, where = "doc"): ComponentDoc {
   const { fields, rest } = parseFrontmatter(source, where);
@@ -47,20 +62,11 @@ export function parseComponentDoc(source: string, where = "doc"): ComponentDoc {
   if (!(DOC_GROUPS as readonly string[]).includes(fields.group)) {
     throw new DocParseError(`${where}: group "${fields.group}" is not one of ${DOC_GROUPS.join(", ")}`);
   }
-  const heading = /^# (.+)\r?\n/.exec(rest.trimStart());
-  if (!heading) throw new DocParseError(`${where}: the markdown must start with an H1`);
-  const afterHeading = rest.trimStart().slice(heading[0].length).trimStart();
-  const leadEnd = afterHeading.search(/\r?\n\s*\r?\n/);
-  const lead = (leadEnd === -1 ? afterHeading : afterHeading.slice(0, leadEnd)).replace(/\s*\r?\n\s*/g, " ").trim();
-  if (lead.startsWith("#") || lead.startsWith("```")) throw new DocParseError(`${where}: the H1 must be followed by a lead paragraph`);
-  const body = leadEnd === -1 ? "" : afterHeading.slice(leadEnd).trim();
   return {
     name: fields.name,
     group: fields.group as DocGroup,
     description: fields.description,
-    title: heading[1].trim(),
-    lead,
-    body,
+    ...parseDocPage(rest, where),
   };
 }
 

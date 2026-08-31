@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { docNameFromPath, DOC_GROUPS, parseComponentDoc, renderComponentIndex, spliceComponentIndex } from "../docs";
+import { docNameFromPath, DOC_GROUPS, parseComponentDoc, parseDocPage, renderComponentIndex, spliceComponentIndex } from "../docs";
 
 const skillDir = join(import.meta.dirname, "../../../../.agents/skills/jam-ui");
 const componentsDir = join(skillDir, "components");
 const files = readdirSync(componentsDir).filter((file) => file.endsWith(".md")).sort();
 const read = (file: string) => readFileSync(join(componentsDir, file), "utf8");
+
+/** Every relative `.md` link in a doc must point at a file in the skill (the catalog turns them into pages). */
+function expectLinksResolve(markdown: string, fromDir: string, where: string) {
+  for (const match of markdown.matchAll(/\]\(((?:\.\.?\/)[^)\s]+\.md)\)/g)) {
+    expect(existsSync(join(fromDir, match[1])), `${where} links to ${match[1]}`).toBe(true);
+  }
+}
 
 describe("component docs", () => {
   it("exist for the library", () => {
@@ -32,12 +39,22 @@ describe("component docs", () => {
       });
 
       it("only links to docs that exist", () => {
-        for (const match of doc.body.matchAll(/\]\(\.\/([A-Za-z]+)\.md\)/g)) {
-          expect(files, `${file} links to ${match[1]}.md`).toContain(`${match[1]}.md`);
-        }
+        expectLinksResolve(doc.body, componentsDir, file);
       });
     });
   }
+});
+
+describe("style-system.md", () => {
+  const source = readFileSync(join(skillDir, "style-system.md"), "utf8");
+  const guide = parseDocPage(source, "style-system.md");
+
+  it("opens with a title and lead and links only to docs that exist", () => {
+    expect(guide.title).toBe("@jam/ui style system");
+    expect(guide.lead.length).toBeGreaterThan(40);
+    expect(guide.body).toMatch(/^## Setup\n/m);
+    expectLinksResolve(guide.body, skillDir, "style-system.md");
+  });
 });
 
 describe("parseComponentDoc", () => {
