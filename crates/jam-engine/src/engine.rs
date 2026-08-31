@@ -2,11 +2,11 @@
 //! to the store, keeps owners and scopes consistent, propagates every change
 //! through the registered queries and reports what changed as packed events.
 
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 
 use crate::owner::Owners;
-use crate::query::{Clause, Queries, QueryId, adhoc, evaluate, row_order};
-use crate::store::{FactId, Mask, OwnerId, ROOT_OWNER, Store};
+use crate::query::{Clause, Queries, QueryId, Row, adhoc, evaluate, row_order};
+use crate::store::{FactId, Mask, OwnerId, ROOT_OWNER, Store, Terms, scan_mask};
 use crate::term::{EMPTY, Interner, NONE, TermId, VAR_BASE, WILD};
 use crate::wire::*;
 
@@ -159,7 +159,9 @@ impl Engine {
             return;
         }
         let replace_flag = if replace { FACT_REPLACE } else { 0 };
-        if let Some(fid) = self.store.find(terms) {
+        let scope = self.resolve_scope(terms, scope, inherited);
+        let (fid, inserted) = self.store.intern(terms, scope, owner);
+        if !inserted {
             let record = self.store.get_mut(fid);
             let had_root = record.owners.contains(&ROOT_OWNER);
             if !record.owners.contains(&owner) {
@@ -172,8 +174,6 @@ impl Engine {
             }
             return;
         }
-        let scope = self.resolve_scope(terms, scope, inherited);
-        let fid = self.store.insert(terms.into(), scope, owner);
         self.owners.attach(owner, fid);
         self.record_entity_scope(terms, scope);
         self.queries.propagate(&self.store, fid, terms, 1);
@@ -182,26 +182,34 @@ impl Engine {
     }
 
     fn remove_fact(&mut self, fid: FactId) {
-        let (terms, durable) = {
-            let record = self.store.get(fid);
-            (record.terms.clone(), record.owners.contains(&ROOT_OWNER))
-        };
-        self.queries.propagate(&self.store, fid, &terms, -1);
+        self.queries.propagate(&self.store, fid, &self.store.get(fid).terms, -1);
         let record = self.store.remove(fid);
         for &owner in &record.owners {
             self.owners.detach(owner, fid);
         }
-        self.forget_entity_scope(&terms, record.scope);
-        let flag = if durable { FACT_DURABLE } else { 0 };
-        self.emit_fact(flag, record.scope, &terms);
+        self.forget_entity_scope(&record.terms, record.scope);
+        let flag = if record.owners.contains(&ROOT_OWNER) { FACT_DURABLE } else { 0 };
+        self.emit_fact(flag, record.scope, &record.terms);
     }
 
-    /// Fact ids matching a pattern of literals and `WILD`s, via the index over the literal positions.
+    /// Fact ids matching a pattern of literals and `WILD`s, via the scan index over its literals.
     fn matching(&mut self, pattern: &[u32]) -> Vec<FactId> {
-        let mask = literal_mask(pattern);
-        let tuple: Vec<TermId> = pattern.iter().filter(|&&p| p != WILD && !is_var(p)).copied().collect();
+        let mask = scan_mask(pattern.len(), literal_mask(pattern));
+        let tuple: Vec<TermId> = pattern
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| mask & (1 << i) != 0)
+            .map(|(_, &p)| p)
+            .collect();
         self.store.ensure_index(pattern.len(), mask);
-        self.store.lookup(pattern.len(), mask, &tuple).collect()
+        let store = &self.store;
+        store
+            .lookup(pattern.len(), mask, &tuple)
+            .filter(|&fid| {
+                let terms = &store.get(fid).terms;
+                pattern.iter().enumerate().all(|(i, &p)| p == WILD || is_var(p) || terms[i] == p)
+            })
+            .collect()
     }
 
     pub fn drop(&mut self, pattern: &[u32]) {
@@ -260,8 +268,7 @@ impl Engine {
 
     pub fn clear(&mut self) {
         if self.fact_events == FACT_EVENTS_ALL {
-            let all: Vec<(TermId, Box<[TermId]>)> =
-                self.store.iter().map(|(_, r)| (r.scope, r.terms.clone())).collect();
+            let all: Vec<(TermId, Terms)> = self.store.iter().map(|(_, r)| (r.scope, r.terms.clone())).collect();
             for (scope, terms) in all {
                 self.emit_fact(0, scope, &terms);
             }
@@ -359,15 +366,12 @@ impl Engine {
 
     /// One-off evaluation: `nvars nrows (vals…)…`, each distinct binding tuple once, in result order.
     pub fn query(&mut self, clauses: Vec<Clause>) -> Vec<u32> {
-        let query = adhoc(&mut self.store, clauses);
-        let mut seen: HashSet<Box<[TermId]>> = HashSet::new();
-        let mut rows: Vec<(u64, Box<[TermId]>)> = Vec::new();
-        evaluate(&self.store, &query, &mut |row| {
-            if seen.insert(row.into()) {
-                rows.push((row_order(&self.store, &query.clauses, row), row.into()));
-            }
-        });
+        let mut query = adhoc(&mut self.store, clauses);
+        let mut rows: Vec<(u64, Row)> = Vec::new();
+        let (store, clauses) = (&self.store, query.clauses.clone());
+        evaluate(store, &mut query, &mut |row| rows.push((row_order(store, &clauses, row), row.into())));
         rows.sort_unstable();
+        rows.dedup();
         let mut out = vec![query.nvars as u32, rows.len() as u32];
         for (_, row) in &rows {
             out.extend_from_slice(row);

@@ -9,10 +9,12 @@
 //! including `f` — the standard decomposition of a multi-way join delta, so
 //! a fact matching several clauses is never counted twice.
 
-use hashbrown::HashMap;
+use std::hash::BuildHasher;
+
+use hashbrown::{DefaultHashBuilder, HashMap, HashTable};
 use smallvec::SmallVec;
 
-use crate::store::{FactId, Mask, Store};
+use crate::store::{FactId, Mask, Store, scan_mask};
 use crate::term::{NONE, TermId, VAR_BASE, WILD};
 
 pub type QueryId = u32;
@@ -21,6 +23,9 @@ pub type VarId = u32;
 
 /// One position of a clause: a literal term id, `VAR_BASE + var`, or `WILD`.
 pub type Clause = Vec<u32>;
+
+/// A result row: one term per variable, inline for the common arities.
+pub type Row = SmallVec<[TermId; 4]>;
 
 #[inline]
 fn is_var(t: u32) -> bool {
@@ -60,28 +65,35 @@ pub struct Query {
     /// Plan for evaluating from scratch: `full_seed` scanned by its literals, then the rest.
     full_seed: usize,
     full_plan: Plan,
+    scratch: Bindings,
     pub results: ResultSet,
     pub refcount: u32,
 }
 
 #[derive(Default)]
 pub struct ResultSet {
-    ids: HashMap<Box<[TermId]>, RowId>,
+    /// Row ids hashed by their rows, which live in `slots`.
+    ids: HashTable<RowId>,
+    hasher: DefaultHashBuilder,
     slots: Vec<Slot>,
     free: Vec<RowId>,
-    /// Row weight before this transaction touched it, for rows touched so far.
-    pending: HashMap<RowId, i32>,
+    /// Rows touched since the last drain, each once.
+    touched: Vec<RowId>,
 }
 
 struct Slot {
-    row: Box<[TermId]>,
+    row: Row,
     weight: i32,
+    /// Weight before this transaction, valid while `touched`.
+    before: i32,
+    touched: bool,
 }
 
 impl ResultSet {
     #[inline]
     fn apply(&mut self, row: &[TermId], delta: i32) {
-        let id = match self.ids.get(row) {
+        let hash = self.hasher.hash_one(row);
+        let id = match self.ids.find(hash, |&id| self.slots[id as usize].row[..] == *row) {
             Some(&id) => id,
             None => {
                 let id = match self.free.pop() {
@@ -90,48 +102,60 @@ impl ResultSet {
                         id
                     }
                     None => {
-                        self.slots.push(Slot { row: row.into(), weight: 0 });
+                        self.slots.push(Slot { row: row.into(), weight: 0, before: 0, touched: false });
                         (self.slots.len() - 1) as RowId
                     }
                 };
-                self.ids.insert(row.into(), id);
+                let (slots, hasher) = (&self.slots, &self.hasher);
+                self.ids.insert_unique(hash, id, |&id| hasher.hash_one(&slots[id as usize].row[..]));
                 id
             }
         };
         let slot = &mut self.slots[id as usize];
-        self.pending.entry(id).or_insert(slot.weight);
+        if !slot.touched {
+            slot.touched = true;
+            slot.before = slot.weight;
+            self.touched.push(id);
+        }
         slot.weight += delta;
     }
 
     pub fn is_dirty(&self) -> bool {
-        !self.pending.is_empty()
+        !self.touched.is_empty()
+    }
+
+    fn release(&mut self, id: RowId) {
+        let row = std::mem::take(&mut self.slots[id as usize].row);
+        let hash = self.hasher.hash_one(&row[..]);
+        if let Ok(entry) = self.ids.find_entry(hash, |&x| x == id) {
+            entry.remove();
+        }
+        self.free.push(id);
     }
 
     /// Accept the current weights as the baseline without reporting them.
     pub fn settle(&mut self) {
-        let touched: Vec<RowId> = self.pending.drain().map(|(id, _)| id).collect();
-        for id in touched {
+        for id in std::mem::take(&mut self.touched) {
+            self.slots[id as usize].touched = false;
             if self.slots[id as usize].weight == 0 {
-                let row = std::mem::take(&mut self.slots[id as usize].row);
-                self.ids.remove(&row);
-                self.free.push(id);
+                self.release(id);
             }
         }
     }
 
     /// Rows whose weight changed since the last drain, as (id, row, before, after); frees emptied slots.
     pub fn drain(&mut self, mut emit: impl FnMut(RowId, &[TermId], i32, i32)) {
-        let mut touched: Vec<(RowId, i32)> = self.pending.drain().collect();
+        let mut touched = std::mem::take(&mut self.touched);
         touched.sort_unstable();
-        for (id, before) in touched {
-            let after = self.slots[id as usize].weight;
+        for id in touched {
+            let slot = &mut self.slots[id as usize];
+            slot.touched = false;
+            let (before, after) = (slot.before, slot.weight);
             if before != after {
-                emit(id, &self.slots[id as usize].row, before, after);
+                emit(id, &slot.row, before, after);
             }
             if after == 0 {
-                let row = std::mem::take(&mut self.slots[id as usize].row);
-                self.ids.remove(&row);
-                self.free.push(id);
+                self.release(id);
             }
         }
     }
@@ -153,14 +177,38 @@ impl ResultSet {
     }
 }
 
+/// A clause a changed fact may match, with the literals to check before binding.
+struct Route {
+    query: QueryId,
+    clause: u8,
+    /// Literal positions of the clause, verified against the fact before the walk and skipped by it.
+    literal_mask: Mask,
+    /// Literals not covered by the route key.
+    literals: SmallVec<[(u8, TermId); 2]>,
+}
+
+/// The fact positions a family of clauses is keyed on: their tuple length and first two literal positions.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct Shape {
+    len: u8,
+    positions: SmallVec<[u8; 2]>,
+}
+
+#[derive(PartialEq, Eq, Hash)]
+struct RouteKey {
+    shape: Shape,
+    values: SmallVec<[TermId; 2]>,
+}
+
 /// Registered queries plus the routing table from fact shapes to the clauses they may match.
 #[derive(Default)]
 pub struct Queries {
     slots: Vec<Option<Query>>,
     free: Vec<QueryId>,
     by_pattern: HashMap<Vec<Clause>, QueryId>,
-    /// (length, literal first term or NONE) → clauses to test against a changed fact.
-    routes: HashMap<(u8, u32), Vec<(QueryId, u8)>>,
+    /// Shapes in use with how many clauses use each; a changed fact is keyed once per shape of its length.
+    shapes: Vec<(Shape, u32)>,
+    routes: HashMap<RouteKey, Vec<Route>>,
     /// Queries touched since the last `take_dirty`, without duplicates.
     dirty: Vec<QueryId>,
 }
@@ -237,19 +285,24 @@ pub fn row_order(store: &Store, clauses: &[Clause], row: &[TermId]) -> u64 {
     let Some(clause) = clauses.first() else {
         return 0;
     };
-    let mut tuple: SmallVec<[TermId; 4]> = SmallVec::new();
-    for &p in clause {
-        if p == WILD {
-            continue;
-        }
-        tuple.push(if is_var(p) { row[var_of(p) as usize] } else { p });
-    }
-    if tuple.len() == clause.len() {
+    let value = |p: u32| if is_var(p) { row[var_of(p) as usize] } else { p };
+    let full = bound_mask(clause);
+    if full.count_ones() as usize == clause.len() {
+        let tuple: SmallVec<[TermId; 4]> = clause.iter().map(|&p| value(p)).collect();
         return store.find(&tuple).map_or(u64::MAX, |fid| store.get(fid).seq);
     }
+    let mask = scan_mask(clause.len(), full);
+    let tuple: SmallVec<[TermId; 4]> = clause
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| mask & (1 << i) != 0)
+        .map(|(_, &p)| value(p))
+        .collect();
     store
-        .lookup(clause.len(), bound_mask(clause), &tuple)
-        .map(|fid| store.get(fid).seq)
+        .lookup(clause.len(), mask, &tuple)
+        .map(|fid| store.get(fid))
+        .filter(|record| clause.iter().enumerate().all(|(i, &p)| p == WILD || record.terms[i] == value(p)))
+        .map(|record| record.seq)
         .min()
         .unwrap_or(u64::MAX)
 }
@@ -319,6 +372,7 @@ impl Query {
             delta_plans,
             full_seed,
             full_plan,
+            scratch: Bindings::new(nvars),
             results: ResultSet::default(),
             refcount: 1,
         }
@@ -334,10 +388,10 @@ impl Query {
         };
         if let Some(first) = self.clauses.first() {
             let seed = &self.clauses[self.full_seed];
-            push(seed.len(), literal_mask(seed));
+            push(seed.len(), scan_mask(seed.len(), literal_mask(seed)));
             let order_mask = bound_mask(first);
             if order_mask.count_ones() as usize != first.len() {
-                push(first.len(), order_mask);
+                push(first.len(), scan_mask(first.len(), order_mask));
             }
         }
         for plan in self.delta_plans.iter().chain(std::iter::once(&self.full_plan)) {
@@ -354,7 +408,7 @@ impl Query {
 /// One traversal of a plan: the store to probe and the seed fact to skip where a step says so.
 struct Walk<'a> {
     store: &'a Store,
-    query: &'a Query,
+    clauses: &'a [Clause],
     plan: &'a Plan,
     exclude: FactId,
 }
@@ -367,7 +421,7 @@ impl Walk<'_> {
             return;
         }
         let step = &self.plan.steps[step_index];
-        let clause = &self.query.clauses[step.clause];
+        let clause = &self.clauses[step.clause];
         let tuple: SmallVec<[TermId; 4]> = step
             .key
             .iter()
@@ -398,22 +452,54 @@ impl Walk<'_> {
 }
 
 /// Evaluate `clauses` against the store from scratch, calling `emit` once per result row (with multiplicity).
-pub fn evaluate(store: &Store, query: &Query, emit: &mut dyn FnMut(&[TermId])) {
-    if query.clauses.is_empty() {
+pub fn evaluate(store: &Store, query: &mut Query, emit: &mut dyn FnMut(&[TermId])) {
+    evaluate_with(store, &query.clauses, query.full_seed, &query.full_plan, &mut query.scratch, emit);
+}
+
+fn evaluate_with(
+    store: &Store,
+    clauses: &[Clause],
+    full_seed: usize,
+    full_plan: &Plan,
+    bindings: &mut Bindings,
+    emit: &mut dyn FnMut(&[TermId]),
+) {
+    if clauses.is_empty() {
         return;
     }
-    let seed = &query.clauses[query.full_seed];
-    let mask = literal_mask(seed);
-    let tuple: SmallVec<[TermId; 4]> = seed.iter().filter(|&&p| !is_var(p) && p != WILD).copied().collect();
-    let mut bindings = Bindings::new(query.nvars);
-    let walk = Walk { store, query, plan: &query.full_plan, exclude: NONE };
+    let seed = &clauses[full_seed];
+    let mask = scan_mask(seed.len(), literal_mask(seed));
+    let tuple: SmallVec<[TermId; 4]> =
+        seed.iter().enumerate().filter(|&(i, _)| mask & (1 << i) != 0).map(|(_, &p)| p).collect();
+    let walk = Walk { store, clauses, plan: full_plan, exclude: NONE };
     for fid in store.lookup(seed.len(), mask, &tuple) {
         let terms = &store.get(fid).terms;
         if let Some(mark) = bindings.bind(seed, terms, mask) {
-            walk.extend(0, &mut bindings, emit);
+            walk.extend(0, bindings, emit);
             bindings.rollback(mark);
         }
     }
+}
+
+/// A clause's route: its key plus the literals the key leaves unchecked.
+fn route_of(clause: &[u32]) -> (RouteKey, SmallVec<[(u8, TermId); 2]>) {
+    let mut key = RouteKey {
+        shape: Shape { len: clause.len() as u8, positions: SmallVec::new() },
+        values: SmallVec::new(),
+    };
+    let mut rest = SmallVec::new();
+    for (pos, &p) in clause.iter().enumerate() {
+        if is_var(p) || p == WILD {
+            continue;
+        }
+        if key.values.len() < 2 {
+            key.shape.positions.push(pos as u8);
+            key.values.push(p);
+        } else {
+            rest.push((pos as u8, p));
+        }
+    }
+    (key, rest)
 }
 
 impl Queries {
@@ -447,9 +533,13 @@ impl Queries {
             }
         };
         for (ci, clause) in query.clauses.iter().enumerate() {
-            let first = clause.first().copied().unwrap_or(NONE);
-            let key = (clause.len() as u8, if is_var(first) || first == WILD { NONE } else { first });
-            self.routes.entry(key).or_default().push((id, ci as u8));
+            let (key, literals) = route_of(clause);
+            match self.shapes.iter_mut().find(|(shape, _)| *shape == key.shape) {
+                Some((_, count)) => *count += 1,
+                None => self.shapes.push((key.shape.clone(), 1)),
+            }
+            let route = Route { query: id, clause: ci as u8, literal_mask: literal_mask(clause), literals };
+            self.routes.entry(key).or_default().push(route);
         }
         self.by_pattern.insert(clauses, id);
         self.slots[id as usize] = Some(query);
@@ -459,14 +549,10 @@ impl Queries {
 
     /// Evaluate from scratch; the initial rows are not reported as a delta.
     fn reevaluate(&mut self, store: &Store, id: QueryId) {
-        let mut query = self.slots[id as usize].take().unwrap();
-        let mut rows: Vec<Box<[TermId]>> = Vec::new();
-        evaluate(store, &query, &mut |row| rows.push(row.into()));
-        for row in rows {
-            query.results.apply(&row, 1);
-        }
-        query.results.settle();
-        self.slots[id as usize] = Some(query);
+        let query = self.slots[id as usize].as_mut().unwrap();
+        let Query { clauses, full_seed, full_plan, scratch, results, .. } = query;
+        evaluate_with(store, clauses, *full_seed, full_plan, scratch, &mut |row| results.apply(row, 1));
+        results.settle();
     }
 
     /// Drop one reference; the query is removed when the last one goes.
@@ -481,12 +567,17 @@ impl Queries {
         let query = self.slots[id as usize].take().unwrap();
         self.by_pattern.remove(&query.clauses);
         for (ci, clause) in query.clauses.iter().enumerate() {
-            let first = clause.first().copied().unwrap_or(NONE);
-            let key = (clause.len() as u8, if is_var(first) || first == WILD { NONE } else { first });
+            let (key, _) = route_of(clause);
             if let Some(list) = self.routes.get_mut(&key) {
-                list.retain(|&(q, c)| !(q == id && c as usize == ci));
+                list.retain(|route| !(route.query == id && route.clause as usize == ci));
                 if list.is_empty() {
                     self.routes.remove(&key);
+                }
+            }
+            if let Some(i) = self.shapes.iter().position(|(shape, _)| *shape == key.shape) {
+                self.shapes[i].1 -= 1;
+                if self.shapes[i].1 == 0 {
+                    self.shapes.swap_remove(i);
                 }
             }
         }
@@ -497,33 +588,32 @@ impl Queries {
     /// Propagate a fact change. For additions the store must already contain
     /// the fact; for removals it must still contain it.
     pub fn propagate(&mut self, store: &Store, fid: FactId, terms: &[TermId], delta: i32) {
-        let len = terms.len() as u8;
-        let exact = self.routes.get(&(len, terms[0])).map(Vec::as_slice).unwrap_or(&[]);
-        let wild = self.routes.get(&(len, NONE)).map(Vec::as_slice).unwrap_or(&[]);
-        if exact.is_empty() && wild.is_empty() {
-            return;
-        }
-        let targets: SmallVec<[(QueryId, u8); 8]> = exact.iter().chain(wild.iter()).copied().collect();
-        let mut rows: Vec<Box<[TermId]>> = Vec::new();
-        for (qid, ci) in targets {
-            let query = self.slots[qid as usize].as_mut().unwrap();
-            let clause = &query.clauses[ci as usize];
-            let mut bindings = Bindings::new(query.nvars);
-            let Some(mark) = bindings.bind(clause, terms, 0) else {
+        let mut targets: SmallVec<[(QueryId, u8, Mask); 8]> = SmallVec::new();
+        for (shape, _) in &self.shapes {
+            if shape.len as usize != terms.len() {
+                continue;
+            }
+            let values = shape.positions.iter().map(|&pos| terms[pos as usize]).collect();
+            let Some(routes) = self.routes.get(&RouteKey { shape: shape.clone(), values }) else {
                 continue;
             };
-            rows.clear();
-            let walk = Walk { store, query, plan: &query.delta_plans[ci as usize], exclude: fid };
-            walk.extend(0, &mut bindings, &mut |row| rows.push(row.into()));
-            bindings.rollback(mark);
-            if rows.is_empty() {
+            for route in routes {
+                if route.literals.iter().all(|&(pos, t)| terms[pos as usize] == t) {
+                    targets.push((route.query, route.clause, route.literal_mask));
+                }
+            }
+        }
+        for (qid, ci, literal_mask) in targets {
+            let Query { clauses, delta_plans, scratch, results, .. } = self.slots[qid as usize].as_mut().unwrap();
+            let Some(mark) = scratch.bind(&clauses[ci as usize], terms, literal_mask) else {
                 continue;
-            }
-            if !query.results.is_dirty() {
+            };
+            let was_dirty = results.is_dirty();
+            let walk = Walk { store, clauses, plan: &delta_plans[ci as usize], exclude: fid };
+            walk.extend(0, scratch, &mut |row| results.apply(row, delta));
+            scratch.rollback(mark);
+            if !was_dirty && results.is_dirty() {
                 self.dirty.push(qid);
-            }
-            for row in &rows {
-                query.results.apply(row, delta);
             }
         }
     }
@@ -536,7 +626,7 @@ impl Queries {
     pub fn clear_results(&mut self) {
         for (i, query) in self.slots.iter_mut().enumerate() {
             let Some(query) = query else { continue };
-            let live: Vec<(Box<[TermId]>, i32)> = query.results.rows().map(|(_, row, w)| (row.into(), w)).collect();
+            let live: Vec<(Row, i32)> = query.results.rows().map(|(_, row, w)| (row.into(), w)).collect();
             if live.is_empty() {
                 continue;
             }
@@ -686,11 +776,11 @@ mod tests {
             "ordering a wildcard clause needs its bound positions"
         );
 
-        let empty = Query::new(vec![]);
+        let mut empty = Query::new(vec![]);
         assert_eq!((empty.nvars, empty.full_seed), (0, 0));
         assert!(empty.index_needs().is_empty());
         let mut rows = 0;
-        evaluate(&Store::new(), &empty, &mut |_| rows += 1);
+        evaluate(&Store::new(), &mut empty, &mut |_| rows += 1);
         assert_eq!(rows, 0);
         assert_eq!(row_order(&Store::new(), &[], &[]), 0);
     }
@@ -710,11 +800,15 @@ mod tests {
         assert!(queries.get(a).is_none());
         let c = queries.register(&mut store, vec![vec![10, v(0), v(1)]]);
         assert_eq!(c, a, "freed ids are reused");
-        assert!(queries.routes.contains_key(&(3, 10)));
-        assert!(!queries.routes.contains_key(&(2, 10)), "the released query's route is gone");
-        assert!(queries.routes.contains_key(&(2, NONE)));
+        assert!(queries.routes.contains_key(&route_of(&[10, v(0), v(1)]).0));
+        assert!(
+            !queries.routes.contains_key(&route_of(&[10, v(0)]).0),
+            "the released query's route is gone"
+        );
+        assert!(queries.routes.contains_key(&route_of(&[v(0), 11]).0));
+        assert_eq!(queries.shapes.len(), 2, "one shape per length and literal layout");
         assert!(queries.release(b) && queries.release(c));
-        assert!(queries.routes.is_empty());
+        assert!(queries.routes.is_empty() && queries.shapes.is_empty());
         assert!(queries.is_empty());
     }
 
@@ -722,14 +816,14 @@ mod tests {
     fn propagation_ignores_unrouted_facts_and_settles_registered_rows() {
         let mut store = Store::new();
         let mut queries = Queries::new();
-        let f = store.insert(vec![10, 1].into(), 2, ROOT_OWNER);
+        let f = store.insert(&[10, 1], 2, ROOT_OWNER);
         let q = queries.register(&mut store, vec![vec![10, v(0)]]);
         assert_eq!(queries.get(q).unwrap().results.len(), 1, "registration sees existing facts");
         assert!(queries.take_dirty().is_empty(), "without reporting them");
-        let g = store.insert(vec![11, 1].into(), 2, ROOT_OWNER);
+        let g = store.insert(&[11, 1], 2, ROOT_OWNER);
         queries.propagate(&store, g, &[11, 1], 1);
         assert!(queries.take_dirty().is_empty(), "no clause can match a fact starting with 11");
-        let h = store.insert(vec![10, 1, 2].into(), 2, ROOT_OWNER);
+        let h = store.insert(&[10, 1, 2], 2, ROOT_OWNER);
         queries.propagate(&store, h, &[10, 1, 2], 1);
         assert!(queries.take_dirty().is_empty(), "nor one of another length");
         queries.propagate(&store, f, &[10, 1], -1);

@@ -157,27 +157,43 @@ once in each direction; ids are the only thing that crosses the boundary.
 
 ### 4.2 Facts and indexes (`store.rs`)
 
-A fact is `terms: Box<[TermId]>`, `scope: TermId`, `owners: SmallVec<OwnerId>`
-in a slot table addressed by `FactId`, plus `by_key: HashMap<[TermId] → FactId>`
-for exact lookup. Indexes are keyed by `(tuple length, bitmask of positions)`
-and map the tuple of those positions to a bucket of fact ids; a bucket is a
-`SmallVec` until it reaches 16 entries and an `IndexSet` after, so both the
-"one value per (entity, attribute)" case and the "every element's tag" case
-are O(1) to update. The `(len, ∅)` index always exists and is the full scan
-for that length. Every other index is created the first time a plan needs it
-(§4.4) by one pass over the facts of that length, and maintained on every
-insert/remove afterwards. In practice a jam app settles on a few dozen
-indexes.
+A fact is `terms: SmallVec<[TermId; 4]>`, `scope: TermId`, `owners:
+SmallVec<OwnerId>`, `seq: u64` in a slot table addressed by `FactId`. The
+primary table groups facts by every term but their last — the shape a join
+probes by (`[issue $id title $t]` with `$id` bound) — as a `hashbrown::HashTable`
+of 12-byte entries `(31-bit prefix hash, first fact id, its last term)`. An
+exact lookup hashes the prefix, confirms a tag match against the first fact's
+terms and compares the last term inline; a prefix with several facts (multi-valued
+attributes, short facts like `[dom node]`) keeps the others in a side table
+`first fact id → Vec | IndexMap<last term → fact id>`, flagged by the entry's
+low bit. Because the prefix table doubles as the `(len, every position but the
+last)` index, most joins need no other index.
+
+Other indexes are keyed by `(tuple length, bitmask of positions)` and map the
+tuple of those positions to a bucket of fact ids. Buckets are keyless: an
+entry is `(hash, SmallVec<FactId>)` and the key is verified against the first
+fact's terms, which the walk is about to read anyway. Each fact record stores
+its position in every bucket it belongs to, so removal is an O(1)
+`swap_remove`; iteration is insertion order, except that removal moves the
+last id into the hole. Scans (`facts()`, one-off `query()`, a plan's seed and
+the first clause's ordering lookup) are indexed by only the first two literal
+positions of the pattern and filter the rest per fact, so the set of indexes
+stays small — every index costs each insert a hash table write, and at 1M
+facts an index whose key includes a high-cardinality position is a 1M-entry
+table. Walk steps with bound variables use the full mask. Indexes are created
+the first time a plan needs them (§4.4) by one pass over the facts of that
+length and maintained on every insert/remove afterwards; in practice a jam app
+settles on a handful.
 
 ### 4.3 Queries (`query.rs`)
 
 A query is `Vec<Clause>`, a clause is `Vec<u32>` of literal ids, variables
 and wildcards. Variables are numbered by first appearance across the clauses
 (the JS side owns the names). Results live in a `ResultSet`: `row → RowId`,
-`slots[RowId] = (row, weight)`, and a `pending: RowId → weight_before` map
-that records which rows this transaction touched. Row ids are stable while a
-row has non-zero weight and are recycled after it is drained, so the JS side
-can keep `Map<RowId, Bindings>` without hashing rows.
+`slots[RowId] = (row, weight, weight before this transaction, touched)` and a
+`touched: Vec<RowId>` list of the rows this transaction changed. Row ids are
+stable while a row has non-zero weight and are recycled after it is drained, so
+the JS side can keep `Map<RowId, Bindings>` without hashing rows.
 
 Result order is the order in which the facts matching the *first* clause were
 asserted: every fact carries a monotonically increasing `seq`, and a row's
@@ -194,8 +210,8 @@ Registering a query builds:
   the `(len, literal mask)` index; the remaining clauses are ordered greedily
   by how many of their positions are already bound (literals plus variables
   bound by earlier clauses), each becoming a step `(clause, mask, key
-  sources)`. A step whose mask covers every position is an exact `by_key`
-  probe.
+  sources)`. A step whose mask covers every position is an exact probe of the
+  primary table.
 - `delta_plans[i]`, one per clause, built the same way with clause `i` as the
   seed; steps for clauses `< i` are marked `exclude_seed`.
 
@@ -203,10 +219,15 @@ All `(len, mask)` pairs the plans probe are ensured as indexes.
 
 ### 4.4 Incremental maintenance
 
-For a fact `f` added to or removed from the store, `Queries::propagate` looks
-up the routing table `(len, first literal | NONE) → [(query, clause)]` and,
-for each clause `f` unifies with, runs that clause's delta plan with the
-partial bindings from `f`, emitting every complete row with weight ±1.
+For a fact `f` added to or removed from the store, `Queries::propagate` routes
+it to the clauses it may match. Clauses are keyed by their *shape* — tuple
+length plus the first two literal positions — and the literals at those
+positions: `[issue $id status open]` lives under shape `(4, {0, 2})` with key
+`(issue, status)` and keeps `open` as a residual literal to check. A changed
+fact is hashed once per registered shape of its length (typically one or two),
+so a fact no query cares about costs a lookup or two and nothing else. For
+each clause `f` unifies with, the delta plan runs with the partial bindings
+from `f`, emitting every complete row with weight ±1.
 
 Correctness of the multi-clause delta uses the n-ary form of DBSP's bilinear
 rule. New results after adding `f` are exactly the joins where some clause

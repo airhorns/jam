@@ -22,6 +22,7 @@ pnpm run bench     # Benchmarks (packages/core only)
 # Rust engine (crates/), from the repo root
 pnpm rust:check    # fmt --check, clippy (host + wasm32), cargo-deny, no ignored tests, cargo test — what CI runs
 pnpm rust:coverage # cargo-llvm-cov over the crates; CI fails under 95% line coverage
+pnpm rust:bench    # criterion suite over the engine at 10k/100k/1M facts, with CI's short sampling; see docs/rust-engine-benchmarks.md
 pnpm build:engine  # Rebuild packages/engine/pkg from crates/jam-engine-wasm; commit the result
 ```
 

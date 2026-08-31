@@ -75,6 +75,34 @@ jobs:
           corepack pnpm build:engine
           git diff --exit-code --stat -- packages/engine/pkg
 
+  engine-benchmarks:
+    name: Engine Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain pinned in crates/rust-toolchain.toml
+        working-directory: crates
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
+          key: bench
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack pnpm rust:bench
+      - name: Upload engine benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: jam-engine-benchmarks
+          path: crates/target/criterion/**/new/*.json
+          if-no-files-found: error
+
   core-benchmarks:
     name: Core Benchmarks
     runs-on: ubuntu-latest
