@@ -10,7 +10,7 @@
 // possibly empty) so a client knows exactly which seq it has caught up to.
 
 import { Engine, ROOT_OWNER, factKey, type Fact, type FactEvent } from "@jam/engine";
-import type { FactStorage, LogEntry, StoredFact } from "@jam/engine/storage";
+import type { FactStorage, NewLogEntry, StoredFact } from "@jam/engine/storage";
 import { compileFilter, parseChanges, parseFilter, type ClientMessage, type CompiledFilter, type ServerMessage, type SyncChange } from "./filter";
 
 export type { SyncChange, SyncOp, FactFilter, ClientMessage, ServerMessage } from "./filter";
@@ -31,7 +31,7 @@ export interface SyncServerOptions {
   storage: FactStorage;
   /** Whether a connection may write facts in `scope`; a batch touching a disallowed scope is rejected whole. Default: allow everything. */
   allow?: (scope: string, context: unknown) => boolean | Promise<boolean>;
-  /** Committed transactions kept for replay to reconnecting clients (default: 10000). */
+  /** Log entries kept for replay to reconnecting clients (default: 10000). */
   logRetention?: number;
 }
 
@@ -64,7 +64,8 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
   engine.applyPending();
   engine.flush();
 
-  let seq = Number((await storage.getMeta("seq")) ?? (await storage.logHead()));
+  // A transaction's seq is the seq storage assigned to its last log entry.
+  let seq = await storage.logHead();
   let oldestSeq = seq + 1;
   const first = await storage.readLog(0, 1);
   if (first.length > 0) oldestSeq = first[0].seq;
@@ -115,25 +116,28 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
     return effective;
   };
 
-  const persist = async (committedSeq: number, effective: SyncChange[]) => {
+  /** Write a transaction's changes and return its seq. */
+  const persist = async (effective: SyncChange[]): Promise<number> => {
     const upserts: StoredFact[] = [];
     const deletes: Fact[] = [];
-    const log: LogEntry[] = [];
+    const log: NewLogEntry[] = [];
     const final = new Map<string, SyncChange>();
     for (const change of effective) {
       final.set(factKey(change.terms), change);
-      log.push({ seq: committedSeq, op: change.op, terms: change.terms, scope: change.scope });
+      log.push({ op: change.op, terms: change.terms, scope: change.scope });
     }
     for (const change of final.values()) {
       if (change.op === "upsert") upserts.push({ terms: change.terms, scope: change.scope });
       else deletes.push(change.terms);
     }
-    await storage.write({ upserts, deletes, log, meta: { seq: String(committedSeq) } });
+    const seqs = await storage.write({ upserts, deletes, log });
+    const committedSeq = seqs[seqs.length - 1];
     if (committedSeq - oldestSeq >= logRetention) {
       const trimTo = committedSeq - logRetention;
       await storage.trimLog(trimTo);
       oldestSeq = trimTo + 1;
     }
+    return committedSeq;
   };
 
   const broadcast = (committedSeq: number, effective: SyncChange[]) => {
@@ -151,8 +155,7 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
     serialized(async () => {
       const effective = commit(changes);
       if (effective.length > 0) {
-        seq++;
-        await persist(seq, effective);
+        seq = await persist(effective);
         broadcast(seq, effective);
       }
       committed?.(seq);

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { memoryStorage } from "@jam/engine/storage";
-import { createSyncServer, parseChanges, parseFilter, type ServerMessage, type SyncSocket } from "../server";
+import { createSyncServer, parseChanges, parseFilter, sqliteStorage, type ServerMessage, type SyncSocket } from "../server";
 import { _ } from "../db";
 import { compileFilter } from "../filter";
 
@@ -68,14 +68,22 @@ describe("createSyncServer", () => {
     const server = await createSyncServer({ storage });
     expect(await server.apply([{ op: "upsert", terms: ["todo", 1, "title", "A"], scope: "" }])).toBe(1);
     expect(await server.apply([{ op: "upsert", terms: ["todo", 1, "title", "A"], scope: "" }])).toBe(1);
-    expect(await server.apply([{ op: "replace", terms: ["todo", 1, "title", "B"], scope: "" }])).toBe(2);
+    expect(await server.apply([{ op: "replace", terms: ["todo", 1, "title", "B"], scope: "" }])).toBe(3);
     expect(server.facts()).toEqual([{ terms: ["todo", 1, "title", "B"], scope: "" }]);
     expect(await storage.load()).toEqual([{ terms: ["todo", 1, "title", "B"], scope: "" }]);
     expect((await storage.readLog(0)).map((e) => [e.seq, e.op, e.terms[3]])).toEqual([
       [1, "upsert", "A"],
       [2, "delete", "A"],
-      [2, "upsert", "B"],
+      [3, "upsert", "B"],
     ]);
+  });
+
+  it("commits a replace on sqlite, where one transaction writes several log entries", async () => {
+    const server = await createSyncServer({ storage: sqliteStorage(":memory:") });
+    await server.apply([{ op: "upsert", terms: ["todo", 1, "title", "A"], scope: "" }]);
+    expect(await server.apply([{ op: "replace", terms: ["todo", 1, "title", "B"], scope: "" }])).toBe(3);
+    expect(server.facts()).toEqual([{ terms: ["todo", 1, "title", "B"], scope: "" }]);
+    await server.close();
   });
 
   it("restores facts and the seq from storage", async () => {
@@ -104,19 +112,19 @@ describe("createSyncServer", () => {
     ]);
     const socket = fakeSocket();
     server.handle(socket);
-    expect(socket.sent[0]).toEqual({ type: "hello", seq: 1 });
+    expect(socket.sent[0]).toEqual({ type: "hello", seq: 3 });
     socket.receive({ type: "subscribe", id: "s1", filter: { scope: "p1" } });
     await tick();
-    expect(socket.sent[1]).toEqual({ type: "snapshot", id: "s1", seq: 1, facts: [[["issue", 1, "title", "A"], "p1"]] });
+    expect(socket.sent[1]).toEqual({ type: "snapshot", id: "s1", seq: 3, facts: [[["issue", 1, "title", "A"], "p1"]] });
 
     await server.apply([
       { op: "upsert", terms: ["issue", 1, "done", true], scope: "p1" },
       { op: "upsert", terms: ["issue", 2, "done", true], scope: "p2" },
     ]);
-    expect(socket.sent[2]).toEqual({ type: "changes", seq: 2, changes: [{ op: "upsert", terms: ["issue", 1, "done", true], scope: "p1" }] });
+    expect(socket.sent[2]).toEqual({ type: "changes", seq: 5, changes: [{ op: "upsert", terms: ["issue", 1, "done", true], scope: "p1" }] });
 
     await server.apply([{ op: "upsert", terms: ["issue", 3, "title", "C"], scope: "p3" }]);
-    expect(socket.sent[3]).toEqual({ type: "changes", seq: 3, changes: [] });
+    expect(socket.sent[3]).toEqual({ type: "changes", seq: 6, changes: [] });
     socket.close();
     expect(server.connections).toBe(0);
   });

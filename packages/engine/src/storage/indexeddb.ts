@@ -1,7 +1,5 @@
 import { factKey, type Fact, type StoredFact } from "../index";
-import type { FactStorage, LogEntry, StorageWrite } from "./index";
-
-const VERSION = 1;
+import { FORMAT_VERSION, type FactStorage, type LogEntry, type StorageWrite } from "./index";
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -18,14 +16,16 @@ function complete(tx: IDBTransaction): Promise<void> {
   });
 }
 
+/** Open the database at the current format; data written under an older format is discarded. */
 function open(name: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(name, VERSION);
+    const req = indexedDB.open(name, FORMAT_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains("facts")) db.createObjectStore("facts", { keyPath: "key" });
-      if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta");
-      if (!db.objectStoreNames.contains("log")) db.createObjectStore("log", { keyPath: "seq" });
+      for (const store of Array.from(db.objectStoreNames)) db.deleteObjectStore(store);
+      db.createObjectStore("facts", { keyPath: "key" });
+      db.createObjectStore("meta");
+      db.createObjectStore("log", { keyPath: "seq", autoIncrement: true });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -61,12 +61,15 @@ export async function indexedDBStorage(name = "jam"): Promise<FactStorage> {
           facts.put({ key: factKey(fact.terms), terms: fact.terms, scope: fact.scope } satisfies FactRow);
         }
         const log = tx.objectStore("log");
-        for (const entry of changes.log ?? []) log.put(entry);
+        const seqs = (changes.log ?? []).map((entry) =>
+          request(log.put({ op: entry.op, terms: entry.terms, scope: entry.scope }) as IDBRequest<number>),
+        );
         const meta = tx.objectStore("meta");
         for (const [key, value] of Object.entries(changes.meta ?? {})) {
           if (value === undefined) meta.delete(key);
           else meta.put(value, key);
         }
+        return Promise.all(seqs);
       });
     },
     getMeta(key) {

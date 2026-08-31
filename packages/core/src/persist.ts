@@ -80,7 +80,9 @@ export async function persist(options: PersistOptions = {}): Promise<PersistHand
     }
     pending.clear();
     inflight = inflight
-      .then(() => storage.write({ upserts, deletes }))
+      .then(async () => {
+        await storage.write({ upserts, deletes });
+      })
       .catch((e) => console.error("[jam] persist flush failed", e));
     return inflight;
   };

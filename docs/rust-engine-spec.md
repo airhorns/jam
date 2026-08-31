@@ -331,9 +331,16 @@ pattern's literal mask when present.
   `QueryHandle { rows(): Bindings[]; changed: boolean; delta }` objects that
   apply drained deltas to `Map<RowId, {bindings, weight}>` and rebuild the
   array lazily.
-- `storage/`: `FactStorage` interface — `load()`, `write({upserts, deletes})`,
-  `kv get/set`, `close()` — with `memoryStorage()`, `indexedDBStorage(name)`
-  and `sqliteStorage(path)` (`node:sqlite`).
+- `storage/`: `FactStorage` interface — `load()`, `write({upserts, deletes,
+  log, meta})`, `getMeta`, `readLog/logHead/trimLog`, `close()` — with
+  `memoryStorage()`, `indexedDBStorage(name)` and `sqliteStorage(path)`
+  (`node:sqlite`). Storage assigns log seqs (IndexedDB `autoIncrement`, SQLite
+  `AUTOINCREMENT`) and `write` returns them, so a server transaction can log
+  several entries and several browser tabs can append to one outbox without
+  coordinating; a seq is never reused, even after the log is trimmed. The
+  layout is stamped with `FORMAT_VERSION` (the IndexedDB database version,
+  SQLite's `user_version`); a store written under another version is emptied
+  on open and sync re-snapshots — there are no migrations before 1.0.
 
 ## 6. `@jam/core` on the engine
 
@@ -378,8 +385,9 @@ Messages (JSON over WebSocket):
     → { type: "unsubscribe", id }
 
 Server: `applyChanges` runs the `allow(scope)` policy (403-equivalent reject),
-applies to the engine as root-owned facts, appends to the log with the next
-`seq`, persists facts + log in one storage write, then for each connection
+applies to the engine as root-owned facts, persists facts + log entries in one
+storage write and takes the seq of the transaction's last entry as its `seq`
+(a client at `since` replays exactly the entries of later transactions), then for each connection
 sends the subset of the transaction matching any of its filters. A
 subscription with `since` newer than the log's oldest retained seq gets the
 log replayed; otherwise a snapshot.

@@ -3,19 +3,31 @@
 import { DatabaseSync } from "node:sqlite";
 
 import { factKey, type Fact, type StoredFact } from "../index";
-import type { FactStorage, LogEntry, LogOp, StorageWrite } from "./index";
+import { FORMAT_VERSION, type FactStorage, type LogEntry, type LogOp, type StorageWrite } from "./index";
+
+const TABLES = ["facts", "meta", "log"];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS facts (key TEXT PRIMARY KEY, scope TEXT NOT NULL, terms TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS facts_scope ON facts (scope);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS log (seq INTEGER PRIMARY KEY, op TEXT NOT NULL, terms TEXT NOT NULL, scope TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS log (seq INTEGER PRIMARY KEY AUTOINCREMENT, op TEXT NOT NULL, terms TEXT NOT NULL, scope TEXT NOT NULL);
 `;
+
+/** Create the tables at the current format; a file written under an older format is emptied first. */
+function prepareSchema(db: DatabaseSync) {
+  const { user_version: version } = db.prepare("PRAGMA user_version").get() as { user_version: number };
+  if (version !== FORMAT_VERSION) {
+    for (const table of TABLES) db.exec(`DROP TABLE IF EXISTS ${table}`);
+    db.exec(`PRAGMA user_version = ${FORMAT_VERSION}`);
+  }
+  db.exec(SCHEMA);
+}
 
 export function sqliteStorage(path = ":memory:"): FactStorage {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL");
-  db.exec(SCHEMA);
+  prepareSchema(db);
   const selectFacts = db.prepare("SELECT terms, scope FROM facts");
   const upsert = db.prepare(
     "INSERT INTO facts (key, scope, terms) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET scope = excluded.scope",
@@ -24,22 +36,25 @@ export function sqliteStorage(path = ":memory:"): FactStorage {
   const getMeta = db.prepare("SELECT value FROM meta WHERE key = ?");
   const putMeta = db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value");
   const delMeta = db.prepare("DELETE FROM meta WHERE key = ?");
-  const appendLog = db.prepare("INSERT INTO log (seq, op, terms, scope) VALUES (?, ?, ?, ?)");
+  const appendLog = db.prepare("INSERT INTO log (op, terms, scope) VALUES (?, ?, ?) RETURNING seq");
   const readLog = db.prepare("SELECT seq, op, terms, scope FROM log WHERE seq > ? ORDER BY seq LIMIT ?");
   const head = db.prepare("SELECT COALESCE(MAX(seq), 0) AS head FROM log");
   const trim = db.prepare("DELETE FROM log WHERE seq <= ?");
 
-  const write = (changes: StorageWrite) => {
+  const write = (changes: StorageWrite): number[] => {
     db.exec("BEGIN");
     try {
       for (const terms of changes.deletes ?? []) remove.run(factKey(terms));
       for (const fact of changes.upserts ?? []) upsert.run(factKey(fact.terms), fact.scope, JSON.stringify(fact.terms));
-      for (const entry of changes.log ?? []) appendLog.run(entry.seq, entry.op, JSON.stringify(entry.terms), entry.scope);
+      const seqs = (changes.log ?? []).map(
+        (entry) => (appendLog.get(entry.op, JSON.stringify(entry.terms), entry.scope) as { seq: number }).seq,
+      );
       for (const [key, value] of Object.entries(changes.meta ?? {})) {
         if (value === undefined) delMeta.run(key);
         else putMeta.run(key, value);
       }
       db.exec("COMMIT");
+      return seqs;
     } catch (e) {
       db.exec("ROLLBACK");
       throw e;
@@ -53,7 +68,7 @@ export function sqliteStorage(path = ":memory:"): FactStorage {
       );
     },
     async write(changes) {
-      write(changes);
+      return write(changes);
     },
     async getMeta(key) {
       const row = getMeta.get(key) as { value: string } | undefined;

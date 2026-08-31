@@ -110,8 +110,8 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   // --- local state ---
   const mirror = new Map<string, StoredFact>();
   for (const fact of await storage.load()) mirror.set(factKey(fact.terms), fact);
+  // Entries carry `seq: 0` until the storage write that assigns their seq settles.
   const outbox: LogEntry[] = url ? await storage.readLog(0) : [];
-  let localSeq = await storage.logHead();
   const pendingKeys = new Map<string, number>();
   const holdKey = (key: string) => pendingKeys.set(key, (pendingKeys.get(key) ?? 0) + 1);
   const releaseKey = (key: string) => {
@@ -144,14 +144,15 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     pendingWrite = null;
     if (!batch) return;
     writing = writing
-      .then(() =>
-        storage.write({
+      .then(async () => {
+        const seqs = await storage.write({
           upserts: Array.from(batch.upserts.values()),
           deletes: Array.from(batch.deletes.values()),
           log: batch.log,
           meta: batch.meta,
-        }),
-      )
+        });
+        batch.log.forEach((entry, i) => (entry.seq = seqs[i]));
+      })
       .catch((e) => console.error("[jam] sync storage write failed", e));
   };
   const settled = async () => {
@@ -303,6 +304,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     outbox.splice(0, entries.length);
     for (const entry of entries) releaseKey(factKey(entry.terms));
     const last = entries[entries.length - 1];
+    flushWrites();
     writing = writing.then(() => storage.trimLog(last.seq)).catch((e) => console.error("[jam] sync outbox trim failed", e));
     updatePending();
     if (outbox.length === 0) {
@@ -414,7 +416,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     else forget(fact);
     if (!url) return;
     const entry: LogEntry = {
-      seq: ++localSeq,
+      seq: 0,
       op: type === "delete" ? "delete" : info.replace ? "replace" : "upsert",
       terms: fact,
       scope: info.scope,
