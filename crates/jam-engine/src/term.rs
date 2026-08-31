@@ -65,7 +65,11 @@ impl Interner {
     }
 
     pub fn intern_bool(&self, b: bool) -> TermId {
-        if b { TRUE } else { FALSE }
+        if b {
+            TRUE
+        } else {
+            FALSE
+        }
     }
 
     pub fn intern(&mut self, term: &Term) -> TermId {

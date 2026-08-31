@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::engine::Engine;
 use crate::query::{Clause, QueryId};
 use crate::store::{OwnerId, ROOT_OWNER};
-use crate::term::{TermId, EMPTY, NONE, VAR_BASE, WILD};
+use crate::term::{Term, TermId, EMPTY, NONE, VAR_BASE, WILD};
 use crate::wire::*;
 
 /// Terms written as strings: `$x` is a variable, `_` a wildcard, anything else a literal.
@@ -16,7 +16,10 @@ impl Harness {
     fn new() -> Self {
         let mut e = Engine::new();
         e.set_fact_events(FACT_EVENTS_ALL);
-        Harness { e, vars: Vec::new() }
+        Harness {
+            e,
+            vars: Vec::new(),
+        }
     }
 
     fn lit(&mut self, s: &str) -> TermId {
@@ -97,16 +100,56 @@ impl Harness {
         let mut i = 2;
         for _ in 0..n {
             out.insert(packed[i + 1..i + 1 + nvars].to_vec());
-            i += 1 + nvars;
+            i += 3 + nvars;
         }
         assert_eq!(out.len(), n, "duplicate rows reported");
         out
     }
 
+    /// Rows of a registered query in result order.
+    fn ordered(&self, qid: QueryId) -> Vec<Vec<String>> {
+        let packed = self.e.rows(qid);
+        let nvars = packed[0] as usize;
+        let n = packed[1] as usize;
+        let mut rows: Vec<(u64, Vec<TermId>)> = Vec::new();
+        let mut i = 2;
+        for _ in 0..n {
+            let row = packed[i + 1..i + 1 + nvars].to_vec();
+            let order = (u64::from(packed[i + 1 + nvars]) << 32) | u64::from(packed[i + 2 + nvars]);
+            rows.push((order, row));
+            i += 3 + nvars;
+        }
+        rows.sort();
+        rows.into_iter()
+            .map(|(_, row)| self.resolve(&row))
+            .collect()
+    }
+
+    fn resolve(&self, row: &[TermId]) -> Vec<String> {
+        row.iter()
+            .map(|&t| match self.e.interner.resolve(t) {
+                Term::Str(s) => s.to_string(),
+                other => other.to_string(),
+            })
+            .collect()
+    }
+
+    /// One-off evaluation in result order.
+    fn fresh_ordered(&mut self, clauses: &[&[&str]]) -> Vec<Vec<String>> {
+        self.vars.clear();
+        let clauses: Vec<Clause> = clauses.iter().map(|c| self.pattern(c)).collect();
+        let packed = self.e.query(clauses);
+        let nvars = packed[0] as usize;
+        let n = packed[1] as usize;
+        (0..n)
+            .map(|r| self.resolve(&packed[2 + r * nvars..2 + (r + 1) * nvars]))
+            .collect()
+    }
+
     fn rows_str(&self, qid: QueryId) -> BTreeSet<Vec<String>> {
         self.rows(qid)
             .into_iter()
-            .map(|row| row.iter().map(|&t| self.e.interner.resolve(t).to_string()).collect())
+            .map(|row| self.resolve(&row))
             .collect()
     }
 
@@ -126,8 +169,16 @@ impl Harness {
 
 #[derive(Debug, PartialEq)]
 enum Event {
-    Fact { flags: u32, scope: TermId, terms: Vec<TermId> },
-    Query { qid: QueryId, added: Vec<(u32, Vec<TermId>)>, removed: Vec<u32> },
+    Fact {
+        flags: u32,
+        scope: TermId,
+        terms: Vec<TermId>,
+    },
+    Query {
+        qid: QueryId,
+        added: Vec<(u32, Vec<TermId>)>,
+        removed: Vec<u32>,
+    },
 }
 
 fn decode(events: &[u32]) -> Vec<Event> {
@@ -140,7 +191,11 @@ fn decode(events: &[u32]) -> Vec<Event> {
                 let scope = events[i + 2];
                 let len = events[i + 3] as usize;
                 let terms = events[i + 4..i + 4 + len].to_vec();
-                out.push(Event::Fact { flags, scope, terms });
+                out.push(Event::Fact {
+                    flags,
+                    scope,
+                    terms,
+                });
                 i += 4 + len;
             }
             EV_QUERY => {
@@ -154,13 +209,17 @@ fn decode(events: &[u32]) -> Vec<Event> {
                     let rid = events[i];
                     if events[i + 1] == 1 {
                         added.push((rid, events[i + 2..i + 2 + nvars].to_vec()));
-                        i += 2 + nvars;
+                        i += 4 + nvars;
                     } else {
                         removed.push(rid);
                         i += 2;
                     }
                 }
-                out.push(Event::Query { qid, added, removed });
+                out.push(Event::Query {
+                    qid,
+                    added,
+                    removed,
+                });
             }
             other => panic!("bad event code {other} at {i}"),
         }
@@ -181,7 +240,10 @@ fn single_clause_tracks_facts() {
     h.assert(ROOT_OWNER, &["todo", "2", "title", "eggs"]);
     h.assert(ROOT_OWNER, &["todo", "1", "done", "true"]);
     let events = decode(&h.e.drain());
-    let queries: Vec<_> = events.iter().filter(|e| matches!(e, Event::Query { .. })).collect();
+    let queries: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::Query { .. }))
+        .collect();
     assert_eq!(queries.len(), 1);
     match queries[0] {
         Event::Query { added, removed, .. } => {
@@ -192,7 +254,7 @@ fn single_clause_tracks_facts() {
     }
     assert_eq!(
         h.rows_str(q),
-        BTreeSet::from([strs(&["\"1\"", "\"milk\""]), strs(&["\"2\"", "\"eggs\""])])
+        BTreeSet::from([strs(&["1", "milk"]), strs(&["2", "eggs"])])
     );
     h.drop(&["todo", "1", "_", "_"]);
     let events = decode(&h.e.drain());
@@ -204,25 +266,42 @@ fn single_clause_tracks_facts() {
         })
         .collect();
     assert_eq!(removed, vec![1]);
-    assert_eq!(h.rows_str(q), BTreeSet::from([strs(&["\"2\"", "\"eggs\""])]));
+    assert_eq!(h.rows_str(q), BTreeSet::from([strs(&["2", "eggs"])]));
 }
 
 #[test]
 fn joins_update_incrementally() {
     let mut h = Harness::new();
-    let q = h.register(&[&["issue", "$id", "project", "$p"], &["issue", "$id", "title", "$t"], &["project", "$p", "name", "$n"]]);
+    let q = h.register(&[
+        &["issue", "$id", "project", "$p"],
+        &["issue", "$id", "title", "$t"],
+        &["project", "$p", "name", "$n"],
+    ]);
     h.assert(ROOT_OWNER, &["issue", "i1", "title", "Bug"]);
     h.assert(ROOT_OWNER, &["project", "p1", "name", "Core"]);
     assert!(h.rows(q).is_empty());
     h.assert(ROOT_OWNER, &["issue", "i1", "project", "p1"]);
-    assert_eq!(h.rows_str(q), BTreeSet::from([strs(&["\"i1\"", "\"p1\"", "\"Bug\"", "\"Core\""])]));
+    assert_eq!(
+        h.rows_str(q),
+        BTreeSet::from([strs(&["i1", "p1", "Bug", "Core"])])
+    );
     h.replace(&["issue", "i1", "title", "Feature"]);
-    assert_eq!(h.rows_str(q), BTreeSet::from([strs(&["\"i1\"", "\"p1\"", "\"Feature\"", "\"Core\""])]));
+    assert_eq!(
+        h.rows_str(q),
+        BTreeSet::from([strs(&["i1", "p1", "Feature", "Core"])])
+    );
     h.drop(&["project", "p1", "name", "Core"]);
     assert!(h.rows(q).is_empty());
     h.assert(ROOT_OWNER, &["project", "p1", "name", "Core"]);
     assert_eq!(h.rows(q).len(), 1);
-    assert_eq!(h.rows(q), h.fresh(&[&["issue", "$id", "project", "$p"], &["issue", "$id", "title", "$t"], &["project", "$p", "name", "$n"]]));
+    assert_eq!(
+        h.rows(q),
+        h.fresh(&[
+            &["issue", "$id", "project", "$p"],
+            &["issue", "$id", "title", "$t"],
+            &["project", "$p", "name", "$n"]
+        ])
+    );
 }
 
 #[test]
@@ -230,7 +309,7 @@ fn fact_matching_two_clauses_counts_once() {
     let mut h = Harness::new();
     let q = h.register(&[&["$a", "knows", "$b"], &["$b", "knows", "$c"]]);
     h.assert(ROOT_OWNER, &["x", "knows", "x"]);
-    assert_eq!(h.rows_str(q), BTreeSet::from([strs(&["\"x\"", "\"x\"", "\"x\""])]));
+    assert_eq!(h.rows_str(q), BTreeSet::from([strs(&["x", "x", "x"])]));
     h.assert(ROOT_OWNER, &["x", "knows", "y"]);
     h.assert(ROOT_OWNER, &["y", "knows", "x"]);
     let expected = h.fresh(&[&["$a", "knows", "$b"], &["$b", "knows", "$c"]]);
@@ -272,7 +351,11 @@ fn ownership_cascades_and_shares() {
     assert_eq!(removed, vec![0, 0], "owner revocations are never durable");
     assert!(!h.e.owner_exists(a) && !h.e.owner_exists(b));
     h.assert(a, &["dom", "9", "tag", "x"]);
-    assert_eq!(h.rows(q).len(), 1, "claims under a revoked owner are ignored");
+    assert_eq!(
+        h.rows(q).len(),
+        1,
+        "claims under a revoked owner are ignored"
+    );
 }
 
 #[test]
@@ -328,7 +411,11 @@ fn scopes_are_explicit_inherited_or_by_entity() {
     h.drop(&["issue", "i1", "_", "_"]);
     h.assert(ROOT_OWNER, &["issue", "i1", "title", "c"]);
     let i1c = h.terms(&["issue", "i1", "title", "c"]);
-    assert_eq!(h.e.scope_of(&i1c), Some(EMPTY), "entity scope is forgotten with its last fact");
+    assert_eq!(
+        h.e.scope_of(&i1c),
+        Some(EMPTY),
+        "entity scope is forgotten with its last fact"
+    );
     let scope = h.lit("project:p2");
     let mut ops = vec![OP_SET_SCOPE, scope, i1c.len() as u32];
     ops.extend(i1c.iter());
@@ -337,7 +424,9 @@ fn scopes_are_explicit_inherited_or_by_entity() {
     h.assert(ROOT_OWNER, &["issue", "i1", "status", "open"]);
     assert_eq!(h.e.scope_of(&i1s), Some(scope));
     let events = decode(&h.e.drain());
-    assert!(events.iter().any(|e| matches!(e, Event::Fact { scope: s, .. } if *s == scope)));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, Event::Fact { scope: s, .. } if *s == scope)));
 }
 
 #[test]
@@ -403,7 +492,9 @@ fn release_refcounts_shared_queries() {
     assert!(h.e.release(a));
     assert_eq!(h.e.query_count(), 0);
     h.assert(ROOT_OWNER, &["a", "1"]);
-    assert!(decode(&h.e.drain()).iter().all(|e| matches!(e, Event::Fact { .. })));
+    assert!(decode(&h.e.drain())
+        .iter()
+        .all(|e| matches!(e, Event::Fact { .. })));
 }
 
 /// A deterministic xorshift so the randomised check needs no dependency.
@@ -427,13 +518,24 @@ impl Rng {
 /// Mirror what the JS side would hold: rows per query, driven only by drained deltas.
 fn apply_events(mirror: &mut BTreeMap<QueryId, BTreeMap<u32, Vec<TermId>>>, events: &[u32]) {
     for event in decode(events) {
-        if let Event::Query { qid, added, removed } = event {
+        if let Event::Query {
+            qid,
+            added,
+            removed,
+        } = event
+        {
             let rows = mirror.entry(qid).or_default();
             for rid in removed {
-                assert!(rows.remove(&rid).is_some(), "removed unknown row {rid} from {qid}");
+                assert!(
+                    rows.remove(&rid).is_some(),
+                    "removed unknown row {rid} from {qid}"
+                );
             }
             for (rid, row) in added {
-                assert!(rows.insert(rid, row).is_none(), "added duplicate row {rid} to {qid}");
+                assert!(
+                    rows.insert(rid, row).is_none(),
+                    "added duplicate row {rid} to {qid}"
+                );
             }
         }
     }
@@ -448,12 +550,19 @@ fn incremental_matches_from_scratch_under_random_ops() {
     let specs: Vec<Vec<Vec<&str>>> = vec![
         vec![vec!["$e", "kind", "$k"]],
         vec![vec!["$e", "parent", "$p"], vec!["$p", "kind", "$k"]],
-        vec![vec!["$e", "parent", "$p"], vec!["$p", "parent", "$g"], vec!["$g", "label", "$l"]],
+        vec![
+            vec!["$e", "parent", "$p"],
+            vec!["$p", "parent", "$g"],
+            vec!["$g", "label", "$l"],
+        ],
         vec![vec!["$e", "kind", "a"], vec!["$e", "label", "$l"]],
         vec![vec!["$a", "parent", "$b"], vec!["$b", "parent", "$a"]],
         vec![vec!["$e", "_", "$v"], vec!["$v", "kind", "$k"]],
     ];
-    let spec_refs: Vec<Vec<&[&str]>> = specs.iter().map(|q| q.iter().map(|c| c.as_slice()).collect()).collect();
+    let spec_refs: Vec<Vec<&[&str]>> = specs
+        .iter()
+        .map(|q| q.iter().map(|c| c.as_slice()).collect())
+        .collect();
     let qids: Vec<QueryId> = spec_refs.iter().map(|q| h.register(q)).collect();
     let mut mirror: BTreeMap<QueryId, BTreeMap<u32, Vec<TermId>>> = BTreeMap::new();
     for &q in &qids {
@@ -463,7 +572,7 @@ fn incremental_matches_from_scratch_under_random_ops() {
         let rows = mirror.entry(q).or_default();
         for _ in 0..packed[1] {
             rows.insert(packed[i], packed[i + 1..i + 1 + nvars].to_vec());
-            i += 1 + nvars;
+            i += 3 + nvars;
         }
     }
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
@@ -496,7 +605,11 @@ fn incremental_matches_from_scratch_under_random_ops() {
                 let owner = owners[rng.below(owners.len())];
                 let mut ops = Vec::new();
                 for _ in 0..3 {
-                    let t = h.terms(&[entities[rng.below(4)], attrs[rng.below(3)], values[rng.below(6)]]);
+                    let t = h.terms(&[
+                        entities[rng.below(4)],
+                        attrs[rng.below(3)],
+                        values[rng.below(6)],
+                    ]);
                     ops.extend([OP_ASSERT, owner, NONE, 3]);
                     ops.extend(t);
                 }
@@ -508,10 +621,80 @@ fn incremental_matches_from_scratch_under_random_ops() {
         for (spec, &q) in spec_refs.iter().zip(&qids) {
             let expected = h.fresh(spec);
             let incremental = h.rows(q);
-            assert_eq!(incremental, expected, "step {step}: query {spec:?} diverged");
+            assert_eq!(
+                incremental, expected,
+                "step {step}: query {spec:?} diverged"
+            );
             let mirrored: BTreeSet<Vec<TermId>> = mirror[&q].values().cloned().collect();
-            assert_eq!(mirrored, expected, "step {step}: mirror of {spec:?} diverged");
+            assert_eq!(
+                mirrored, expected,
+                "step {step}: mirror of {spec:?} diverged"
+            );
         }
     }
     assert!(h.e.index_count() > 3);
+}
+
+#[test]
+fn rows_follow_the_first_clauses_assertion_order() {
+    let mut h = Harness::new();
+    let q = h.register(&[
+        &["todo", "$id", "title", "$t"],
+        &["todo", "$id", "done", "$d"],
+    ]);
+    for id in ["b", "a", "c"] {
+        h.assert(ROOT_OWNER, &["todo", id, "title", &format!("{id} title")]);
+        h.assert(ROOT_OWNER, &["todo", id, "done", "no"]);
+    }
+    h.e.drain();
+    let ids = |rows: Vec<Vec<String>>| rows.into_iter().map(|r| r[0].clone()).collect::<Vec<_>>();
+    assert_eq!(ids(h.ordered(q)), strs(&["b", "a", "c"]));
+
+    // Replacing a joined attribute keeps the entity where it was.
+    h.replace(&["todo", "a", "done", "yes"]);
+    h.e.drain();
+    assert_eq!(ids(h.ordered(q)), strs(&["b", "a", "c"]));
+    assert_eq!(
+        ids(h.fresh_ordered(&[
+            &["todo", "$id", "title", "$t"],
+            &["todo", "$id", "done", "$d"]
+        ])),
+        strs(&["b", "a", "c"])
+    );
+
+    // Replacing the first clause's attribute is a new fact, so the entity moves to the end.
+    h.replace(&["todo", "b", "title", "renamed"]);
+    h.e.drain();
+    assert_eq!(ids(h.ordered(q)), strs(&["a", "c", "b"]));
+
+    // A single-clause query is plain assertion order, so the latest value of a
+    // multi-valued attribute comes last.
+    let w = h.register(&[&["session", "s", "workspace", "$w"]]);
+    h.assert(ROOT_OWNER, &["session", "s", "workspace", "ws-2"]);
+    h.assert(ROOT_OWNER, &["session", "s", "workspace", "ws-1"]);
+    h.e.drain();
+    assert_eq!(h.ordered(w), vec![strs(&["ws-2"]), strs(&["ws-1"])]);
+    assert_eq!(
+        h.fresh_ordered(&[&["session", "s", "workspace", "$w"]]),
+        vec![strs(&["ws-2"]), strs(&["ws-1"])]
+    );
+}
+
+#[test]
+fn wildcards_in_the_first_clause_order_by_the_earliest_match() {
+    let mut h = Harness::new();
+    h.assert(ROOT_OWNER, &["e2", "label", "x"]);
+    h.assert(ROOT_OWNER, &["e1", "label", "y"]);
+    h.assert(ROOT_OWNER, &["e1", "kind", "k"]);
+    h.assert(ROOT_OWNER, &["e2", "kind", "k"]);
+    let q = h.register(&[&["$e", "_", "_"], &["$e", "kind", "$k"]]);
+    let ids = |rows: Vec<Vec<String>>| rows.into_iter().map(|r| r[0].clone()).collect::<Vec<_>>();
+    assert_eq!(ids(h.ordered(q)), strs(&["e2", "e1"]));
+    h.drop(&["e2", "label", "x"]);
+    h.e.drain();
+    assert_eq!(ids(h.ordered(q)), strs(&["e1", "e2"]));
+    assert_eq!(
+        ids(h.fresh_ordered(&[&["$e", "_", "_"], &["$e", "kind", "$k"]])),
+        strs(&["e1", "e2"])
+    );
 }

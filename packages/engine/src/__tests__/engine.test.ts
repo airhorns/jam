@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { Engine, FACT_EVENTS_ALL, NONE, ROOT_OWNER, VAR_BASE, WILD, _, type FactEvent } from "../index";
+import { Engine, FACT_EVENTS_ALL, NONE, ROOT_OWNER, VAR_BASE, WILD, _, compareRows, rowOrder, type FactEvent, type QueryHandle } from "../index";
 
 const v = (i: number) => VAR_BASE + i;
+
+const decodeRows = (e: Engine, q: QueryHandle) =>
+  Array.from(q.rows.values())
+    .sort(compareRows(q.nvars))
+    .map((row) => e.decodeTerms(row, 0, q.nvars));
 
 describe("Engine", () => {
   it("interns terms by value and type", () => {
@@ -32,17 +37,49 @@ describe("Engine", () => {
     const changed = e.flush();
     expect(changed).toEqual([q]);
     expect(q.version).toBe(1);
-    const rows = Array.from(q.rows.values(), (ids) => e.decodeTerms(ids));
-    expect(rows).toEqual([["i1", "p1", "Bug"]]);
+    expect(decodeRows(e, q)).toEqual([["i1", "p1", "Bug"]]);
     e.replace(ROOT_OWNER, NONE, ["issue", "i1", "title", "Feature"]);
     e.flush();
-    expect(Array.from(q.rows.values(), (ids) => e.decodeTerms(ids))).toEqual([["i1", "p1", "Feature"]]);
+    expect(decodeRows(e, q)).toEqual([["i1", "p1", "Feature"]]);
     e.drop(["issue", "i1", _, _]);
     expect(e.flush()).toEqual([q]);
     expect(q.rows.size).toBe(0);
     q.release();
     expect(q.released).toBe(true);
     expect(e.queryCount).toBe(0);
+  });
+
+  it("orders rows by the first clause's assertion order", () => {
+    const e = new Engine();
+    const todo = e.id("todo");
+    const q = e.register([
+      [todo, v(0), e.id("title"), v(1)],
+      [todo, v(0), e.id("done"), v(2)],
+    ]);
+    for (const id of ["b", "a", "c"]) {
+      e.assert(ROOT_OWNER, NONE, ["todo", id, "title", `${id} title`]);
+      e.assert(ROOT_OWNER, NONE, ["todo", id, "done", false]);
+    }
+    e.flush();
+    const ids = () => decodeRows(e, q).map((row) => row[0]);
+    expect(ids()).toEqual(["b", "a", "c"]);
+    const orders = Array.from(q.rows.values(), (row) => rowOrder(row, q.nvars));
+    expect(orders).toEqual([...orders].sort((x, y) => x - y));
+
+    e.replace(ROOT_OWNER, NONE, ["todo", "a", "done", true]);
+    e.flush();
+    expect(ids()).toEqual(["b", "a", "c"]);
+
+    e.replace(ROOT_OWNER, NONE, ["todo", "b", "title", "renamed"]);
+    e.flush();
+    expect(ids()).toEqual(["a", "c", "b"]);
+
+    const fresh = e.query([
+      [todo, v(0), e.id("title"), v(1)],
+      [todo, v(0), e.id("done"), v(2)],
+    ]);
+    const freshIds = Array.from({ length: fresh.count }, (_, r) => e.term(fresh.data[r * fresh.nvars]));
+    expect(freshIds).toEqual(["a", "c", "b"]);
   });
 
   it("shares handles for identical clauses", () => {

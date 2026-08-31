@@ -27,8 +27,18 @@ impl Default for Owners {
 impl Owners {
     pub fn new() -> Self {
         let mut records = HashMap::new();
-        records.insert(ROOT_OWNER, OwnerRecord { parent: ROOT_OWNER, children: Vec::new(), facts: IndexSet::new() });
-        Owners { records, next: ROOT_OWNER + 1 }
+        records.insert(
+            ROOT_OWNER,
+            OwnerRecord {
+                parent: ROOT_OWNER,
+                children: Vec::new(),
+                facts: IndexSet::new(),
+            },
+        );
+        Owners {
+            records,
+            next: ROOT_OWNER + 1,
+        }
     }
 
     /// Ids are never reused, so a stale id from a revoked owner can't alias a live one.
@@ -37,7 +47,14 @@ impl Owners {
         let id = self.next;
         self.next += 1;
         parent_record.children.push(id);
-        self.records.insert(id, OwnerRecord { parent, children: Vec::new(), facts: IndexSet::new() });
+        self.records.insert(
+            id,
+            OwnerRecord {
+                parent,
+                children: Vec::new(),
+                facts: IndexSet::new(),
+            },
+        );
         Some(id)
     }
 

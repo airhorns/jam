@@ -3,7 +3,7 @@
 // terms, names owners, keeps the side-channel refs, and wires query handles
 // into the reactive scheduler.
 
-import { Engine, NONE, ROOT_OWNER, VAR_BASE, WILD, _, factKey, type Clause, type QueryHandle } from "@jam/engine";
+import { Engine, NONE, ROOT_OWNER, VAR_BASE, WILD, _, compareRows, factKey, type Clause, type QueryHandle } from "@jam/engine";
 import { isTracking, markDirty, onWrite, recordRead, registerDrainer, type Dependency, type Effect } from "./reactive";
 
 export type Term = string | number | boolean;
@@ -122,13 +122,6 @@ class Index implements Dependency, IndexHandle {
     this.version = -1;
     this.cached = [];
   }
-}
-
-function compareRows(a: Uint32Array, b: Uint32Array): number {
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return a[i] - b[i];
-  }
-  return 0;
 }
 
 // --- FactDB ---
@@ -390,28 +383,29 @@ export class FactDB {
     return { clauses, names };
   }
 
-  /** @internal one-off evaluation */
+  /** @internal one-off evaluation; the engine returns rows already in result order */
   evaluate(compiled: CompiledPatterns): Bindings[] {
     const { nvars, data, count } = this.engine.query(compiled.clauses);
-    const rows = new Array<Uint32Array>(count);
-    for (let r = 0; r < count; r++) rows[r] = data.subarray(r * nvars, (r + 1) * nvars);
-    return this.decodeRows(rows, compiled.names);
+    const out = new Array<Bindings>(count);
+    for (let r = 0; r < count; r++) out[r] = this.bindingsOf(data, r * nvars, compiled.names);
+    return out;
   }
 
   /**
-   * @internal Rows ordered by the first-seen order of their bound values, first variable most
-   * significant, so a list keyed by entity id keeps creation order when an attribute changes.
+   * @internal Rows of a maintained query in result order: the order the facts matching the
+   * first pattern were asserted, so a list keyed by entity keeps its order when other attributes change.
    */
   decodeRows(rows: Iterable<Uint32Array>, names: string[]): Bindings[] {
-    const sorted = Array.from(rows).sort(compareRows);
+    const sorted = Array.from(rows).sort(compareRows(names.length));
     const out = new Array<Bindings>(sorted.length);
-    for (let r = 0; r < sorted.length; r++) {
-      const row = sorted[r];
-      const bindings: Bindings = {};
-      for (let v = 0; v < names.length; v++) bindings[names[v]] = this.engine.term(row[v]);
-      out[r] = bindings;
-    }
+    for (let r = 0; r < sorted.length; r++) out[r] = this.bindingsOf(sorted[r], 0, names);
     return out;
+  }
+
+  private bindingsOf(row: ArrayLike<number>, start: number, names: string[]): Bindings {
+    const bindings: Bindings = {};
+    for (let v = 0; v < names.length; v++) bindings[names[v]] = this.engine.term(row[start + v]);
+    return bindings;
   }
 
   /** @internal */

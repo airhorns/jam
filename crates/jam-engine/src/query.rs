@@ -90,7 +90,10 @@ impl ResultSet {
                         id
                     }
                     None => {
-                        self.slots.push(Slot { row: row.into(), weight: 0 });
+                        self.slots.push(Slot {
+                            row: row.into(),
+                            weight: 0,
+                        });
                         (self.slots.len() - 1) as RowId
                     }
                 };
@@ -172,7 +175,10 @@ pub struct Bindings {
 
 impl Bindings {
     fn new(nvars: usize) -> Self {
-        Bindings { row: vec![NONE; nvars], undo: Vec::new() }
+        Bindings {
+            row: vec![NONE; nvars],
+            undo: Vec::new(),
+        }
     }
 
     /// Bind the clause against `terms`, recording new bindings so they can be undone. Returns how many were bound.
@@ -219,7 +225,51 @@ fn clause_vars(clause: &[u32], out: &mut Vec<VarId>) {
 }
 
 fn literal_mask(clause: &[u32]) -> Mask {
-    clause.iter().enumerate().fold(0, |m, (i, &p)| if !is_var(p) && p != WILD { m | (1 << i) } else { m })
+    clause.iter().enumerate().fold(0, |m, (i, &p)| {
+        if !is_var(p) && p != WILD {
+            m | (1 << i)
+        } else {
+            m
+        }
+    })
+}
+
+/// Every position that is known once the row is complete: everything but wildcards.
+fn bound_mask(clause: &[u32]) -> Mask {
+    clause
+        .iter()
+        .enumerate()
+        .fold(0, |m, (i, &p)| if p != WILD { m | (1 << i) } else { m })
+}
+
+/// Where a row sits in result order: the assertion sequence of the fact matching the
+/// first clause (the earliest one when that clause has wildcards). Results therefore
+/// follow the order the first pattern's facts were asserted, however the row was joined.
+pub fn row_order(store: &Store, clauses: &[Clause], row: &[TermId]) -> u64 {
+    let Some(clause) = clauses.first() else {
+        return 0;
+    };
+    let mut tuple: SmallVec<[TermId; 4]> = SmallVec::new();
+    for &p in clause {
+        if p == WILD {
+            continue;
+        }
+        tuple.push(if is_var(p) {
+            row[var_of(p) as usize]
+        } else {
+            p
+        });
+    }
+    if tuple.len() == clause.len() {
+        return store
+            .find(&tuple)
+            .map_or(u64::MAX, |fid| store.get(fid).seq);
+    }
+    store
+        .lookup(clause.len(), bound_mask(clause), &tuple)
+        .map(|fid| store.get(fid).seq)
+        .min()
+        .unwrap_or(u64::MAX)
 }
 
 fn build_plan(clauses: &[Clause], seed: usize, exclude_before_seed: bool) -> Plan {
@@ -233,7 +283,9 @@ fn build_plan(clauses: &[Clause], seed: usize, exclude_before_seed: bool) -> Pla
         for (i, &c) in remaining.iter().enumerate() {
             let score = clauses[c]
                 .iter()
-                .filter(|&&p| (!is_var(p) && p != WILD) || (is_var(p) && bound.contains(&var_of(p))))
+                .filter(|&&p| {
+                    (!is_var(p) && p != WILD) || (is_var(p) && bound.contains(&var_of(p)))
+                })
                 .count() as i32;
             if score > best_score {
                 best_score = score;
@@ -259,7 +311,13 @@ fn build_plan(clauses: &[Clause], seed: usize, exclude_before_seed: bool) -> Pla
             }
         }
         let exact = mask.count_ones() as usize == clause.len();
-        steps.push(Step { clause: c, mask, key, exact, exclude_seed: exclude_before_seed && c < seed });
+        steps.push(Step {
+            clause: c,
+            mask,
+            key,
+            exact,
+            exclude_seed: exclude_before_seed && c < seed,
+        });
         clause_vars(clause, &mut bound);
     }
     Plan { steps }
@@ -272,12 +330,26 @@ impl Query {
             clause_vars(clause, &mut vars);
         }
         let nvars = vars.iter().map(|&v| v as usize + 1).max().unwrap_or(0);
-        let delta_plans = (0..clauses.len()).map(|seed| build_plan(&clauses, seed, true)).collect();
+        let delta_plans = (0..clauses.len())
+            .map(|seed| build_plan(&clauses, seed, true))
+            .collect();
         let full_seed = (0..clauses.len())
             .max_by_key(|&i| (literal_mask(&clauses[i]).count_ones(), usize::MAX - i))
             .unwrap_or(0);
-        let full_plan = if clauses.is_empty() { Plan { steps: Vec::new() } } else { build_plan(&clauses, full_seed, false) };
-        Query { clauses, nvars, delta_plans, full_seed, full_plan, results: ResultSet::default(), refcount: 1 }
+        let full_plan = if clauses.is_empty() {
+            Plan { steps: Vec::new() }
+        } else {
+            build_plan(&clauses, full_seed, false)
+        };
+        Query {
+            clauses,
+            nvars,
+            delta_plans,
+            full_seed,
+            full_plan,
+            results: ResultSet::default(),
+            refcount: 1,
+        }
     }
 
     /// Every (len, mask) the plans probe, so the store can index them.
@@ -288,11 +360,19 @@ impl Query {
                 needs.push((len, mask));
             }
         };
-        if !self.clauses.is_empty() {
+        if let Some(first) = self.clauses.first() {
             let seed = &self.clauses[self.full_seed];
             push(seed.len(), literal_mask(seed));
+            let order_mask = bound_mask(first);
+            if order_mask.count_ones() as usize != first.len() {
+                push(first.len(), order_mask);
+            }
         }
-        for plan in self.delta_plans.iter().chain(std::iter::once(&self.full_plan)) {
+        for plan in self
+            .delta_plans
+            .iter()
+            .chain(std::iter::once(&self.full_plan))
+        {
             for step in &plan.steps {
                 if !step.exact {
                     push(self.clauses[step.clause].len(), step.mask);
@@ -356,9 +436,18 @@ pub fn evaluate(store: &Store, query: &Query, emit: &mut dyn FnMut(&[TermId])) {
     }
     let seed = &query.clauses[query.full_seed];
     let mask = literal_mask(seed);
-    let tuple: SmallVec<[TermId; 4]> = seed.iter().filter(|&&p| !is_var(p) && p != WILD).copied().collect();
+    let tuple: SmallVec<[TermId; 4]> = seed
+        .iter()
+        .filter(|&&p| !is_var(p) && p != WILD)
+        .copied()
+        .collect();
     let mut bindings = Bindings::new(query.nvars);
-    let walk = Walk { store, query, plan: &query.full_plan, exclude: NONE };
+    let walk = Walk {
+        store,
+        query,
+        plan: &query.full_plan,
+        exclude: NONE,
+    };
     for fid in store.lookup(seed.len(), mask, &tuple) {
         let terms = &store.get(fid).terms;
         if let Some(mark) = bindings.bind(seed, terms, mask) {
@@ -400,7 +489,14 @@ impl Queries {
         };
         for (ci, clause) in query.clauses.iter().enumerate() {
             let first = clause.first().copied().unwrap_or(NONE);
-            let key = (clause.len() as u8, if is_var(first) || first == WILD { NONE } else { first });
+            let key = (
+                clause.len() as u8,
+                if is_var(first) || first == WILD {
+                    NONE
+                } else {
+                    first
+                },
+            );
             self.routes.entry(key).or_default().push((id, ci as u8));
         }
         self.by_pattern.insert(clauses, id);
@@ -423,7 +519,9 @@ impl Queries {
 
     /// Drop one reference; the query is removed when the last one goes.
     pub fn release(&mut self, id: QueryId) -> bool {
-        let Some(query) = self.get_mut(id) else { return false };
+        let Some(query) = self.get_mut(id) else {
+            return false;
+        };
         query.refcount -= 1;
         if query.refcount > 0 {
             return false;
@@ -432,7 +530,14 @@ impl Queries {
         self.by_pattern.remove(&query.clauses);
         for (ci, clause) in query.clauses.iter().enumerate() {
             let first = clause.first().copied().unwrap_or(NONE);
-            let key = (clause.len() as u8, if is_var(first) || first == WILD { NONE } else { first });
+            let key = (
+                clause.len() as u8,
+                if is_var(first) || first == WILD {
+                    NONE
+                } else {
+                    first
+                },
+            );
             if let Some(list) = self.routes.get_mut(&key) {
                 list.retain(|&(q, c)| !(q == id && c as usize == ci));
                 if list.is_empty() {
@@ -448,20 +553,36 @@ impl Queries {
     /// the fact; for removals it must still contain it.
     pub fn propagate(&mut self, store: &Store, fid: FactId, terms: &[TermId], delta: i32) {
         let len = terms.len() as u8;
-        let exact = self.routes.get(&(len, terms[0])).map(Vec::as_slice).unwrap_or(&[]);
-        let wild = self.routes.get(&(len, NONE)).map(Vec::as_slice).unwrap_or(&[]);
+        let exact = self
+            .routes
+            .get(&(len, terms[0]))
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let wild = self
+            .routes
+            .get(&(len, NONE))
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         if exact.is_empty() && wild.is_empty() {
             return;
         }
-        let targets: SmallVec<[(QueryId, u8); 8]> = exact.iter().chain(wild.iter()).copied().collect();
+        let targets: SmallVec<[(QueryId, u8); 8]> =
+            exact.iter().chain(wild.iter()).copied().collect();
         let mut rows: Vec<Box<[TermId]>> = Vec::new();
         for (qid, ci) in targets {
             let query = self.slots[qid as usize].as_mut().unwrap();
             let clause = &query.clauses[ci as usize];
             let mut bindings = Bindings::new(query.nvars);
-            let Some(mark) = bindings.bind(clause, terms, 0) else { continue };
+            let Some(mark) = bindings.bind(clause, terms, 0) else {
+                continue;
+            };
             rows.clear();
-            let walk = Walk { store, query, plan: &query.delta_plans[ci as usize], exclude: fid };
+            let walk = Walk {
+                store,
+                query,
+                plan: &query.delta_plans[ci as usize],
+                exclude: fid,
+            };
             walk.extend(0, &mut bindings, &mut |row| rows.push(row.into()));
             bindings.rollback(mark);
             if rows.is_empty() {
@@ -484,7 +605,11 @@ impl Queries {
     pub fn clear_results(&mut self) {
         for (i, query) in self.slots.iter_mut().enumerate() {
             let Some(query) = query else { continue };
-            let live: Vec<(Box<[TermId]>, i32)> = query.results.rows().map(|(_, row, w)| (row.into(), w)).collect();
+            let live: Vec<(Box<[TermId]>, i32)> = query
+                .results
+                .rows()
+                .map(|(_, row, w)| (row.into(), w))
+                .collect();
             if live.is_empty() {
                 continue;
             }

@@ -5,7 +5,7 @@
 use hashbrown::{HashMap, HashSet};
 
 use crate::owner::Owners;
-use crate::query::{adhoc, evaluate, Clause, Queries, QueryId};
+use crate::query::{adhoc, evaluate, row_order, Clause, Queries, QueryId};
 use crate::store::{FactId, Mask, OwnerId, Store, ROOT_OWNER};
 use crate::term::{Interner, TermId, EMPTY, NONE, VAR_BASE, WILD};
 use crate::wire::*;
@@ -111,14 +111,18 @@ impl Engine {
     /// Fact events since the last drain followed by the delta of every query that changed.
     pub fn drain(&mut self) -> Vec<u32> {
         let mut out = std::mem::take(&mut self.events);
+        let store = &self.store;
         for qid in self.queries.take_dirty() {
-            let Some(query) = self.queries.get_mut(qid) else { continue };
+            let Some(query) = self.queries.get_mut(qid) else {
+                continue;
+            };
             if !query.results.is_dirty() {
                 continue;
             }
             let header = out.len();
             out.extend_from_slice(&[EV_QUERY, qid, query.nvars as u32, 0]);
             let mut n = 0u32;
+            let clauses = &query.clauses;
             query.results.drain(|id, row, before, after| {
                 let (was, is) = (before > 0, after > 0);
                 if was == is {
@@ -129,6 +133,7 @@ impl Engine {
                 if is {
                     out.push(1);
                     out.extend_from_slice(row);
+                    push_order(&mut out, row_order(store, clauses, row));
                 } else {
                     out.push(0);
                 }
@@ -142,7 +147,14 @@ impl Engine {
         out
     }
 
-    pub fn assert(&mut self, owner: OwnerId, scope: TermId, terms: &[TermId], inherited: Option<TermId>, replace: bool) {
+    pub fn assert(
+        &mut self,
+        owner: OwnerId,
+        scope: TermId,
+        terms: &[TermId],
+        inherited: Option<TermId>,
+        replace: bool,
+    ) {
         if !self.owners.exists(owner) {
             return;
         }
@@ -156,7 +168,11 @@ impl Engine {
             }
             if owner == ROOT_OWNER && !had_root {
                 let scope = record.scope;
-                self.emit_fact(FACT_ADDED | FACT_DURABLE | FACT_EXISTING | replace_flag, scope, terms);
+                self.emit_fact(
+                    FACT_ADDED | FACT_DURABLE | FACT_EXISTING | replace_flag,
+                    scope,
+                    terms,
+                );
             }
             return;
         }
@@ -187,7 +203,11 @@ impl Engine {
     /// Fact ids matching a pattern of literals and `WILD`s, via the index over the literal positions.
     fn matching(&mut self, pattern: &[u32]) -> Vec<FactId> {
         let mask = literal_mask(pattern);
-        let tuple: Vec<TermId> = pattern.iter().filter(|&&p| p != WILD && !is_var(p)).copied().collect();
+        let tuple: Vec<TermId> = pattern
+            .iter()
+            .filter(|&&p| p != WILD && !is_var(p))
+            .copied()
+            .collect();
         self.store.ensure_index(pattern.len(), mask);
         self.store.lookup(pattern.len(), mask, &tuple).collect()
     }
@@ -237,7 +257,9 @@ impl Engine {
     }
 
     pub fn set_scope(&mut self, scope: TermId, terms: &[TermId]) {
-        let Some(fid) = self.store.find(terms) else { return };
+        let Some(fid) = self.store.find(terms) else {
+            return;
+        };
         let previous = self.store.get(fid).scope;
         if previous == scope {
             return;
@@ -249,8 +271,11 @@ impl Engine {
 
     pub fn clear(&mut self) {
         if self.fact_events == FACT_EVENTS_ALL {
-            let all: Vec<(TermId, Box<[TermId]>)> =
-                self.store.iter().map(|(_, r)| (r.scope, r.terms.clone())).collect();
+            let all: Vec<(TermId, Box<[TermId]>)> = self
+                .store
+                .iter()
+                .map(|(_, r)| (r.scope, r.terms.clone()))
+                .collect();
             for (scope, terms) in all {
                 self.emit_fact(0, scope, &terms);
             }
@@ -263,7 +288,12 @@ impl Engine {
 
     // --- scopes ---
 
-    fn resolve_scope(&self, terms: &[TermId], explicit: TermId, inherited: Option<TermId>) -> TermId {
+    fn resolve_scope(
+        &self,
+        terms: &[TermId],
+        explicit: TermId,
+        inherited: Option<TermId>,
+    ) -> TermId {
         if explicit != NONE {
             return explicit;
         }
@@ -271,7 +301,10 @@ impl Engine {
             return scope;
         }
         if terms.len() >= 2 && !self.entity_scopes.is_empty() {
-            return self.entity_scopes.get(&(terms[0], terms[1])).map_or(EMPTY, |e| e.scope);
+            return self
+                .entity_scopes
+                .get(&(terms[0], terms[1]))
+                .map_or(EMPTY, |e| e.scope);
         }
         EMPTY
     }
@@ -329,31 +362,38 @@ impl Engine {
         self.queries.release(id)
     }
 
-    /// Current rows of a registered query: `nvars nrows (rowid vals…)…`.
+    /// Current rows of a registered query: `nvars nrows (rowid vals… order_hi order_lo)…`.
     pub fn rows(&self, id: QueryId) -> Vec<u32> {
-        let Some(query) = self.queries.get(id) else { return vec![0, 0] };
+        let Some(query) = self.queries.get(id) else {
+            return vec![0, 0];
+        };
         let mut out = vec![query.nvars as u32, 0];
         let mut n = 0u32;
         for (rid, row, _) in query.results.rows() {
             n += 1;
             out.push(rid);
             out.extend_from_slice(row);
+            push_order(&mut out, row_order(&self.store, &query.clauses, row));
         }
         out[1] = n;
         out
     }
 
-    /// One-off evaluation: `nvars nrows (vals…)…`, each distinct binding tuple once.
+    /// One-off evaluation: `nvars nrows (vals…)…`, each distinct binding tuple once, in result order.
     pub fn query(&mut self, clauses: Vec<Clause>) -> Vec<u32> {
         let query = adhoc(&mut self.store, clauses);
-        let mut out = vec![query.nvars as u32, 0];
         let mut seen: HashSet<Box<[TermId]>> = HashSet::new();
+        let mut rows: Vec<(u64, Box<[TermId]>)> = Vec::new();
         evaluate(&self.store, &query, &mut |row| {
             if seen.insert(row.into()) {
-                out.extend_from_slice(row);
+                rows.push((row_order(&self.store, &query.clauses, row), row.into()));
             }
         });
-        out[1] = seen.len() as u32;
+        rows.sort_unstable();
+        let mut out = vec![query.nvars as u32, rows.len() as u32];
+        for (_, row) in &rows {
+            out.extend_from_slice(row);
+        }
         out
     }
 
@@ -386,6 +426,17 @@ fn is_var(t: u32) -> bool {
     (VAR_BASE..WILD).contains(&t)
 }
 
+fn push_order(out: &mut Vec<u32>, order: u64) {
+    out.push((order >> 32) as u32);
+    out.push(order as u32);
+}
+
 fn literal_mask(pattern: &[u32]) -> Mask {
-    pattern.iter().enumerate().fold(0, |m, (i, &p)| if p != WILD && !is_var(p) { m | (1 << i) } else { m })
+    pattern.iter().enumerate().fold(0, |m, (i, &p)| {
+        if p != WILD && !is_var(p) {
+            m | (1 << i)
+        } else {
+            m
+        }
+    })
 }

@@ -17,7 +17,8 @@ pub const OP_CLEAR: u32 = 6;
 
 /// `FACT flags scope len t…`
 pub const EV_FACT: u32 = 1;
-/// `QUERY qid nvars nrows (rowid flag [vals…])…` — `flag` 1 means the row appeared (values follow), 0 that it left.
+/// `QUERY qid nvars nrows (rowid flag [vals… order_hi order_lo])…` — `flag` 1 means the row
+/// appeared (its values and 64-bit result-order key follow), 0 that it left.
 pub const EV_QUERY: u32 = 2;
 
 pub const FACT_ADDED: u32 = 1;
@@ -47,7 +48,10 @@ impl<'a> Reader<'a> {
     }
 
     pub fn u32(&mut self) -> Result<u32, String> {
-        let v = *self.data.get(self.pos).ok_or_else(|| format!("truncated at {}", self.pos))?;
+        let v = *self
+            .data
+            .get(self.pos)
+            .ok_or_else(|| format!("truncated at {}", self.pos))?;
         self.pos += 1;
         Ok(v)
     }

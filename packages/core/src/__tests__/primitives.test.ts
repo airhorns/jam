@@ -68,11 +68,11 @@ describe("when", () => {
     expect(result).toContainEqual({ val: 2 });
   });
 
-  it("keeps rows in creation order of their first binding, tracked or not", () => {
-    remember("todo", "a", "title", "A");
-    remember("todo", "a", "done", false);
+  it("orders rows by when the first pattern's facts were asserted, tracked or not", () => {
     remember("todo", "b", "title", "B");
     remember("todo", "b", "done", false);
+    remember("todo", "a", "title", "A");
+    remember("todo", "a", "done", false);
     const patterns: Pattern[] = [
       ["todo", $.id, "title", $.title],
       ["todo", $.id, "done", $.done],
@@ -82,12 +82,20 @@ describe("when", () => {
     const disposer = autorun(() => {
       tracked = when(...patterns).map((row) => String(row.id));
     });
-    replace("todo", "a", "done", true);
-    replace("todo", "a", "title", "A2");
+    expect(tracked).toEqual(["b", "a"]);
 
+    replace("todo", "b", "done", true);
+    expect(tracked).toEqual(["b", "a"]);
+    expect(when(...patterns).map((row) => row.id)).toEqual(["b", "a"]);
+
+    replace("todo", "b", "title", "B2");
     expect(tracked).toEqual(["a", "b"]);
     expect(when(...patterns).map((row) => row.id)).toEqual(["a", "b"]);
     disposer();
+
+    remember("session", "s", "workspace", "ws-2");
+    remember("session", "s", "workspace", "ws-1");
+    expect(when(["session", "s", "workspace", $.ws]).map((row) => row.ws)).toEqual(["ws-2", "ws-1"]);
   });
 
   it("reacts to new facts inside autorun", () => {

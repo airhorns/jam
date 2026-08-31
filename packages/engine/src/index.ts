@@ -52,12 +52,35 @@ export type FactEventListener = (event: FactEvent) => void;
 /** One clause of a query: interned term ids, `VAR_BASE + i` for variable `i`, or `WILD`. */
 export type Clause = number[];
 
-/**
- * A registered query's live result set. `rows` maps stable row ids to the
- * bound variable ids in order; `version` bumps whenever a row appears or leaves.
- */
 export type RowListener = (row: Uint32Array, added: boolean) => void;
 
+/**
+ * Where a row sits in result order: the assertion sequence of the fact matching the
+ * query's first clause, carried as two words after the row's `nvars` values.
+ */
+export function rowOrder(row: Uint32Array, nvars: number): number {
+  return row[nvars] * 0x1_0000_0000 + row[nvars + 1];
+}
+
+/** Sort rows into result order; ties (only possible with wildcards in the first clause) fall back to the values. */
+export function compareRows(nvars: number): (a: Uint32Array, b: Uint32Array) => number {
+  return (a, b) => {
+    const hi = a[nvars] - b[nvars];
+    if (hi !== 0) return hi;
+    const lo = a[nvars + 1] - b[nvars + 1];
+    if (lo !== 0) return lo;
+    for (let i = 0; i < nvars; i++) {
+      if (a[i] !== b[i]) return a[i] - b[i];
+    }
+    return 0;
+  };
+}
+
+/**
+ * A registered query's live result set. `rows` maps stable row ids to the bound
+ * variable ids followed by the row's order key (see `rowOrder`); `version` bumps
+ * whenever a row appears or leaves.
+ */
 export class QueryHandle {
   readonly rows = new Map<number, Uint32Array>();
   version = 0;
@@ -101,7 +124,7 @@ export class QueryHandle {
 
 export interface QueryResult {
   nvars: number;
-  /** `nrows * nvars` variable ids, row-major. */
+  /** `nrows * nvars` variable ids, row-major, already in result order. */
   data: Uint32Array;
   count: number;
 }
@@ -308,8 +331,8 @@ export class Engine {
           const flag = events[i + 1];
           i += 2;
           if (flag === 1) {
-            handle?.applyRow(rid, events.slice(i, i + nvars));
-            i += nvars;
+            handle?.applyRow(rid, events.slice(i, i + nvars + 2));
+            i += nvars + 2;
           } else {
             handle?.applyRow(rid, null);
           }
@@ -377,8 +400,8 @@ export class Engine {
     const n = packed[1];
     let i = 2;
     for (let r = 0; r < n; r++) {
-      handle.rows.set(packed[i], packed.slice(i + 1, i + 1 + nvars));
-      i += 1 + nvars;
+      handle.rows.set(packed[i], packed.slice(i + 1, i + 3 + nvars));
+      i += 3 + nvars;
     }
     this.handles.set(qid, { handle, refs: 1 });
     return handle;

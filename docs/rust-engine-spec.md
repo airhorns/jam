@@ -179,6 +179,15 @@ that records which rows this transaction touched. Row ids are stable while a
 row has non-zero weight and are recycled after it is drained, so the JS side
 can keep `Map<RowId, Bindings>` without hashing rows.
 
+Result order is the order in which the facts matching the *first* clause were
+asserted: every fact carries a monotonically increasing `seq`, and a row's
+order key is the `seq` of the fact the first clause binds to (the smallest
+one when that clause has wildcards). A list keyed by entity therefore keeps
+its order when other attributes are replaced, a single-clause query over a
+multi-valued attribute lists values oldest to newest, and replacing the first
+clause's own attribute moves the entity to the end — the same order the
+Map-based store produced before the engine.
+
 Registering a query builds:
 
 - `full_plan`: the clause with the most literals is the seed, scanned through
@@ -251,10 +260,11 @@ The JS side packs a transaction into one `Uint32Array` of ops:
 `Engine::apply(ops)` executes them in order, propagating every fact change,
 then `drain()` returns one `Uint32Array` of events:
 
-    QUERY qid nrows (rowid weight_before weight_after [values…]…)
+    QUERY qid nvars nrows (rowid flag [values… order_hi order_lo])…
     FACT  flags scope len t…        (flags: added/removed, durable, replace)
 
-Values are included only for rows created in this transaction. Fact events
+Values and the 64-bit order key are included only for rows that appeared in
+this transaction (`flag` 1); `flag` 0 means the row left. Fact events
 are emitted at the requested level (none / durable only / all) so the render
 path pays nothing for observers that only care about durable facts.
 
