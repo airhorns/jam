@@ -333,6 +333,42 @@ describe("sync (server)", () => {
     expect(db.has("sync", "shape", allowed.id, "ready", true)).toBe(true);
   });
 
+  it("snapshots instead of replaying when the server's log is not the one its seqs came from", async () => {
+    for (let i = 1; i <= 3; i++) await server.apply([{ op: "upsert", terms: ["n", i], scope: "" }]);
+    const first = await start();
+    const sub = first.subscribe();
+    await sub.ready;
+    await first.flush();
+    const { log } = received[0] as { type: "hello"; seq: number; log: string };
+    expect(await storage.getMeta(`sub:${sub.id}`)).toBe(`${log}:3`);
+    await first.dispose();
+    handles.length = 0;
+    db.clear();
+
+    server = await createSyncServer({ storage: memoryStorage() });
+    for (let i = 10; i < 15; i++) await server.apply([{ op: "upsert", terms: ["m", i], scope: "" }]);
+    expect(server.seq).toBeGreaterThan(3);
+    received = [];
+    const second = await start();
+    await second.subscribe().ready;
+    expect(received.map((m) => m.type)).toEqual(["hello", "snapshot"]);
+    expect((received[0] as { log: string }).log).not.toBe(log);
+    expect(facts("n")).toEqual([]);
+    expect(facts("m")).toEqual([["m", 10], ["m", 11], ["m", 12], ["m", 13], ["m", 14]]);
+    await second.flush();
+    expect(await stored()).toEqual(server.facts());
+    expect(await storage.getMeta(`sub:${sub.id}`)).toBe(`${(received[0] as { log: string }).log}:5`);
+  });
+
+  it("treats a bare seq recorded before log ids as belonging to no log", async () => {
+    for (let i = 1; i <= 3; i++) await server.apply([{ op: "upsert", terms: ["n", i], scope: "" }]);
+    await storage.write({ meta: { [`sub:${compileFilter({}).id}`]: "2" } });
+    const s = await start();
+    await s.subscribe().ready;
+    expect(received.map((m) => m.type)).toEqual(["hello", "snapshot"]);
+    expect(facts("n")).toEqual([["n", 1], ["n", 2], ["n", 3]]);
+  });
+
   it("converges with a concurrent replace from another writer", async () => {
     await server.apply([{ op: "upsert", terms: ["todo", 1, "title", "A"], scope: "" }]);
     const s = await start();

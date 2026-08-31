@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { memoryStorage } from "@jam/engine/storage";
-import { createSyncServer, parseChanges, parseFilter, sqliteStorage, type ServerMessage, type SyncChange, type SyncCommit, type SyncSocket } from "../server";
+import { createSyncServer, parseChanges, parseFilter, sqliteStorage, type ServerMessage, type SyncChange, type SyncCommit, type SyncServer, type SyncSocket } from "../server";
 import { _ } from "../db";
 import { compileFilter } from "../filter";
 
@@ -96,6 +99,39 @@ describe("createSyncServer", () => {
     expect(second.facts().map((f) => f.terms[0]).sort()).toEqual(["a", "b"]);
   });
 
+  it("names its log once per storage and tells every connection", async () => {
+    const hello = (server: SyncServer) => {
+      const socket = fakeSocket();
+      server.handle(socket);
+      return socket.sent[0] as { type: "hello"; seq: number; log: string };
+    };
+    const storage = memoryStorage();
+    const first = await createSyncServer({ storage });
+    const { log } = hello(first);
+    expect(log).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await storage.getMeta("log")).toBe(log);
+    await first.apply([{ op: "upsert", terms: ["n", 1], scope: "" }]);
+
+    const second = await createSyncServer({ storage });
+    expect(hello(second)).toEqual({ type: "hello", seq: 1, log });
+    expect(hello(await createSyncServer({ storage: memoryStorage() })).log).not.toBe(log);
+
+    const path = join(mkdtempSync(join(tmpdir(), "jam-log-")), "facts.db");
+    const onDisk = await createSyncServer({ storage: sqliteStorage(path) });
+    const persisted = hello(onDisk).log;
+    await onDisk.close();
+    const reopened = await createSyncServer({ storage: sqliteStorage(path) });
+    expect(hello(reopened).log).toBe(persisted);
+    await reopened.close();
+
+    vi.stubGlobal("crypto", undefined);
+    try {
+      expect(hello(await createSyncServer({ storage: memoryStorage() })).log).toMatch(/^[0-9a-z]+$/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("trims the log to the retention window", async () => {
     const storage = memoryStorage();
     const server = await createSyncServer({ storage, logRetention: 3 });
@@ -112,7 +148,7 @@ describe("createSyncServer", () => {
     ]);
     const socket = fakeSocket();
     server.handle(socket);
-    expect(socket.sent[0]).toEqual({ type: "hello", seq: 3 });
+    expect(socket.sent[0]).toEqual({ type: "hello", seq: 3, log: expect.any(String) });
     socket.receive({ type: "subscribe", id: "s1", filter: { scope: "p1" } });
     await tick();
     expect(socket.sent[1]).toEqual({ type: "snapshot", id: "s1", seq: 3, facts: [[["issue", 1, "title", "A"], "p1"]] });

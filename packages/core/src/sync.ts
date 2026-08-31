@@ -9,7 +9,8 @@
 //
 // Every durable fact the client knows is kept in a local FactStorage mirror
 // so a subscription shows its last known state instantly and resumes from the
-// seq it last saw. Local writes queue in the storage's log (the outbox) until
+// seq it last saw, as long as the server still serves the log that seq belongs
+// to. Local writes queue in the storage's log (the outbox) until
 // the server acknowledges them; while a key is in the outbox, incoming changes
 // for it are ignored so the server's echo can never flicker a local write.
 // Without `url` there is no network and subscribe() only chooses which stored
@@ -451,10 +452,15 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     }, db);
   };
 
-  /** Remember how far each caught-up subscription has seen, so a later connection can ask for a replay. */
+  /**
+   * Remember how far each caught-up subscription has seen, as `<log>:<seq>`, so a later connection to the
+   * same log can ask for a replay; seqs from another log (a server restarted on fresh storage) mean nothing.
+   */
   const recordSeq = (seq: number) => {
+    if (log === null) return;
+    const position = `${log}:${seq}`;
     write((w) => {
-      for (const [id, sub] of remote) if (sub.synced) w.meta[`sub:${id}`] = String(seq);
+      for (const [id, sub] of remote) if (sub.synced) w.meta[`sub:${id}`] = position;
     });
   };
 
@@ -623,6 +629,8 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
 
   // --- connection (leader only) ---
   let socket: SyncWebSocket | null = null;
+  /** The id of the log behind the current connection, once its `hello` has arrived; subscriptions wait for it. */
+  let log: string | null = null;
   let attempts = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let inflight: { id: number; upTo: number } | null = null;
@@ -637,15 +645,19 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     socket.send(JSON.stringify(message));
   };
 
+  /** Subscribe on the server, resuming from the recorded position when it was taken on this very log; a bare seq predates log ids. */
   const subscribeRemote = async (id: string, sub: RemoteSubscription) => {
+    const current = log;
+    if (current === null) return;
     await settled();
-    const since = await storage.getMeta(`sub:${id}`);
-    if (!connected || remote.get(id) !== sub) return;
+    const position = await storage.getMeta(`sub:${id}`);
+    if (!connected || log !== current || remote.get(id) !== sub) return;
+    const prefix = `${current}:`;
     sendMessage({
       type: "subscribe",
       id,
       filter: JSON.parse(serializeFilter(sub.compiled.filter)),
-      since: since === undefined ? undefined : Number(since),
+      since: position?.startsWith(prefix) ? Number(position.slice(prefix.length)) : undefined,
     });
   };
 
@@ -686,6 +698,9 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   const handleMessage = (message: ServerMessage) => {
     switch (message.type) {
       case "hello":
+        log = message.log;
+        for (const [id, sub] of remote) void subscribeRemote(id, sub);
+        pushNow();
         return;
       case "snapshot": {
         const sub = remote.get(message.id);
@@ -758,8 +773,6 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
       attempts = 0;
       updateStatus();
       postConn();
-      for (const [id, sub] of remote) void subscribeRemote(id, sub);
-      pushNow();
     };
     ws.onmessage = (event) => {
       if (socket !== ws) return;
@@ -773,6 +786,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     ws.onclose = () => {
       if (socket !== ws) return;
       socket = null;
+      log = null;
       inflight = null;
       for (const sub of remote.values()) sub.synced = false;
       scheduleReconnect();
