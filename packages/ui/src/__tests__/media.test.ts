@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { resetUI } from "../testing";
 import { replace } from "@jam/core";
-import { createMedia, useMedia, disposeMedia } from "../media";
+import { createMedia, useMedia, disposeMedia, buildMediaQuery, getMediaQuery, getMediaPrecedence, isMediaKey } from "../media";
 
 beforeEach(() => {
   resetUI();
@@ -67,6 +67,32 @@ describe("createMedia", () => {
     const media = useMedia();
     expect(media.sm).toBe(true); // viewport <= 860
     expect(media.lg).toBe(false); // query doesn't match our mock
+
+    listeners.get("(max-width: 860px)")!({ matches: false });
+    listeners.get("(max-width: 1280px)")!({ matches: true });
+    expect(useMedia()).toEqual({ sm: false, lg: true });
+  });
+
+  it("records each key's query string and precedence", () => {
+    createMedia({ sm: { maxWidth: 860 }, portrait: { orientation: "portrait" }, dark: { prefersColorScheme: "dark" } });
+    expect(getMediaQuery("sm")).toBe("(max-width: 860px)");
+    expect(getMediaQuery("portrait")).toBe("(orientation: portrait)");
+    expect(getMediaQuery("dark")).toBe("(prefers-color-scheme: dark)");
+    expect(getMediaQuery("xl")).toBeUndefined();
+    expect(getMediaPrecedence("sm")).toBe(0);
+    expect(getMediaPrecedence("dark")).toBe(2);
+    expect(getMediaPrecedence("xl")).toBe(-1);
+    expect(isMediaKey("portrait")).toBe(true);
+    expect(isMediaKey("xl")).toBe(false);
+  });
+});
+
+describe("buildMediaQuery", () => {
+  it("joins every condition with `and`, or matches everything when there are none", () => {
+    expect(buildMediaQuery({ minWidth: 100, maxWidth: 200, minHeight: 300, maxHeight: 400, hover: "hover", pointer: "fine" })).toBe(
+      "(min-width: 100px) and (max-width: 200px) and (min-height: 300px) and (max-height: 400px) and (hover: hover) and (pointer: fine)",
+    );
+    expect(buildMediaQuery({})).toBe("all");
   });
 });
 

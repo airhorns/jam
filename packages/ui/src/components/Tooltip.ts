@@ -76,13 +76,13 @@ function scheduleOpen(ctx: TooltipContextValue): void {
 }
 
 /** Merges a caller's `aria-describedby` with the tooltip content id, like Radix's `concatAriaDescribedby`. */
-function concatAriaDescribedby(...values: (string | undefined)[]): string | undefined {
+function concatAriaDescribedby(...values: (string | undefined)[]): string {
   const ids = new Set<string>();
   for (const value of values) {
     if (!value) continue;
     for (const token of value.split(/\s+/)) if (token) ids.add(token);
   }
-  return ids.size > 0 ? Array.from(ids).join(" ") : undefined;
+  return Array.from(ids).join(" ");
 }
 
 export type TooltipProps = {

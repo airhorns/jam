@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { resetUI } from "../testing";
-import { createTokens, getToken, resolveTokenValue, isTokenRef, isThemeRef } from "../tokens";
+import { createTokens, getToken, getTokens, resolveTokenValue, resolveTokenIn, isTokenRef, isThemeRef } from "../tokens";
 
 beforeEach(() => {
   resetUI();
@@ -90,6 +90,32 @@ describe("resolveTokenValue", () => {
   it("returns undefined for non-string non-number", () => {
     expect(resolveTokenValue(null)).toBeUndefined();
     expect(resolveTokenValue(undefined)).toBeUndefined();
+  });
+});
+
+describe("resolveTokenIn", () => {
+  beforeEach(() => {
+    createTokens({ size: { "4": 20, true: 20 }, space: { "4": 16 } });
+  });
+
+  it("resolves bare tokens in the given category and qualified refs anywhere", () => {
+    expect(resolveTokenIn("size", "$4")).toBe(20);
+    expect(resolveTokenIn("space", "$4")).toBe(16);
+    expect(resolveTokenIn("size", "$true")).toBe(20);
+    expect(resolveTokenIn("size", "$space.4")).toBe(16);
+  });
+
+  it("is undefined for plain strings and missing tokens", () => {
+    expect(resolveTokenIn("size", "4")).toBeUndefined();
+    expect(resolveTokenIn("size", "$99")).toBeUndefined();
+  });
+});
+
+describe("createTokens / getTokens", () => {
+  it("skips undefined categories and snapshots every token under both keys", () => {
+    createTokens({ size: { "4": 20 }, color: undefined });
+    expect(getTokens()).toEqual({ size: { "4": 20, $4: 20 } });
+    expect(getToken("color", "$anything")).toBeUndefined();
   });
 });
 

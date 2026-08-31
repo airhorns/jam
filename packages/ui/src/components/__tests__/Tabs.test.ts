@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { h } from "@jam/core/jsx";
 import { render, css, click, keydown, setupDefaultUI } from "../../testing";
+import { createTokens } from "../../tokens";
 import { Tabs } from "../Tabs";
 
 beforeEach(() => {
@@ -230,5 +231,89 @@ describe("Tabs", () => {
     expect(css(list(r))["border-bottom-width"]).toBeUndefined();
     expect(css(tabList(r)[0]).height).toBeUndefined();
     expect(css(panels(r)[0]).padding).toBeUndefined();
+
+    const vertical = render(
+      h(
+        Tabs,
+        { defaultValue: "a", orientation: "vertical" } as never,
+        h(Tabs.List, { unstyled: true }, h(Tabs.Tab, { value: "a", unstyled: true }, "First")),
+        h(Tabs.Content, { value: "a", unstyled: true }, "Panel A"),
+      ),
+    );
+    expect(css(list(vertical))).toMatchObject({ "flex-direction": "column" });
+    expect(css(list(vertical))["border-right-width"]).toBeUndefined();
+    expect(css(tabList(vertical)[0])).toMatchObject({ "justify-content": "flex-start" });
+    expect(css(tabList(vertical)[0])["margin-right"]).toBeUndefined();
+  });
+
+  it("sizes tabs and panels from a literal pixel size, and falls back to the default space for a size with no space token", () => {
+    const r = tabs({ defaultValue: "a", size: 40 });
+    expect(css(tabList(r)[0])).toMatchObject({ height: "40px", "border-radius": "0px" });
+    expect(css(panels(r)[0]).padding).toBe("40px");
+
+    createTokens({ size: { odd: 30 } });
+    const odd = tabs({ defaultValue: "a", size: "$odd" });
+    expect(css(panels(odd)[0]).padding).toBe("18px");
+  });
+
+  it("calls caller handlers on the list and tabs before its own", () => {
+    const onKeyDown = vi.fn();
+    const onClick = vi.fn();
+    const onValueChange = vi.fn();
+    const r = render(
+      h(
+        Tabs,
+        { defaultValue: "a", onValueChange } as never,
+        h(Tabs.List, { onKeyDown }, h(Tabs.Tab, { value: "a" }, "First"), h(Tabs.Tab, { value: "b", onClick }, "Second")),
+      ),
+    );
+    tabList(r)[0].focus();
+    keydown(tabList(r)[0], "ArrowRight");
+    expect(onKeyDown).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(tabList(r)[1]);
+    click(tabList(r)[1]);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onValueChange).toHaveBeenLastCalledWith("b");
+  });
+
+  it("ignores a click that reaches a disabled tab through a child", () => {
+    const onValueChange = vi.fn();
+    const r = render(
+      h(
+        Tabs,
+        { defaultValue: "a", onValueChange } as never,
+        h(Tabs.List, null, h(Tabs.Tab, { value: "a" }, "First"), h(Tabs.Tab, { value: "b", disabled: true }, h("span", { "data-testid": "inner" }, "Second"))),
+      ),
+    );
+    r.get("[data-testid=inner]").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
+  it("leaves secondary and modified mouse presses alone without selecting", () => {
+    const onValueChange = vi.fn();
+    const r = tabs({ defaultValue: "a", onValueChange });
+    const right = new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 2 });
+    tabList(r)[1].dispatchEvent(right);
+    expect(right.defaultPrevented).toBe(true);
+    const ctrl = new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, ctrlKey: true });
+    tabList(r)[1].dispatchEvent(ctrl);
+    expect(ctrl.defaultPrevented).toBe(true);
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
+  it("renders childless parts and inert tabs outside a Tabs", () => {
+    const r = render(h(Tabs, {} as never, h(Tabs.List, null), h(Tabs.Content, { value: "a", forceMount: true })));
+    expect(list(r).children).toHaveLength(0);
+    expect(panels(r)[0].textContent).toBe("");
+    expect(r.root.hasAttribute("data-value")).toBe(false);
+
+    const empty = render(h(Tabs, { defaultValue: "a" } as never));
+    expect(empty.root.childElementCount).toBe(0);
+    expect(empty.root.dataset.value).toBe("a");
+
+    const lone = render(h(Tabs.Tab, { value: "a" }));
+    click(lone.root);
+    expect(lone.root.getAttribute("aria-selected")).toBe("false");
+    expect(lone.root.textContent).toBe("");
   });
 });

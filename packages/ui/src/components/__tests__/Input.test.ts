@@ -96,6 +96,16 @@ describe("TextArea", () => {
     expect(css(render(h(TextArea, { rows: 5 })).root)["min-height"]).toBe("115px");
   });
 
+  it("an explicitly undefined rows keeps the three-row minimum", () => {
+    expect(css(render(h(TextArea, { rows: undefined })).root)["min-height"]).toBe("69px");
+  });
+
+  it("has no minimum height when the font has no line height for its size", () => {
+    const r = render(h(TextArea, { size: "$0.5" }));
+    expect(css(r.root)["min-height"]).toBeUndefined();
+    expect(css(r.root)["font-size"]).toBeUndefined();
+  });
+
   it("keeps the Input styling and its own theme", () => {
     const r = render(h(TextArea, { size: "$2" }));
     expect(css(r.root)).toMatchObject({ "border-color": "var(--borderColor)", "font-size": "13px" });

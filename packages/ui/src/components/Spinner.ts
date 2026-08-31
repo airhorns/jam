@@ -20,10 +20,8 @@ const ringSized = (diameter: number) => ({
   borderWidth: Math.max(2, Math.round(diameter / 12)),
 });
 
-const spinnerSized: VariantFunction = (value, { tokens }) => {
-  const diameter = tokenValue(tokens, "size", value);
-  return diameter === undefined ? null : ringSized(diameter);
-};
+/** Only runs for literal numbers and size tokens that exist, so the lookup always resolves. */
+const spinnerSized: VariantFunction = (value, { tokens }) => ringSized(tokenValue(tokens, "size", value)!);
 
 export type SpinnerProps = StyledProps & {
   size?: "small" | "large" | string | number;

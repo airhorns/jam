@@ -129,5 +129,35 @@ describe("Checkbox", () => {
   it("shares size with the indicator through context", () => {
     const r = render(h(Checkbox, { size: "$2", defaultChecked: true }, h(Checkbox.Indicator, null)));
     expect(css(r.get(".is_CheckboxIndicator"))["font-size"]).toBe("10px");
+    const literal = render(h(Checkbox, { size: 40, defaultChecked: true }, h(Checkbox.Indicator, null)));
+    expect(css(literal.get(".is_CheckboxIndicator"))["font-size"]).toBe("30px");
+  });
+
+  it("leaves the box and indicator unsized for an unknown size token", () => {
+    const r = render(h(Checkbox, { size: "$nonexistent", defaultChecked: true }, h(Checkbox.Indicator, null)));
+    expect(css(r.root).width).toBeUndefined();
+    expect(css(r.get(".is_CheckboxIndicator"))["font-size"]).toBeUndefined();
+  });
+
+  it("resets to unchecked when no default was given", () => {
+    const r = render(h("form", null, h(Checkbox, { name: "agree" })));
+    click(r.get("button"));
+    expect(r.get("button").getAttribute("aria-checked")).toBe("true");
+    r.get<HTMLFormElement>("form").dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
+    expect(r.get("button").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("runs a caller onClick before toggling and ignores clicks reaching a disabled box through the indicator", () => {
+    const onClick = vi.fn();
+    const r = render(h(Checkbox, { onClick }));
+    click(r.root);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(r.root.getAttribute("aria-checked")).toBe("true");
+
+    const onCheckedChange = vi.fn();
+    const disabled = render(h(Checkbox, { disabled: true, defaultChecked: true, onCheckedChange }, h(Checkbox.Indicator, null)));
+    disabled.get(".is_CheckboxIndicator").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onCheckedChange).not.toHaveBeenCalled();
+    expect(disabled.root.getAttribute("aria-checked")).toBe("true");
   });
 });

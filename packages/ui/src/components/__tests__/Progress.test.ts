@@ -85,4 +85,11 @@ describe("Progress", () => {
     expect(css(r.root).height).toBeUndefined();
     expect(css(r.root)["border-radius"]).toBeUndefined();
   });
+
+  it("renders every child it is given", () => {
+    const r = render(h(Progress, { value: 25 }, h(Progress.Indicator, { "data-testid": "indicator" }), h("span", { "data-testid": "label" }, "25%")));
+    expect(r.root.contains(r.get("[data-testid=indicator]"))).toBe(true);
+    expect(r.get("[data-testid=label]").textContent).toBe("25%");
+    expect(css(r.get("[data-testid=indicator]")).transform).toBe("translateX(-87.5%)");
+  });
 });

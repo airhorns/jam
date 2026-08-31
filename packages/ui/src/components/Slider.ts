@@ -31,7 +31,6 @@ type SliderStateValue = {
   disabled: boolean;
   /** Position of a value along the track, 0–100. */
   percent: (value: number) => number;
-  setAt: (index: number, value: number) => void;
   nudge: (index: number, steps: number | "min" | "max") => number[];
   slideEnd: (values: number[]) => void;
 };
@@ -44,7 +43,6 @@ const SliderState = createContext<SliderStateValue>({
   from: "from-left",
   disabled: false,
   percent: () => 0,
-  setAt: () => {},
   nudge: () => [],
   slideEnd: () => {},
 });
@@ -468,9 +466,6 @@ function SliderComponent(props: SliderProps): VNode {
     from,
     disabled,
     percent: (value) => ((clamp(value, min, max) - min) / (max - min || 1)) * 100,
-    setAt: (index, value) => {
-      commit(index, value);
-    },
     nudge: (index, steps) => {
       const current = values[index] ?? min;
       if (steps === "min") return commit(index, min);

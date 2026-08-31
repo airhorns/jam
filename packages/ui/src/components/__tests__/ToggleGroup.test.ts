@@ -180,4 +180,49 @@ describe("ToggleGroup", () => {
     expect(css(bare.get("button"))["background-color"]).toBe("transparent");
     expect(css(bare.get("button")).height).toBeUndefined();
   });
+
+  it("sizes items from a literal pixel size", () => {
+    const r = items({ size: 40 });
+    expect(css(buttons(r)[0])).toMatchObject({ height: "40px", "padding-left": "10px", "font-size": "40px" });
+  });
+
+  it("runs caller handlers before its own and keeps a caller class", () => {
+    const onClick = vi.fn();
+    const onKeyDown = vi.fn();
+    const onValueChange = vi.fn();
+    const r = items({ onValueChange, onKeyDown, class: "mine" }, { onClick });
+    expect(r.root.classList.contains("mine")).toBe(true);
+    click(buttons(r)[2]);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onValueChange).toHaveBeenLastCalledWith("right");
+    buttons(r)[0].focus();
+    keydown(buttons(r)[0], "ArrowRight");
+    expect(onKeyDown).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(buttons(r)[1]);
+  });
+
+  it("ignores arrow keys and clicks through children while disabled", () => {
+    const onValueChange = vi.fn();
+    const r = render(
+      h(
+        ToggleGroup,
+        { disabled: true, onValueChange } as never,
+        h(ToggleGroup.Item, { value: "a" }, h("span", { "data-testid": "inner" }, "A")),
+        h(ToggleGroup.Item, { value: "b" }, "B"),
+      ),
+    );
+    buttons(r)[0].focus();
+    expect(keydown(buttons(r)[0], "ArrowRight").defaultPrevented).toBe(false);
+    r.get("[data-testid=inner]").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
+  it("renders childless parts and inert items outside a group", () => {
+    expect(render(h(ToggleGroup, {} as never)).root.children).toHaveLength(0);
+    const r = render(h(ToggleGroup, {} as never, h(ToggleGroup.Item, { value: "a" })));
+    expect(buttons(r)[0].textContent).toBe("");
+    const lone = render(h(ToggleGroup.Item, { value: "a" }, "Alone"));
+    click(lone.root);
+    expect(lone.root.getAttribute("aria-pressed")).toBe("false");
+  });
 });

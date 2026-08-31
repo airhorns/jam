@@ -103,4 +103,27 @@ describe("Button", () => {
     expect(css(r.get("button")).height).toBe("28px");
     expect(css(r.get("span"))["font-size"]).toBe("12px");
   });
+
+  it("sizes the frame, label and icons from a literal pixel size", () => {
+    const r = render(h(Button, { size: 40, icon: "★" }, "Star"));
+    expect(css(r.root)).toMatchObject({ height: "40px", "padding-left": "10px", "border-radius": "8px", gap: "16px" });
+    expect(css(r.get(".is_ButtonText"))["font-size"]).toBe("40px");
+    expect(css(r.get(".is_ButtonIcon"))).toMatchObject({ "font-size": "20px", width: "20px", height: "20px" });
+  });
+
+  it("circular buttons without a size fall back to the default token", () => {
+    const r = render(h(Button, { circular: true }, "+"));
+    expect(css(r.root)).toMatchObject({ width: "44px", height: "44px", "border-radius": "100000px" });
+  });
+
+  it("noTextWrap leaves string children bare", () => {
+    const r = render(h(Button, { noTextWrap: true }, "Raw"));
+    expect(r.root.textContent).toBe("Raw");
+    expect(r.query(".is_ButtonText")).toBeNull();
+  });
+
+  it("leaves an icon unsized when the font has no size for its token", () => {
+    const r = render(h(Button.Icon, { size: "$9" }, "★"));
+    expect(css(r.root)["font-size"]).toBeUndefined();
+  });
 });

@@ -155,4 +155,50 @@ describe("mount: html", () => {
     button.dispatchEvent(new MouseEvent("click"));
     expect(seen).toEqual(["second"]);
   });
+
+  it("clears boolean attributes that turn false and drops listeners for handlers that go away", () => {
+    const clicks: string[] = [];
+    replace("row", "locked", true);
+    const Row = () => {
+      const [{ locked }] = when(["row", "locked", $.locked]);
+      return h("div", { hidden: locked, ...(locked ? { onClick: () => clicks.push("locked") } : {}) }, "row");
+    };
+    unmount = mount(h(Row, null), container);
+    const div = container.firstElementChild as HTMLElement;
+    expect(div.hasAttribute("hidden")).toBe(true);
+    div.dispatchEvent(new MouseEvent("click"));
+    expect(clicks).toEqual(["locked"]);
+
+    replace("row", "locked", false);
+    expect(div.hasAttribute("hidden")).toBe(false);
+    div.dispatchEvent(new MouseEvent("click"));
+    expect(clicks).toEqual(["locked"]);
+  });
+
+  it("renders raw VDOM facts once per entity and treats a text entity without text as empty", () => {
+    unmount = mount(null, container);
+    db.insert("dom", "child", 0, "twice");
+    db.insert("dom", "child", 1, "twice");
+    db.insert("twice", "tag", "span");
+    db.insert("twice", "child", 0, "blank");
+    db.insert("blank", "tag", "__text");
+    expect(container.childNodes).toHaveLength(1);
+    expect(container.firstElementChild?.tagName).toBe("SPAN");
+    expect(container.firstElementChild?.childNodes).toHaveLength(1);
+    expect(container.textContent).toBe("");
+  });
+
+  it("releases element refs it still holds at unmount when the facts behind them outlive the mount", () => {
+    const seen: (Element | null)[] = [];
+    db.setRef("host:ref", (el: Element | null) => seen.push(el));
+    db.insert("dom", "child", 0, "host");
+    db.insert("host", "tag", "div");
+    db.insert("host", "elementRef", "host:ref");
+    const stop = mount(null, container);
+    const div = container.firstElementChild!;
+    expect(seen).toEqual([div]);
+    stop();
+    expect(seen).toEqual([div, null]);
+    expect(db.query(["host", "tag", $.t])).toEqual([{ t: "div" }]);
+  });
 });

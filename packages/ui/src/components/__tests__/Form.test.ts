@@ -46,6 +46,13 @@ describe("Form", () => {
     expect(trigger.className).toContain("t_light_Button");
   });
 
+  it("Trigger keeps a caller className alongside its own", () => {
+    const r = render(h(Form, null, h(Form.Trigger, { className: "mine" }, "Save")));
+    const trigger = r.get("button");
+    expect(trigger.classList.contains("is_FormTrigger")).toBe(true);
+    expect(trigger.classList.contains("mine")).toBe(true);
+  });
+
   it("Trigger with asChild submits through its child", () => {
     let submits = 0;
     const r = render(

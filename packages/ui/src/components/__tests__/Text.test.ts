@@ -28,6 +28,9 @@ describe("Text", () => {
     expect(css(three.root)).toMatchObject({ "-webkit-line-clamp": "3", "-webkit-box-orient": "vertical", overflow: "hidden", "white-space": "normal" });
     const ellipsis = render(h(Text, { ellipsis: true }, "x"));
     expect(css(ellipsis.root)["text-overflow"]).toBe("ellipsis");
+    const none = render(h(Text, { numberOfLines: 0 }, "x"));
+    expect(css(none.root)["-webkit-line-clamp"]).toBeUndefined();
+    expect(css(none.root).overflow).toBeUndefined();
   });
 
   it("text nested in text inherits the parent's wrapping so ellipsis still truncates", () => {

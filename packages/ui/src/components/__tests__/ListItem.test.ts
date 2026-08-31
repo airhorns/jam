@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { h } from "@jam/core/jsx";
 import { render, css, setupDefaultUI } from "../../testing";
+import { createTokens } from "../../tokens";
 import { ListItem } from "../ListItem";
 import { YStack } from "../Stacks";
 
@@ -120,5 +121,27 @@ describe("ListItem", () => {
     const r = render(h(ListItem, { unstyled: true, title: "Star" }));
     expect(css(r.root)["min-height"]).toBeUndefined();
     expect(css(r.root)["background-color"]).toBeUndefined();
+  });
+
+  it("sizes the row, text and icon from a literal pixel size", () => {
+    const r = render(h(ListItem, { size: 40, title: "Star", subTitle: "Favourite", icon: "@" }));
+    expect(css(r.root)).toMatchObject({ "min-height": "40px", "padding-left": "10px", "padding-top": "4px" });
+    expect(css(r.get(".is_ListItemTitle"))["font-size"]).toBe("40px");
+    expect(css(r.get(".is_ListItemSubtitle"))["font-size"]).toBe("34px");
+    expect(css(r.get(".is_ListItemIcon"))["font-size"]).toBe("16px");
+  });
+
+  it("falls back to the default space for a size token with no matching space, and leaves an icon unsized when the font has no such size", () => {
+    createTokens({ size: { odd: 30 } });
+    const r = render(h(ListItem, { size: "$odd", title: "Star" }, h(ListItem.Icon, { size: "$0.5" }, "@")));
+    expect(css(r.root)).toMatchObject({ "min-height": "30px", "padding-left": "18px" });
+    expect(css(r.get(".is_ListItemIcon"))["font-size"]).toBeUndefined();
+  });
+
+  it("accepts elements for the title and subtitle", () => {
+    const r = render(h(ListItem, { title: h("b", { "data-testid": "title" }, "Bold"), subTitle: h("i", { "data-testid": "sub" }, "Italic") }));
+    expect(r.get("[data-testid=title]").tagName).toBe("B");
+    expect(r.get("[data-testid=sub]").tagName).toBe("I");
+    expect(r.query(".is_ListItemTitle")).toBeNull();
   });
 });

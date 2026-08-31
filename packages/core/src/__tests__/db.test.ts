@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { FactDB, $, _, matchPattern, type Fact, type FactChange, type FactChangeInfo } from "../db";
 import { autorun, transaction } from "../reactive";
+import { where } from "../primitives";
 
 describe("matchPattern", () => {
   it("matches exact facts", () => {
@@ -161,6 +162,32 @@ describe("FactDB", () => {
     it("returns empty for empty patterns", () => {
       expect(db.query()).toEqual([]);
     });
+
+    it("treats _ as a wildcard that binds nothing", () => {
+      expect(db.query(["todo", _, "done", $.done]).map((b) => b.done).sort()).toEqual([false, true]);
+    });
+
+    it("lets an effect that subscribed to an index it could not compile go away cleanly", () => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      const broken = db.index(["todo", $.id, "title", $.title], where($.missing, ">", 1));
+      const stop = autorun(() => broken.get());
+      expect(errors).toHaveBeenCalledWith("[jam] effect failed", expect.any(Error));
+      expect(db.stats().queries).toBe(0);
+      expect(() => stop()).not.toThrow();
+      expect(db.stats().queries).toBe(0);
+      errors.mockRestore();
+    });
+
+    it("replace() needs an attribute path and a value", () => {
+      expect(() => db.replace("todo")).toThrow("replace() requires at least 2 terms");
+    });
+  });
+
+  describe("bindings", () => {
+    it("only hands out markers for string keys", () => {
+      expect($.title).toEqual({ __binding: true, name: "title" });
+      expect(($ as unknown as Record<symbol, unknown>)[Symbol.iterator]).toBeUndefined();
+    });
   });
 
   describe("refs (side-channel)", () => {
@@ -174,6 +201,50 @@ describe("FactDB", () => {
       db.setRef("key", "val");
       db.deleteRef("key");
       expect(db.getRef("key")).toBeUndefined();
+    });
+
+    it("keeps a ref alive while any owner still holds it and drops it with the last", () => {
+      const a = db.createChildOwner(db.getCurrentOwnerId(), "a");
+      const b = db.createChildOwner(db.getCurrentOwnerId(), "b");
+      db.withOwnerScope(a, () => db.setRef("shared", 1));
+      db.withOwnerScope(b, () => db.setRef("shared", 2));
+      db.setRef("root", 3);
+      db.revokeOwner(a);
+      expect(db.getRef("shared")).toBe(2);
+      db.revokeOwner(b);
+      expect(db.getRef("shared")).toBeUndefined();
+      expect(db.getRef("root")).toBe(3);
+    });
+
+    it("deleting an owned ref also forgets who owned it", () => {
+      const owner = db.createChildOwner(db.getCurrentOwnerId(), "a");
+      db.withOwnerScope(owner, () => db.setRef("k", 1));
+      db.deleteRef("k");
+      db.withOwnerScope(owner, () => db.setRef("k", 2));
+      expect(db.getRef("k")).toBe(2);
+      db.revokeOwner(owner);
+      expect(db.getRef("k")).toBeUndefined();
+    });
+  });
+
+  describe("owners", () => {
+    it("knows which owners exist, ignores revoking unknown ones and refuses to revoke the root", () => {
+      expect(db.ownerExists("nobody")).toBe(false);
+      expect(() => db.revokeOwner("nobody")).not.toThrow();
+      const owner = db.createChildOwner(db.getCurrentOwnerId(), "a");
+      expect(db.ownerExists(owner)).toBe(true);
+      expect(() => db.revokeOwner(db.getCurrentOwnerId())).toThrow("the root owner cannot be revoked");
+      db.revokeOwner(owner);
+      expect(db.ownerExists(owner)).toBe(false);
+    });
+
+    it("falls back to the root id when the current owner was revoked underneath it", () => {
+      const owner = db.createChildOwner(db.getCurrentOwnerId(), "a");
+      db.withOwnerScope(owner, () => {
+        expect(db.getCurrentOwnerId()).toBe(owner);
+        db.revokeOwner(owner);
+        expect(db.getCurrentOwnerId()).toBe("__root__");
+      });
     });
   });
 

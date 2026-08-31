@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { $, forget, when } from "@jam/core";
 import { createFont, getFont, getFontStyles, getFontFamily, getFontValue, fillSizes, hasFont } from "../fonts";
 import { resetUI } from "../testing";
 
@@ -87,6 +88,24 @@ describe("createFont", () => {
     expect(f.fontWeight).toBeUndefined();
     expect(f.letterSpacing).toBeUndefined();
   });
+
+  it("records font faces per weight, with italics when given, without polluting the size tables", () => {
+    createFont("body", {
+      family: "Inter",
+      size: { "1": 12 },
+      face: { "400": { normal: "Inter-Regular", italic: "Inter-Italic" }, "700": { normal: "Inter-Bold" } },
+    });
+    const faces = when(["font", "body", $.prop, $.weight, $.face]).map((r) => [r.prop, r.weight, r.face]);
+    expect(faces).toEqual(
+      expect.arrayContaining([
+        ["face", "400", "Inter-Regular"],
+        ["faceItalic", "400", "Inter-Italic"],
+        ["face", "700", "Inter-Bold"],
+      ]),
+    );
+    expect(faces.filter(([prop]) => prop === "faceItalic")).toHaveLength(1);
+    expect(getFont("body")).toEqual({ family: "Inter", size: { "1": 12, $1: 12 }, lineHeight: {}, weight: {}, letterSpacing: {} });
+  });
 });
 
 describe("getFont", () => {
@@ -111,6 +130,12 @@ describe("getFont", () => {
     expect(getFont("body")!.size["1"]).toBe(12);
     createFont("body", { family: "Inter", size: { "1": 13 } });
     expect(getFont("body")!.size["1"]).toBe(13);
+  });
+
+  it("falls back to an empty family when the family fact is gone", () => {
+    createFont("body", { family: "Inter", size: { "1": 12 } });
+    forget("font", "body", "family", "Inter");
+    expect(getFont("body")!.family).toBe("");
   });
 });
 

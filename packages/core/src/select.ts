@@ -234,7 +234,7 @@ function parseSelector(input: string): SelectorSegment[] {
       } else if (/[\w-]/.test(input[i])) {
         simple.tag = readIdent();
       } else {
-        break;
+        throw new Error(`select: unsupported character "${input[i]}" in selector "${input}"`);
       }
     }
 

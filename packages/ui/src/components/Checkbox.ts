@@ -13,11 +13,8 @@ export const CheckboxContext = createStyledContext<{ size?: string | number }>({
 
 const CheckboxState = createContext<{ checked: CheckedState }>({ checked: false });
 
-/** tamagui sizes the box at 45% of the size token and rounds it at an eighth of it. */
-const boxSize = (value: unknown, tokens: VariantExtras["tokens"]) => {
-  const token = tokenValue(tokens, "size", value) ?? tokenValue(tokens, "size", "$true") ?? 44;
-  return Math.round(token * 0.45);
-};
+/** tamagui sizes the box at 45% of the size token; the `...size` spread only runs for tokens that exist. */
+const boxSize = (value: unknown, tokens: VariantExtras["tokens"]) => Math.round(tokenValue(tokens, "size", value)! * 0.45);
 
 export const CheckboxFrame = styled("button", {
   name: "Checkbox",

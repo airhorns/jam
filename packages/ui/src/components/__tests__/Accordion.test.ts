@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { h } from "@jam/core/jsx";
 import { render, css, click, keydown, injectedRules, setupDefaultUI } from "../../testing";
+import { createTokens } from "../../tokens";
 import { Accordion } from "../Accordion";
 
 beforeEach(() => {
@@ -250,5 +251,66 @@ describe("Accordion", () => {
     expect(css(r.get("[data-value=a]"))["border-bottom-width"]).toBeUndefined();
     expect(css(triggers(r)[0])["min-height"]).toBeUndefined();
     expect(css(regions(r)[0])["padding-bottom"]).toBeUndefined();
+  });
+
+  it("sizes triggers and content from a literal pixel size, and falls back to the default space for a size with no space token", () => {
+    const r = accordion({ defaultValue: "a", size: 40 });
+    expect(css(triggers(r)[0])["min-height"]).toBe("40px");
+    expect(css(regions(r)[0])["padding-bottom"]).toBe("40px");
+
+    createTokens({ size: { odd: 30 } });
+    const odd = accordion({ defaultValue: "a", size: "$odd" });
+    expect(css(regions(odd)[0])["padding-bottom"]).toBe("18px");
+  });
+
+  it("calls caller handlers on the frame and triggers before its own, and keeps a caller class", () => {
+    const onKeyDown = vi.fn();
+    const onClick = vi.fn();
+    const onValueChange = vi.fn();
+    const r = render(
+      h(
+        Accordion,
+        { onValueChange, onKeyDown, class: "mine" } as never,
+        h(Accordion.Item, { value: "a" }, h(Accordion.Trigger, { onClick }, "First"), h(Accordion.Content, null, "Body")),
+        h(Accordion.Item, { value: "b" }, h(Accordion.Trigger, null, "Second"), h(Accordion.Content, null, "Body")),
+      ),
+    );
+    expect(r.root.classList.contains("mine")).toBe(true);
+    click(triggers(r)[0]);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onValueChange).toHaveBeenLastCalledWith("a");
+    triggers(r)[0].focus();
+    keydown(triggers(r)[0], "ArrowDown");
+    expect(onKeyDown).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(triggers(r)[1]);
+  });
+
+  it("renders a custom indicator and childless parts", () => {
+    const r = render(
+      h(
+        Accordion,
+        { defaultValue: "a" } as never,
+        h(Accordion.Item, { value: "a" }, h(Accordion.Header, null, h(Accordion.Trigger, null, h(Accordion.Indicator, { "data-testid": "indicator" }, "+"))), h(Accordion.Content, null)),
+        h(Accordion.Item, { value: "b" }, h(Accordion.Header, null), h(Accordion.Trigger, null)),
+        h(Accordion.Item, { value: "c" }),
+      ),
+    );
+    expect(r.get("[data-testid=indicator]").textContent).toBe("+");
+    expect(r.get("[data-testid=indicator]").querySelector("svg")).toBeNull();
+    expect(regions(r)[0].textContent).toBe("");
+    expect(triggers(r)[1].textContent).toBe("");
+    expect(r.get("[data-value=c]").children).toHaveLength(0);
+    expect(render(h(Accordion, {} as never)).root.children).toHaveLength(0);
+  });
+
+  it("renders inert parts outside an Accordion", () => {
+    const r = render(h("div", null, h(Accordion.Item, { value: "a" }, h(Accordion.Trigger, null, "Lone", h(Accordion.Indicator, null)), h(Accordion.Content, null, "Body"))));
+    const trigger = r.get("button");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    click(trigger);
+    expect(r.get("button").getAttribute("aria-expanded")).toBe("false");
+    const lone = render(h(Accordion.Trigger, null, "Alone"));
+    click(lone.root);
+    expect(lone.root.getAttribute("aria-expanded")).toBe("false");
   });
 });

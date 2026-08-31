@@ -28,6 +28,12 @@ describe("Group", () => {
     expect(Group).toBe(YGroup);
   });
 
+  it("renders an empty group without children", () => {
+    const r = render(h(XGroup, null));
+    expect(r.root.classList.contains("is_Group")).toBe(true);
+    expect(r.root.childElementCount).toBe(0);
+  });
+
   it("takes the radius from the size token", () => {
     expect(css(render(h(XGroup, null, item("a"))).root)["border-radius"]).toBe("9px");
     expect(css(render(h(XGroup, { size: "$6" }, item("a"))).root)["border-radius"]).toBe("16px");

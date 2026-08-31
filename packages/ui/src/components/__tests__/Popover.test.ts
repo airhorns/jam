@@ -5,6 +5,7 @@ import { render, css, setupDefaultUI, click, keydown, tick, pointerEnter, pointe
 import { Popover } from "../Popover";
 import { Button } from "../Button";
 import type { Placement } from "../../floating";
+import { renderError } from "./helpers";
 
 beforeEach(() => {
   setupDefaultUI();
@@ -198,5 +199,91 @@ describe("Popover", () => {
     await tick();
     expect(content.style.left).toBe("150px");
     expect(css(content)).toMatchObject({ padding: "7px", "border-radius": "5px" });
+  });
+
+  it("reports parts rendered outside a Popover", () => {
+    expect(renderError(h(Popover.Content, null, "Lost"))).toMatch(/Popover.Content must be rendered inside <Popover>/);
+  });
+
+  it("opens to the left or right of the trigger and keeps a caller's inline style", async () => {
+    for (const placement of ["right", "left"] as const) {
+      const { get } = render(
+        h(
+          Popover,
+          { placement },
+          h(Popover.Trigger, { "data-testid": "trigger" }, "Open"),
+          h(Popover.Content, { "data-testid": "content", style: { zIndex: 5 } }, "hi"),
+        ),
+      );
+      const trigger = get("[data-testid=trigger]");
+      rect(trigger, 400, 300, 80, 30);
+      click(trigger);
+      const content = get("[data-testid=content]");
+      rect(content, 0, 0, 200, 100);
+      await tick();
+      expect(content.dataset.placement).toBe(placement);
+      expect(content.style.position).toBe("fixed");
+      expect(content.style.zIndex).toBe("5");
+    }
+  });
+
+  it("merges Anchor and Close onto custom elements and runs caller click handlers first", () => {
+    const triggerClick = vi.fn();
+    const closeClick = vi.fn();
+    const { get, query } = render(
+      h(
+        Popover,
+        null,
+        h(Popover.Anchor, { asChild: true }, h("section", { "data-testid": "anchor" }, h(Popover.Trigger, { "data-testid": "trigger", onClick: triggerClick }, "Open"))),
+        h(Popover.Content, { "data-testid": "content" }, h(Popover.Close, { asChild: true, onClick: closeClick }, h("a", { href: "#", "data-testid": "close" }, "Close"))),
+      ),
+    );
+    const anchor = get("[data-testid=anchor]");
+    expect(anchor.tagName).toBe("SECTION");
+    expect(anchor.dataset.layerAnchor).toBe(get("[data-testid=trigger]").dataset.layerTrigger);
+    click(get("[data-testid=trigger]"));
+    expect(triggerClick).toHaveBeenCalledTimes(1);
+    expect(get("[data-testid=close]").tagName).toBe("A");
+    click(get("[data-testid=close]"));
+    expect(closeClick).toHaveBeenCalledTimes(1);
+    expect(query("[data-testid=content]")).toBeNull();
+  });
+
+  it("takes the hover close delay from a hoverable object and drops a pending close on unmount", async () => {
+    vi.useFakeTimers();
+    try {
+      const onOpenChange = vi.fn();
+      const hoverable = (props: Record<string, unknown>) =>
+        render(h(Popover, { hoverable: props, onOpenChange }, h(Popover.Trigger, { "data-testid": "trigger" }, "Open"), h(Popover.Content, { "data-testid": "content" }, "hi")));
+
+      const quick = hoverable({ delay: 20 });
+      pointerEnter(quick.get("[data-testid=trigger]"));
+      await vi.advanceTimersByTimeAsync(0);
+      quick.get("[data-testid=content]");
+      pointerLeave(quick.get("[data-testid=trigger]"));
+      vi.advanceTimersByTime(25);
+      expect(quick.query("[data-testid=content]")).toBeNull();
+
+      const slow = hoverable({});
+      pointerEnter(slow.get("[data-testid=trigger]"));
+      await vi.advanceTimersByTimeAsync(0);
+      pointerLeave(slow.get("[data-testid=trigger]"));
+      vi.advanceTimersByTime(100);
+      expect(slow.query("[data-testid=content]")).not.toBeNull();
+      vi.advanceTimersByTime(60);
+      expect(slow.query("[data-testid=content]")).toBeNull();
+
+      onOpenChange.mockClear();
+      const gone = hoverable({ delay: 20 });
+      pointerEnter(gone.get("[data-testid=trigger]"));
+      await vi.advanceTimersByTimeAsync(0);
+      pointerLeave(gone.get("[data-testid=trigger]"));
+      gone.unmount();
+      vi.advanceTimersByTime(50);
+      expect(onOpenChange).toHaveBeenCalledTimes(1);
+      expect(onOpenChange).toHaveBeenLastCalledWith(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -8,6 +8,7 @@ import { createFont } from "../fonts";
 import { createMedia } from "../media";
 import { setDefaultFont, setAnimations } from "../settings";
 import { render, css, mediaCss, resetUI, injectedRules } from "../testing";
+import { atomicClassName } from "../css";
 
 beforeEach(() => {
   resetUI();
@@ -106,6 +107,27 @@ describe("styled basics", () => {
   it("sets displayName", () => {
     expect(styled("div", { name: "MyBox" }).displayName).toBe("MyBox");
     expect(styled("div", {}).displayName).toBe("Styled(div)");
+    const Named = () => h("b", null);
+    Named.displayName = "Fancy";
+    expect(styled(Named).displayName).toBe("Styled(Fancy)");
+    expect(styled(function Plain() { return h("b", null); }).displayName).toBe("Styled(Plain)");
+  });
+
+  it("ignores undefined pseudo values and media props for unregistered keys", () => {
+    const Box = styled("div", { defaultProps: { hoverStyle: { color: undefined, padding: 1 }, $nothing: { padding: 9 } } });
+    const r = render(h(Box, null));
+    expect(css(r.root, ":hover")).toEqual({ padding: "1px", "padding-top": "1px", "padding-right": "1px", "padding-bottom": "1px", "padding-left": "1px" });
+    expect(css(r.root).padding).toBeUndefined();
+    expect(injectedRules().some((rule) => rule.includes("9px"))).toBe(false);
+  });
+
+  it("drops null style values and keeps unresolvable refs verbatim", () => {
+    const Box = styled("div", { defaultProps: { padding: null, margin: "$space.99", color: "$mystery" } });
+    const classes = Array.from(render(h(Box, null)).root.classList);
+    expect(classes.some((c) => c.startsWith("_padtop-"))).toBe(false);
+    expect(classes.filter((c) => c.startsWith("_mar"))).toHaveLength(4);
+    expect(classes.filter((c) => c.startsWith("_col-"))).toEqual([atomicClassName("color", "$mystery")]);
+    expect(classes).toContain(atomicClassName("margin-top", "$space.99"));
   });
 });
 
@@ -117,8 +139,10 @@ describe("token and theme resolution", () => {
   });
 
   it("resolves color tokens for any prop", () => {
-    const Box = styled("div", { defaultProps: { borderColor: "$blue9" } });
-    expect(css(render(h(Box, null)).root)["border-color"]).toBe("#0090ff");
+    const Box = styled("div", { defaultProps: { borderColor: "$blue9", outline: "$blue9" } });
+    const root = render(h(Box, null)).root;
+    expect(css(root)["border-color"]).toBe("#0090ff");
+    expect(root.classList.contains(atomicClassName("outline", "#0090ff"))).toBe(true);
   });
 
   it("resolves theme refs to CSS variables and injects the theme rule", () => {
@@ -320,6 +344,72 @@ describe("variants", () => {
     const Ext = styled(Base, { defaultProps: { hoverStyle: { color: "blue" } } });
     expect(css(render(h(Ext, null)).root, ":hover")).toMatchObject({ color: "blue", padding: "1px" });
   });
+
+  it("matches :string and :boolean catch-alls", () => {
+    const Box = styled("div", {
+      variants: {
+        label: { ":string": (value: string) => ({ width: value.length }) },
+        on: { ":boolean": (value: boolean) => ({ opacity: value ? 1 : 0.2 }) },
+      },
+    });
+    expect(css(render(h(Box, { label: "abcd", on: false })).root)).toMatchObject({ width: "4px", opacity: "0.2" });
+    expect(css(render(h(Box, { on: true })).root).opacity).toBe("1");
+  });
+
+  it("applies nothing for a variant function that returns nothing, or a null default", () => {
+    const Box = styled("div", {
+      defaultProps: { padding: 1 },
+      variants: { quiet: () => undefined, size: { sm: { padding: 4 } } },
+      defaultVariants: { size: null },
+    });
+    expect(css(render(h(Box, { quiet: true })).root)).toEqual({ padding: "1px", "padding-top": "1px", "padding-right": "1px", "padding-bottom": "1px", "padding-left": "1px" });
+  });
+
+  it("exposes theme refs, their presence and concrete values to variant functions", () => {
+    const Box = styled("div", {
+      variants: {
+        probe: (_: boolean, { theme, themeValues }) => ({
+          color: theme.color,
+          borderColor: theme.nope ?? "pink",
+          outlineColor: "shadowColor" in theme && !("nope" in theme) ? "green" : "red",
+          backgroundColor: themeValues.background,
+        }),
+      },
+    });
+    expect(css(render(h(Box, { probe: true })).root)).toMatchObject({
+      color: "var(--color)",
+      "border-color": "pink",
+      "outline-color": "green",
+      "background-color": "#fff",
+    });
+    expect(css(render(h(Box, { probe: true, theme: "blue" })).root)["background-color"]).toBe("#e6f4ff");
+  });
+
+  it("gives variant functions empty theme values when no theme is active", () => {
+    resetUI();
+    const Box = styled("div", { variants: { probe: (_: boolean, { themeValues }) => ({ color: themeValues.color ?? "unset" }) } });
+    expect(css(render(h(Box, { probe: true })).root).color).toBe("unset");
+  });
+});
+
+describe("animation", () => {
+  beforeEach(() => setAnimations({ quick: "150ms ease-out" }));
+
+  it("plays enterStyle as a keyframe animation from those values", () => {
+    const Box = styled("div", { defaultProps: { opacity: 1, enterStyle: { opacity: 0 } } });
+    const el = render(h(Box, { animation: "quick" })).root;
+    expect(css(el).animation).toMatch(/^enter_aninam-\w+ 150ms ease-out$/);
+    expect(injectedRules().some((rule) => rule.startsWith("@keyframes enter_") && rule.includes("opacity: 0"))).toBe(true);
+  });
+
+  it("emits no animation for an empty enterStyle, and skips enter/exit styles inside media blocks", () => {
+    createMedia({ sm: { maxWidth: 600 } });
+    const Box = styled("div", { defaultProps: { enterStyle: {}, $sm: { enterStyle: { opacity: 0 }, padding: 3 } } });
+    const el = render(h(Box, { animation: "quick" })).root;
+    expect(css(el).animation).toBeUndefined();
+    expect(mediaCss(el, "(max-width: 600px)").padding).toBe("3px");
+    expect(injectedRules().some((rule) => rule.includes("opacity: 0"))).toBe(false);
+  });
 });
 
 describe("fonts", () => {
@@ -381,12 +471,23 @@ describe("asChild and composition", () => {
     expect(clicks).toBe(2);
   });
 
+  it("asChild falls back to rendering its own tag without exactly one element child", () => {
+    const Trigger = styled("button", { defaultProps: { padding: 3 } });
+    const two = render(h(Trigger, { asChild: true }, h("a", null, "one"), h("a", null, "two")));
+    expect(two.root.tagName).toBe("BUTTON");
+    expect(two.all("a")).toHaveLength(2);
+    const text = render(h(Trigger, { asChild: true }, "plain"));
+    expect(text.root.tagName).toBe("BUTTON");
+    expect(text.root.textContent).toBe("plain");
+  });
+
   it("extends a plain function component", () => {
     const Base = (props: Record<string, unknown>) => h("section", { class: props.class as string, id: "s" }, props.children as any);
     const Styled = styled(Base, { defaultProps: { padding: 5 } });
     const r = render(h(Styled, null, "x"));
     expect(r.root.tagName).toBe("SECTION");
     expect(css(r.root).padding).toBe("5px");
+    expect(render(h(Styled, null, h("i", null), h("i", null))).all("i")).toHaveLength(2);
   });
 
   it("composes styled components", () => {

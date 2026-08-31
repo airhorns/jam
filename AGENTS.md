@@ -4,7 +4,7 @@
 pnpm install       # Install all dependencies
 pnpm dev           # Run folk-todo example dev server
 pnpm test          # Run package/example unit tests where present
-pnpm test:coverage # packages/* unit tests with v8 coverage; CI fails under 90% lines/statements/functions/branches
+pnpm test:coverage # packages/* unit tests with v8 coverage; CI fails under 90% lines, statements, functions or branches, overall or in any one package
 pnpm test:examples # Example unit tests only
 pnpm test:e2e      # Run folk-todo, puddy-vite, linearlite and catalog e2e tests (Playwright)
 pnpm typecheck     # TypeScript check all packages

@@ -110,5 +110,8 @@ describe("ZStack", () => {
   it("ignores null children", () => {
     const r = render(h(ZStack, null, null, h(YStack, null), false));
     expect(r.all(".is_ZStackFill")).toHaveLength(1);
+    const empty = render(h(ZStack, { width: 10 }));
+    expect(empty.all(".is_ZStackFill")).toHaveLength(0);
+    expect(css(empty.root).width).toBe("10px");
   });
 });

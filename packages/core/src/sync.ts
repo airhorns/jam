@@ -488,9 +488,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     updateStatus();
   };
 
-  const markRemoteReady = (id: string) => {
-    const sub = remote.get(id);
-    if (!sub) return;
+  const markRemoteReady = (id: string, sub: RemoteSubscription) => {
     sub.synced = true;
     post({ t: "ready", id });
     const own = subscriptions.get(id);
@@ -667,14 +665,15 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         const sub = remote.get(message.id);
         if (!sub) return;
         applyChanges(snapshotChanges(sub, message.facts));
-        markRemoteReady(message.id);
+        markRemoteReady(message.id, sub);
         recordSeq(message.seq);
         return;
       }
       case "replay": {
-        if (!remote.has(message.id)) return;
+        const sub = remote.get(message.id);
+        if (!sub) return;
         applyChanges(message.changes);
-        markRemoteReady(message.id);
+        markRemoteReady(message.id, sub);
         recordSeq(message.seq);
         return;
       }
@@ -699,7 +698,6 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   };
 
   const scheduleReconnect = () => {
-    if (disposed) return;
     disconnected(true);
     postConn();
     const delay = Math.min(retryDelay * 2 ** attempts, MAX_RETRY_DELAY);

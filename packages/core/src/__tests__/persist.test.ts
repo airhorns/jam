@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { IDBKeyRange, indexedDB } from "fake-indexeddb";
 import { memoryStorage, type FactStorage } from "@jam/engine/storage";
 import { db, $, _ } from "../db";
 import { whenever, replace, claim, remember, scoped } from "../primitives";
@@ -167,5 +168,65 @@ describe("persist", () => {
     db.drop("todo", 1, "tag", _);
     await sleep(30);
     expect(await rows()).toEqual([[JSON.stringify(["todo", 2, "tag", "c"]), ["todo", 2, "tag", "c"]]]);
+  });
+
+  it("flush() writes pending changes immediately and reports a failing write without stopping", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const write = storage.write.bind(storage);
+    let fail = true;
+    storage.write = async (changes) => {
+      if (fail) throw new Error("disk full");
+      return write(changes);
+    };
+    const handle = await start();
+    db.insert("todo", 1, "title", "A");
+    await handle.flush();
+    expect(errors).toHaveBeenCalledWith("[jam] persist flush failed", expect.any(Error));
+    expect(await rows()).toEqual([]);
+
+    fail = false;
+    db.insert("todo", 2, "title", "B");
+    await handle.flush();
+    expect(await rows()).toEqual([[JSON.stringify(["todo", 2, "title", "B"]), ["todo", 2, "title", "B"]]]);
+    errors.mockRestore();
+  });
+});
+
+describe("persist without an explicit storage", () => {
+  const closers: Array<() => Promise<void>> = [];
+  afterEach(async () => {
+    while (closers.length) await closers.pop()!();
+    vi.unstubAllGlobals();
+    db.clear();
+  });
+
+  it("keeps facts in memory when IndexedDB is unavailable", async () => {
+    const dispose = await persist({ debounce: 10 });
+    closers.push(dispose);
+    db.insert("todo", 1, "title", "A");
+    await dispose();
+    closers.pop();
+    db.clear();
+
+    const again = await persist({ debounce: 10 });
+    closers.push(again);
+    expect(db.query(["todo", $.id, "title", $.t])).toEqual([]);
+  });
+
+  it("uses an IndexedDB database of the given name when it exists, and closes it on dispose", async () => {
+    vi.stubGlobal("indexedDB", indexedDB);
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const name = `jam-test-${Math.random().toString(36).slice(2)}`;
+
+    const dispose = await persist({ name, debounce: 10 });
+    closers.push(dispose);
+    db.insert("todo", 1, "title", "A");
+    await dispose();
+    closers.pop();
+    db.clear();
+
+    const again = await persist({ name, debounce: 10 });
+    closers.push(again);
+    expect(db.query(["todo", $.id, "title", $.t])).toEqual([{ id: 1, t: "A" }]);
   });
 });

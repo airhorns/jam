@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { h } from "@jam/core/jsx";
-import { render, css, click, keydown, setupDefaultUI } from "../../testing";
+import { render, css, click, keydown, setupDefaultUI, resetUI } from "../../testing";
 import { Switch } from "../Switch";
 
 beforeEach(() => {
@@ -133,5 +133,46 @@ describe("Switch", () => {
     expect(styles["background-color"]).toBe("transparent");
     expect(styles.width).toBeUndefined();
     expect(css(thumb(r))["background-color"]).toBeUndefined();
+  });
+
+  it("still travels one default track height when checked without a usable size", () => {
+    const unsized = render(h(Switch, { unstyled: true, checked: true }, h(Switch.Thumb, null)));
+    expect(css(thumb(unsized)).transform).toBe("translateY(-50%) translateX(29px)");
+    const unknown = render(h(Switch, { size: "$nonexistent", checked: true }, h(Switch.Thumb, null)));
+    expect(css(thumb(unknown)).transform).toBe("translateX(29px)");
+    const literal = render(h(Switch, { size: 40, checked: true }, h(Switch.Thumb, null)));
+    expect(css(thumb(literal)).transform).toBe("translateY(-50%) translateX(26px)");
+
+    resetUI();
+    const tokenless = render(h(Switch, { checked: true }, h(Switch.Thumb, null)));
+    expect(css(thumb(tokenless)).transform).toBe("translateX(29px)");
+  });
+
+  it("resets to unchecked when no default was given", () => {
+    const r = render(h("form", null, h(Switch, { name: "notifications" })));
+    click(r.get("button"));
+    expect(r.get("button").getAttribute("aria-checked")).toBe("true");
+    r.get<HTMLFormElement>("form").dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
+    expect(r.get("button").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("runs caller handlers before toggling", () => {
+    const onClick = vi.fn();
+    const onKeyDown = vi.fn();
+    const r = render(h(Switch, { onClick, onKeyDown }, h(Switch.Thumb, null)));
+    click(r.root);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(r.root.getAttribute("aria-checked")).toBe("true");
+    keydown(r.root, "ArrowLeft");
+    expect(onKeyDown).toHaveBeenCalledTimes(1);
+    expect(r.root.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("ignores a click that reaches a disabled switch through its thumb", () => {
+    const onCheckedChange = vi.fn();
+    const r = render(h(Switch, { disabled: true, onCheckedChange }, h(Switch.Thumb, null)));
+    thumb(r).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onCheckedChange).not.toHaveBeenCalled();
+    expect(r.root.getAttribute("aria-checked")).toBe("false");
   });
 });

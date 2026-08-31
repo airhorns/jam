@@ -114,10 +114,10 @@ export const RadioGroupItemFrame = styled("button", {
       },
     },
 
-    // tamagui's ratio: half the size token, so a radio reads smaller than a button.
+    // tamagui's ratio: half the size token, so a radio reads smaller than a button. The spread only runs for tokens that exist.
     size: {
       "...size": (value, { tokens }) => {
-        const side = Math.floor((tokenValue(tokens, "size", value) ?? 44) * 0.5);
+        const side = Math.floor(tokenValue(tokens, "size", value)! * 0.5);
         return { width: side, height: side };
       },
       ":number": (value: number) => ({ width: value, height: value }),

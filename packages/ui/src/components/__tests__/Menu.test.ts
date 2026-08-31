@@ -6,6 +6,7 @@ import { render, css, setupDefaultUI, click, keydown, tick, focus } from "../../
 import { Menu } from "../Menu";
 import type { MenuProps } from "../Menu";
 import { Button } from "../Button";
+import { renderError } from "./helpers";
 
 beforeEach(() => {
   setupDefaultUI();
@@ -403,5 +404,122 @@ describe("Menu", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("lets a space through to typeahead only while a query is in progress", async () => {
+    const onSelect = vi.fn();
+    const { get } = render(
+      h(Example, {
+        onSelect,
+        items: [h(Menu.Item, { "data-testid": "one", onSelect: () => onSelect("one") }, "New file"), h(Menu.Item, { "data-testid": "two", onSelect: () => onSelect("two") }, "New folder")],
+      }),
+    );
+    press(get("[data-testid=trigger]"), "ArrowDown");
+    await tick();
+    keydown(get("[data-testid=one]"), "n");
+    keydown(get("[data-testid=one]"), "e");
+    keydown(get("[data-testid=one]"), "w");
+    keydown(get("[data-testid=two]"), " ");
+    keydown(get("[data-testid=two]"), "f");
+    keydown(get("[data-testid=two]"), "o");
+    expect(active()).toBe(get("[data-testid=two]"));
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("a space on the content itself is neither typeahead nor a selection", async () => {
+    const onSelect = vi.fn();
+    const { get, query } = render(h(Example, { defaultOpen: true, onSelect }));
+    await tick();
+    const content = get("[data-testid=content]");
+    focus(content);
+    expect(keydown(content, " ").defaultPrevented).toBe(false);
+    expect(active()).toBe(content);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(query("[data-testid=content]")).not.toBeNull();
+  });
+
+  it("reports parts rendered outside their owners", () => {
+    expect(renderError(h(Menu.Trigger, null, "Open"))).toMatch(/Menu.Trigger must be rendered inside <Menu>/);
+    expect(renderError(h(Menu, { defaultOpen: true }, h(Menu.Content, null, h(Menu.RadioItem, { value: "a" }, "A"))))).toMatch(/Menu.RadioItem must be rendered inside <Menu.RadioGroup>/);
+    expect(renderError(h(Menu, { defaultOpen: true }, h(Menu.Content, null, h(Menu.Item, null, h(Menu.ItemIndicator, null)))))).toMatch(/Menu.ItemIndicator must be rendered inside/);
+  });
+
+  it("renders an arrow pointing at the trigger and labels outside a group", async () => {
+    const { get } = render(
+      h(
+        Menu,
+        { defaultOpen: true },
+        h(Menu.Trigger, { "data-testid": "trigger" }, "Open"),
+        h(Menu.Content, { "data-testid": "content" }, h(Menu.Label, { "data-testid": "label" }, "Loose"), h(Menu.Item, { size: 20, "data-testid": "big" }, "Big"), h(Menu.Arrow, { "data-testid": "arrow" })),
+      ),
+    );
+    await tick();
+    expect(get("[data-testid=arrow]").style.transform).toBe("rotate(45deg)");
+    expect(get("[data-testid=label]").hasAttribute("id")).toBe(false);
+    expect(css(get("[data-testid=big]"))["font-size"]).toBe("20px");
+  });
+
+  it("runs caller handlers on the trigger first and stops when they prevent default", () => {
+    const onPointerDown = vi.fn((event: PointerEvent) => event.preventDefault());
+    const onKeyDown = vi.fn((event: KeyboardEvent) => event.preventDefault());
+    const { get, query } = render(h(Menu, null, h(Menu.Trigger, { "data-testid": "trigger", onPointerDown, onKeyDown }, "Open"), h(Menu.Content, { "data-testid": "content" }, h(Menu.Item, null, "A"))));
+    const trigger = get("[data-testid=trigger]");
+    pointer(trigger, "pointerdown", { button: 0 });
+    press(trigger, "Enter");
+    expect(onPointerDown).toHaveBeenCalledTimes(1);
+    expect(onKeyDown).toHaveBeenCalledTimes(1);
+    expect(query("[data-testid=content]")).toBeNull();
+  });
+
+  it("runs caller handlers on the content and items before its own", async () => {
+    const contentKeyDown = vi.fn();
+    const handlers = { onClick: vi.fn(), onPointerDown: vi.fn(), onPointerUp: vi.fn(), onPointerMove: vi.fn(), onPointerLeave: vi.fn(), onKeyDown: vi.fn() };
+    const onSelect = vi.fn();
+    const { get, query } = render(
+      h(
+        Menu,
+        { defaultOpen: true },
+        h(Menu.Trigger, { "data-testid": "trigger" }, "Open"),
+        h(Menu.Content, { "data-testid": "content", onKeyDown: contentKeyDown }, h(Menu.Item, { "data-testid": "a", onSelect, ...handlers }, "A"), h(Menu.Item, { "data-testid": "b" }, "B")),
+      ),
+    );
+    await tick();
+    const a = get("[data-testid=a]");
+    pointer(a, "pointermove");
+    expect(handlers.onPointerMove).toHaveBeenCalledTimes(1);
+    expect(active()).toBe(a);
+    pointer(a, "pointerleave", { pointerType: "touch" });
+    expect(handlers.onPointerLeave).toHaveBeenCalledTimes(1);
+    expect(active()).toBe(a);
+    keydown(a, "ArrowDown");
+    expect(contentKeyDown).toHaveBeenCalledTimes(1);
+    expect(handlers.onKeyDown).toHaveBeenCalledTimes(1);
+    expect(active()).toBe(get("[data-testid=b]"));
+    contentKeyDown.mockImplementation((event: KeyboardEvent) => event.preventDefault());
+    keydown(get("[data-testid=b]"), "ArrowUp");
+    expect(active()).toBe(get("[data-testid=b]"));
+    click(a);
+    expect(handlers.onPointerDown).toHaveBeenCalledTimes(1);
+    expect(handlers.onPointerUp).toHaveBeenCalledTimes(1);
+    expect(handlers.onClick).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(query("[data-testid=content]")).toBeNull();
+  });
+
+  it("moves to the last item on ArrowUp from an item that is not focused, and copes with an empty menu", async () => {
+    const { get } = render(h(Example, { defaultOpen: true }));
+    await tick();
+    focus(get("[data-testid=content]"));
+    keydown(get("[data-testid=alpha]"), "ArrowUp");
+    expect(active()).toBe(get("[data-testid=gamma]"));
+    focus(get("[data-testid=content]"));
+    keydown(get("[data-testid=gamma]"), "ArrowDown");
+    expect(active()).toBe(get("[data-testid=alpha]"));
+
+    const empty = render(h(Example, { defaultOpen: true, items: [] }));
+    await tick();
+    focus(empty.get("[data-testid=content]"));
+    expect(keydown(empty.get("[data-testid=content]"), "ArrowDown").defaultPrevented).toBe(true);
+    expect(active()).toBe(empty.get("[data-testid=content]"));
   });
 });

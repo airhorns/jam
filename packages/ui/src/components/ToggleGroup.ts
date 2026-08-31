@@ -238,7 +238,7 @@ function ToggleGroupComponent(props: ToggleGroupProps): VNode {
       ...(frameProps as Record<string, unknown>),
       orientation,
       dir,
-      class: [groupedChildrenClass(orientation), props.class].filter(Boolean).join(" ") || undefined,
+      class: [groupedChildrenClass(orientation), props.class].filter(Boolean).join(" "),
       "aria-orientation": orientation,
       "data-orientation": orientation,
       "data-disabled": props.disabled ? "" : undefined,

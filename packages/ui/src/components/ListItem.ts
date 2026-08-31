@@ -25,7 +25,7 @@ const listItemSized: VariantFunction = (value, { tokens }) => {
     return { minHeight: value, paddingHorizontal: value * 0.25, paddingVertical: value * 0.1 };
   }
   return {
-    minHeight: tokenValue(tokens, "size", value) ?? tokens.size?.true,
+    minHeight: tokenValue(tokens, "size", value),
     paddingHorizontal: tokenValue(tokens, "space", value) ?? tokens.space?.true,
     paddingVertical: steppedSpace(tokens, value, -4),
   };

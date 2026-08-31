@@ -516,8 +516,7 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
       }
     }
     for (const [name, block] of Object.entries(acc.media)) {
-      const media = getMediaQuery(name);
-      if (!media) continue;
+      const media = getMediaQuery(name)!;
       const mediaPrecedence = getMediaPrecedence(name);
       for (const [prop, value] of Object.entries(stylesToCSS(resolveStyles(block.base, ctx)))) {
         classes.push(injectAtomic(prop, value, { media, mediaPrecedence }));
@@ -564,8 +563,7 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
     if (merged.asChild === true) {
       const only = rawChildren.length === 1 ? rawChildren[0] : undefined;
       if (only && typeof only === "object" && "__vnode" in only) {
-        const wrapped = provideTo([mergeOntoChild(only as VNode, passthrough)]);
-        return (wrapped.length === 1 ? wrapped[0] : h("span", { style: "display: contents" }, ...wrapped)) as VNode;
+        return provideTo([mergeOntoChild(only as VNode, passthrough)])[0] as VNode;
       }
     }
 
@@ -583,7 +581,7 @@ export function styled<P = {}>(base: string | StyledComponent<any> | ((props: an
     config.name ??
     (typeof base === "string"
       ? `Styled(${base})`
-      : `Styled(${(base as { displayName?: string }).displayName ?? (base as Function).name ?? "Component"})`);
+      : `Styled(${(base as { displayName?: string }).displayName ?? (base as Function).name})`);
 
   return component;
 }
