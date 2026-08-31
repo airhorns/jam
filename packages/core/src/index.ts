@@ -40,8 +40,8 @@ export type {
 } from "./db";
 export { autorun, reaction, untracked } from "./reactive";
 export type { ReactionOptions } from "./reactive";
-export { h, Fragment, ImperativeHost, injectVdom, createContext, useContext, useComponentId, Portal } from "./jsx";
-export type { VNode, VChild, Context, ElementRef, ImperativeHostProps } from "./jsx";
+export { h, Fragment, ImperativeHost, injectVdom, createContext, useContext, useComponentId, useCleanup, Portal } from "./jsx";
+export type { VNode, VChild, Context, Cleanup, ElementRef, ImperativeHostProps } from "./jsx";
 export { mount } from "./renderer";
 export { select } from "./select";
 export type { VdomElement } from "./select";

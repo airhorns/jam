@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { runInAction, observable } from "mobx";
 import { h } from "@jam/core/jsx";
-import { render, click, setupDefaultUI } from "../../testing";
+import { box, render, click, setupDefaultUI } from "../../testing";
 import { useFormReset } from "../../form";
 import { Form } from "../../components/Form";
 import { Input, TextArea } from "../../components/Input";
@@ -258,10 +257,10 @@ describe("Form conformance", () => {
     it("invokes the newest onReset callback a control rendered, not the first", () => {
       const first = vi.fn();
       const second = vi.fn();
-      const callback = observable.box(first);
+      const callback = box(first);
       const Probe = () => resetProbe(callback.get())();
       const r = render(h(Form, null, h(Probe, null)));
-      runInAction(() => callback.set(second));
+      callback.set(second);
       (r.root as HTMLFormElement).reset();
       expect(first).not.toHaveBeenCalled();
       expect(second).toHaveBeenCalledTimes(1);
@@ -272,12 +271,12 @@ describe("Form conformance", () => {
     it("stops resetting a control once it unmounts", () => {
       const staying = vi.fn();
       const leaving = vi.fn();
-      const show = observable.box(true);
+      const show = box(true);
       const Staying = resetProbe(staying);
       const Leaving = resetProbe(leaving);
       const Fields = () => h(Form, null, h(Staying, null), show.get() ? h(Leaving, null) : null);
       const r = render(h(Fields, null));
-      runInAction(() => show.set(false));
+      show.set(false);
       (r.root as HTMLFormElement).reset();
       expect(staying).toHaveBeenCalledTimes(1);
       expect(leaving).not.toHaveBeenCalled();

@@ -1,26 +1,23 @@
 // Benchmarks for sync(): how fast facts move between the server and a client.
 //
 // Run: corepack pnpm bench sync
-// Electric mode runs against the in-process FakeElectric double (real
-// @electric-sql/client + pglite-sync path), so what is measured is jam's own
-// work: mirroring shape rows into facts, the outbox, the write endpoint.
-//   - Initial load of a shape into an empty client (Electric and standalone)
-//   - One remote change arriving into an already-loaded shape
+// The server is an in-process createSyncServer over memory storage and the
+// socket is the fake network from the tests, so what is measured is jam's own
+// work: mirroring changes into storage and facts, the outbox, the ack path.
+//   - Initial load of a subscription into an empty client (server and standalone)
+//   - One remote change arriving into an already-loaded subscription
 //   - Local writes round-tripping to the server and back
 //
 // Vitest's bench mode runs no suite hooks, so fixtures are built by each
 // task's `setup` (once, ahead of the warmup) and torn down after its run.
 
 import { bench, describe, type BenchOptions } from "vitest";
-import { PGlite } from "@electric-sql/pglite";
-import { live } from "@electric-sql/pglite/live";
-import { electricSync } from "@electric-sql/pglite-sync";
+import { memoryStorage, type FactStorage } from "@jam/engine/storage";
 import { db, $ } from "../db";
 import { remember, scoped, transaction } from "../primitives";
 import { sync, type SyncHandle, type SyncOptions } from "../sync";
-import { JAM_FACTS_SQL, factKey } from "../server";
-import type { JamPGlite } from "../pglite";
-import { FakeElectric } from "../__tests__/helpers/fake-electric";
+import { createSyncServer, type SyncChange, type SyncServer } from "../server";
+import { fakeNetwork, type FakeNetwork } from "../__tests__/helpers/fake-socket";
 
 const P1 = "project:p1";
 const SIZES = [1_000, 10_000];
@@ -35,55 +32,37 @@ async function waitFor(predicate: () => boolean, what: string, timeout = 60_000)
 
 const pending = () => db.query(["sync", "pending", $.n]).map((b) => b.n)[0];
 
-function issueFacts(n: number, scope = P1): Array<{ key: string; scope: string }> {
+function issueFacts(n: number, scope = P1): SyncChange[] {
   const attrs = ["title", "status", "priority", "kanbanorder"];
   return Array.from({ length: n }, (_x, i) => ({
-    key: factKey(["issue", `issue-${Math.floor(i / attrs.length)}`, attrs[i % attrs.length], `value ${i}`]),
+    op: "upsert",
+    terms: ["issue", `issue-${Math.floor(i / attrs.length)}`, attrs[i % attrs.length], `value ${i}`],
     scope,
   }));
 }
 
-async function insertFacts(pg: PGlite, facts: Array<{ key: string; scope: string }>) {
-  for (let i = 0; i < facts.length; i += 5000) {
-    await pg.query(
-      `INSERT INTO jam_facts (key, scope) SELECT key, scope FROM json_to_recordset($1::text::json) AS t(key TEXT, scope TEXT)`,
-      [JSON.stringify(facts.slice(i, i + 5000))],
-    );
-  }
-}
-
-function createClient(): Promise<JamPGlite & PGlite> {
-  return PGlite.create({ dataDir: "memory://", extensions: { live, sync: electricSync() } });
-}
-
 interface Rig {
-  client: JamPGlite & PGlite;
-  server: PGlite;
-  electric: FakeElectric;
+  server: SyncServer;
+  net: FakeNetwork;
+  storage: FactStorage;
   start(options?: Partial<SyncOptions>): Promise<SyncHandle>;
   close(): Promise<void>;
 }
 
 async function createRig(): Promise<Rig> {
-  const client = await createClient();
-  const server = await PGlite.create({ dataDir: "memory://" });
-  await server.exec(JAM_FACTS_SQL);
-  const electric = new FakeElectric(server);
-  electric.pollTimeout = 50;
+  const server = await createSyncServer({ storage: memoryStorage() });
+  const net = fakeNetwork((socket) => server.handle(socket));
+  const storage = memoryStorage();
   return {
-    client,
     server,
-    electric,
-    start: (options = {}) =>
-      sync({ pg: client, shapeUrl: electric.shapeUrl, writeUrl: electric.writeUrl, fetch: electric.fetch, retryDelay: 10, ...options }),
-    close: async () => {
-      await client.close();
-      await server.close();
-    },
+    net,
+    storage,
+    start: (options = {}) => sync({ url: "ws://bench", storage, socket: net.connect, retryDelay: 10, ...options }),
+    close: () => server.close(),
   };
 }
 
-/** Each iteration is a full round trip through PGlite, so a handful of samples is the budget. */
+/** Each iteration is a full round trip through the server, so a handful of samples is the budget. */
 const RUN: BenchOptions = { iterations: 3, warmupIterations: 1, time: 0, warmupTime: 0, throws: true };
 
 /** A lazily built fixture handed to one bench: `get()` inside the task, torn down after the measured run. */
@@ -108,43 +87,41 @@ function fixture<T>(create: () => Promise<T>, destroy: (value: T) => Promise<voi
 describe("sync — initial load into an empty client", () => {
   for (const n of SIZES) {
     describe(`${n} facts`, () => {
-      const electric = fixture(
+      const server = fixture(
         async () => {
           const rig = await createRig();
-          await insertFacts(rig.server, issueFacts(n));
+          await rig.server.apply(issueFacts(n));
           return rig;
         },
         (rig) => rig.close(),
       );
       bench(
-        "electric: subscribe until every fact is in memory",
+        "server: subscribe until every fact is in memory",
         async () => {
-          const rig = await electric.get();
-          const s = await rig.start();
+          const rig = await server.get();
+          const s = await rig.start({ storage: memoryStorage() });
           const sub = s.subscribe({ scope: P1 });
           await sub.ready;
           await waitFor(() => db.facts.size >= n, `${n} facts`);
           await sub.dispose();
           await s.dispose();
-          await s.forgetShape({ scope: P1 });
           db.clear();
         },
-        electric.bench,
+        server.bench,
       );
 
       const standalone = fixture(
         async () => {
-          const pg = await createClient();
-          await pg.exec(JAM_FACTS_SQL);
-          await insertFacts(pg, issueFacts(n));
-          return pg;
+          const storage = memoryStorage();
+          await storage.write({ upserts: issueFacts(n).map(({ terms, scope }) => ({ terms, scope })), deletes: [] });
+          return storage;
         },
-        (pg) => pg.close(),
+        async () => {},
       );
       bench(
         "standalone: subscribe until every fact is in memory",
         async () => {
-          const s = await sync({ pg: await standalone.get() });
+          const s = await sync({ storage: await standalone.get() });
           const sub = s.subscribe({ scope: P1 });
           await sub.ready;
           await waitFor(() => db.facts.size >= n, `${n} facts`);
@@ -158,14 +135,14 @@ describe("sync — initial load into an empty client", () => {
   }
 });
 
-describe("sync — one remote change into a live shape", () => {
+describe("sync — one remote change into a live subscription", () => {
   for (const n of SIZES) {
     describe(`${n} facts already loaded`, () => {
       let next = 0;
       const loaded = fixture(
         async () => {
           const rig = await createRig();
-          await insertFacts(rig.server, issueFacts(n));
+          await rig.server.apply(issueFacts(n));
           const handle = await rig.start();
           await handle.subscribe({ scope: P1 }).ready;
           await waitFor(() => db.facts.size >= n, `${n} facts`);
@@ -181,9 +158,9 @@ describe("sync — one remote change into a live shape", () => {
         "upsert on the server → fact in memory",
         async () => {
           const { rig } = await loaded.get();
-          const key = factKey(["remote", ++next, "arrived", true]);
-          await rig.electric.apply([{ op: "upsert", key, scope: P1 }]);
-          await waitFor(() => db.facts.has(key), "remote fact");
+          const id = ++next;
+          await rig.server.apply([{ op: "upsert", terms: ["remote", id, "arrived", true], scope: P1 }]);
+          await waitFor(() => db.has("remote", id, "arrived", true), "remote fact");
         },
         loaded.bench,
       );
@@ -197,7 +174,7 @@ describe("sync — local writes round-tripping through the server", () => {
     fixture(
       async () => {
         const rig = await createRig();
-        const handle = await rig.start({ echoTimeout: 100 });
+        const handle = await rig.start();
         await handle.subscribe({ scope: P1 }).ready;
         const acked = async () => {
           await handle.flush();
@@ -214,7 +191,7 @@ describe("sync — local writes round-tripping through the server", () => {
 
   const single = live({ iterations: 10 });
   bench(
-    "1 remember → outbox → endpoint → acknowledged",
+    "1 remember → outbox → server → acknowledged",
     async () => {
       const { acked } = await single.get();
       scoped(P1, () => remember("local", ++next, "title", "One"));
@@ -241,7 +218,7 @@ describe("sync — local writes round-tripping through the server", () => {
 
   const echoed = live();
   bench(
-    "1000 remembers → acknowledged → echoed back and retired",
+    "1000 remembers → acknowledged → outbox retired",
     async () => {
       const { rig, acked } = await echoed.get();
       const base = ++next * 10_000;
@@ -251,9 +228,9 @@ describe("sync — local writes round-tripping through the server", () => {
         });
       });
       await acked();
-      const outbox = async () => (await rig.client.query<{ n: number }>(`SELECT count(*)::int AS n FROM jam_outbox`)).rows[0].n;
+      await waitFor(() => rig.server.facts().some((f) => f.terms[0] === "echo" && f.terms[1] === base + 999), "server to hold the burst");
       const start = Date.now();
-      while ((await outbox()) > 0) {
+      while ((await rig.storage.readLog(0)).length > 0) {
         if (Date.now() - start > 60_000) throw new Error("timed out waiting for the outbox to retire");
         await new Promise((r) => setTimeout(r, 5));
       }

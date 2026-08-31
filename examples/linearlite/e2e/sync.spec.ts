@@ -70,7 +70,7 @@ async function deleteIssue(id: string) {
 async function open(page: Page, path = `/${WEB}`) {
   watchErrors(page);
   await page.goto(`${path}?sync=${encodeURIComponent(syncUrl)}`);
-  await expect(page.locator(".sync-badge")).toHaveText("Synced", { timeout: 20000 });
+  await expect(page.getByTestId("sync-badge")).toHaveText("Synced", { timeout: 20000 });
 }
 
 async function openInFreshBrowser(browser: Browser, path = `/${WEB}`): Promise<Page> {
@@ -83,7 +83,7 @@ test.describe("LinearLite on the sync server", () => {
   test("loads projects and the current project's facts from the server", async ({ page }) => {
     await open(page, "/");
     await expect(page).toHaveURL(new RegExp(`/${WEB}(\\?|$)`));
-    await expect(page.locator(".project-menu .project-name")).toHaveText("Web App");
+    await expect(page.getByTestId("project-name")).toHaveText("Web App");
     await expectCount(page, PER_PROJECT, PER_PROJECT);
     expect((await query(page, ["project", "?id", "name", "?name"])).map((p) => p.id).sort()).toEqual(["api", "design", "mobile", "web"]);
     await expectMirrored(page, scopeOf(WEB));
@@ -93,22 +93,22 @@ test.describe("LinearLite on the sync server", () => {
 
   test("pushes local edits to the server and reloads them from the local mirror", async ({ page }) => {
     await open(page);
-    const row = page.locator(".issue-row").first();
+    const row = page.getByTestId("issue-row").first();
     const id = (await row.getAttribute("data-issue-id"))!;
     const [{ title: before }] = await query(page, ["issue", id!, "title", "?title"]);
-    await row.locator(".issue-row-title").click();
+    await row.getByTestId("issue-row-title").click();
     await expect(page).toHaveURL(new RegExp(`/${WEB}/issue/${id}`));
 
-    await page.locator(".issue-title").fill("Renamed through the sync server");
+    await page.getByTestId("issue-title").fill("Renamed through the sync server");
     await expect.poll(() => hasFact(["issue", id, "title", "Renamed through the sync server"])).toBe(true);
     await expect.poll(() => hasFact(["issue", id, "title", before])).toBe(false);
     expect(server.facts().find((f) => key(f.terms) === key(["issue", id, "title", "Renamed through the sync server"]))?.scope).toBe(scopeOf(WEB));
-    await expect(page.locator(".sync-badge")).toHaveText("Synced");
+    await expect(page.getByTestId("sync-badge")).toHaveText("Synced");
     await expectMirrored(page, scopeOf(WEB));
 
     await page.reload();
-    await expect(page.locator(".issue-title")).toHaveValue("Renamed through the sync server", { timeout: 15000 });
-    await expect(page.locator(".sync-badge")).toHaveText("Synced", { timeout: 20000 });
+    await expect(page.getByTestId("issue-title")).toHaveValue("Renamed through the sync server", { timeout: 15000 });
+    await expect(page.getByTestId("sync-badge")).toHaveText("Synced", { timeout: 20000 });
     await expectMirrored(page, scopeOf(WEB));
   });
 
@@ -116,11 +116,11 @@ test.describe("LinearLite on the sync server", () => {
     await open(page);
     const id = "00000000-0000-4000-8000-00000000e1ec";
     await insertIssue(WEB, id, "Arrived from the server");
-    await expect(page.locator(".issue-row-title").first()).toHaveText("Arrived from the server");
+    await expect(page.getByTestId("issue-row-title").first()).toHaveText("Arrived from the server");
     await expectCount(page, PER_PROJECT + 1, PER_PROJECT + 1);
 
     await server.apply([{ op: "replace", terms: ["issue", id, "title", "Retitled on the server"], scope: scopeOf(WEB) }]);
-    await expect(page.locator(`.issue-row[data-issue-id='${id}'] .issue-row-title`)).toHaveText("Retitled on the server");
+    await expect(page.locator(`[data-testid='issue-row'][data-issue-id='${id}']`).getByTestId("issue-row-title")).toHaveText("Retitled on the server");
     await expectMirrored(page, scopeOf(WEB));
 
     await insertIssue(MOBILE, "00000000-0000-4000-8000-00000000e2ec", "Not this project");
@@ -129,15 +129,15 @@ test.describe("LinearLite on the sync server", () => {
     expect(await issuesInMemory(page, MOBILE)).toEqual([]);
 
     await deleteIssue(id);
-    await expect(page.locator(`.issue-row[data-issue-id='${id}']`)).toHaveCount(0);
+    await expect(page.locator(`[data-testid='issue-row'][data-issue-id='${id}']`)).toHaveCount(0);
     await expectCount(page, PER_PROJECT, PER_PROJECT);
     await expectMirrored(page, scopeOf(WEB));
   });
 
   test("switching projects swaps the synced scope", async ({ page }) => {
     await open(page);
-    await page.locator(".project-menu .menu-trigger").click();
-    await page.locator(".project-item", { hasText: "Mobile" }).click();
+    await page.getByTestId("project-menu-trigger").click();
+    await page.getByTestId("project-item").filter({ hasText: "Mobile" }).click();
     await expect(page).toHaveURL(/\/mobile$/);
     const mobileIssues = issueCountOnServer(MOBILE);
     await expectCount(page, mobileIssues, mobileIssues);
@@ -145,28 +145,28 @@ test.describe("LinearLite on the sync server", () => {
     await expect.poll(() => issuesInMemory(page, WEB)).toEqual([]);
     await expect.poll(() => keysInMemory(page, scopeOf(WEB))).toEqual([]);
 
-    await page.locator(".new-issue-button").click();
-    await page.locator(".modal .new-issue-title").fill("Created inside Mobile");
-    await page.locator(".modal .save-issue-button").click();
-    await expect(page.locator(".issue-row-title").first()).toHaveText("Created inside Mobile");
+    await page.getByTestId("new-issue-button").click();
+    await page.getByTestId("new-issue-modal").getByTestId("new-issue-title").fill("Created inside Mobile");
+    await page.getByTestId("new-issue-modal").getByTestId("save-issue-button").click();
+    await expect(page.getByTestId("issue-row-title").first()).toHaveText("Created inside Mobile");
     const [created] = (await issuesInMemory(page, MOBILE)).filter((issue) => issue.title === "Created inside Mobile");
     await expect.poll(() => server.facts().find((f) => key(f.terms) === key(["issue", created.id, "project", MOBILE]))?.scope).toBe(scopeOf(MOBILE));
-    await expect(page.locator(".sync-badge")).toHaveText("Synced");
+    await expect(page.getByTestId("sync-badge")).toHaveText("Synced");
     await expectMirrored(page, scopeOf(MOBILE));
   });
 
   test("two browsers converge on the same project", async ({ browser }) => {
     const a = await openInFreshBrowser(browser);
     const b = await openInFreshBrowser(browser);
-    const id = await a.locator(".issue-row").first().getAttribute("data-issue-id");
-    await a.locator(".issue-row-title").first().click();
-    await a.locator(".issue-title").fill("Edited in browser A");
-    await expect(b.locator(`.issue-row[data-issue-id='${id}'] .issue-row-title`)).toHaveText("Edited in browser A", { timeout: 15000 });
+    const id = await a.getByTestId("issue-row").first().getAttribute("data-issue-id");
+    await a.getByTestId("issue-row-title").first().click();
+    await a.getByTestId("issue-title").fill("Edited in browser A");
+    await expect(b.locator(`[data-testid='issue-row'][data-issue-id='${id}']`).getByTestId("issue-row-title")).toHaveText("Edited in browser A", { timeout: 15000 });
 
-    await b.locator(`.issue-row[data-issue-id='${id}'] .issue-row-title`).click();
-    await b.locator(".delete-button").click();
-    await b.locator(".confirm-delete-button").click();
-    await expect(a.locator(".issue-missing")).toHaveText("This issue doesn't exist.", { timeout: 15000 });
+    await b.locator(`[data-testid='issue-row'][data-issue-id='${id}']`).getByTestId("issue-row-title").click();
+    await b.getByTestId("delete-button").click();
+    await b.getByTestId("confirm-delete-button").click();
+    await expect(a.getByTestId("issue-missing")).toHaveText("This issue doesn't exist.", { timeout: 15000 });
     await expect.poll(() => server.facts().some((f) => f.terms[0] === "issue" && f.terms[1] === id)).toBe(false);
     await expectMirrored(b, scopeOf(WEB));
     await expectMirrored(a, scopeOf(WEB));
@@ -183,20 +183,20 @@ test.describe("LinearLite on the sync server", () => {
     const leading = (page: Page) => page.evaluate(() => (window as unknown as { __sync: { leading: boolean } }).__sync.leading);
     expect([await leading(a), await leading(b)]).toEqual([true, false]);
 
-    const id = await b.locator(".issue-row").first().getAttribute("data-issue-id");
-    await b.locator(".issue-row-title").first().click();
-    await b.locator(".issue-title").fill("Edited in the follower tab");
-    await expect(a.locator(`.issue-row[data-issue-id='${id}'] .issue-row-title`)).toHaveText("Edited in the follower tab", { timeout: 15000 });
+    const id = await b.getByTestId("issue-row").first().getAttribute("data-issue-id");
+    await b.getByTestId("issue-row-title").first().click();
+    await b.getByTestId("issue-title").fill("Edited in the follower tab");
+    await expect(a.locator(`[data-testid='issue-row'][data-issue-id='${id}']`).getByTestId("issue-row-title")).toHaveText("Edited in the follower tab", { timeout: 15000 });
     await expect.poll(() => hasFact(["issue", id, "title", "Edited in the follower tab"])).toBe(true);
     expect(server.connections).toBe(1);
 
     await a.close();
     await expect.poll(() => leading(b), { timeout: 15000 }).toBe(true);
-    await expect(b.locator(".sync-badge")).toHaveText("Synced", { timeout: 20000 });
+    await expect(b.getByTestId("sync-badge")).toHaveText("Synced", { timeout: 20000 });
     expect(server.connections).toBe(1);
     await insertIssue(WEB, "00000000-0000-4000-8000-00000000e3ec", "Arrived after the handover");
     await b.goBack();
-    await expect(b.locator(".issue-row-title").first()).toHaveText("Arrived after the handover", { timeout: 15000 });
+    await expect(b.getByTestId("issue-row-title").first()).toHaveText("Arrived after the handover", { timeout: 15000 });
     await expectMirrored(b, scopeOf(WEB));
     await context.close();
   });

@@ -28,7 +28,7 @@ import { factKey, type Fact } from "@jam/engine";
 import { memoryStorage, type FactStorage, type LogEntry, type StoredFact } from "@jam/engine/storage";
 import { indexedDBStorage } from "@jam/engine/storage/indexeddb";
 import { applyFacts, isApplying } from "./applying";
-import { db as defaultDb, _, type FactDB } from "./db";
+import { db as defaultDb, _, type Bindings, type FactDB, type Pattern } from "./db";
 import {
   compileFilter,
   parseFilter,
@@ -40,7 +40,7 @@ import {
   type SyncChange,
 } from "./filter";
 import { defaultExclude } from "./persist";
-import { transaction } from "./reactive";
+import { reaction, transaction } from "./reactive";
 import { defaultTabs, type Lead, type TabCoordinator } from "./tabs";
 
 export type { FactFilter, CompiledFilter, SyncChange, SyncOp } from "./filter";
@@ -90,6 +90,13 @@ export interface FactSubscription {
 
 export interface SyncHandle {
   subscribe(filter?: FactFilter): FactSubscription;
+  /**
+   * Keep subscriptions in step with facts: whenever the matches of `patterns`
+   * change, subscribe what `wanted` returns for them. Newly wanted filters are
+   * ready before anything no longer wanted is released, so a switch never
+   * empties the screen first. Returns a function that releases them all.
+   */
+  follow(patterns: Pattern[], wanted: (matches: Bindings[]) => FactFilter[]): () => Promise<void>;
   /** Wait for local storage writes and, when connected, for the server to acknowledge every queued write. */
   flush(): Promise<void>;
   dispose(): Promise<void>;
@@ -823,8 +830,63 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
       },
     };
   };
+  const follow = (patterns: Pattern[], wanted: (matches: Bindings[]) => FactFilter[]): (() => Promise<void>) => {
+    if (disposed) throw new Error("sync: disposed");
+    const index = db.index(...patterns);
+    let current = new Map<string, FactSubscription>();
+    let generation = 0;
+    const inflight = new Set<Promise<void>>();
+
+    const apply = async (filters: FactFilter[]) => {
+      const gen = ++generation;
+      const next = new Map<string, FactSubscription>();
+      const added: FactSubscription[] = [];
+      for (const filter of filters) {
+        const { id } = compileFilter(filter);
+        if (next.has(id)) continue;
+        const kept = current.get(id);
+        if (kept) {
+          next.set(id, kept);
+        } else {
+          const subscription = subscribe(filter);
+          next.set(id, subscription);
+          added.push(subscription);
+        }
+      }
+      await Promise.all(added.map((s) => s.ready));
+      if (gen !== generation) {
+        await Promise.all(added.map((s) => s.dispose()));
+        return;
+      }
+      const previous = current;
+      current = next;
+      await Promise.all(Array.from(previous, ([id, s]) => (next.has(id) ? undefined : s.dispose())));
+    };
+
+    const stopReaction = reaction(
+      () => index.get(),
+      (matches) => {
+        const run: Promise<void> = Promise.resolve()
+          .then(() => apply(wanted(matches)))
+          .catch((e) => console.error("[jam] sync: follow failed", e))
+          .finally(() => inflight.delete(run));
+        inflight.add(run);
+      },
+      { fireImmediately: true, equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
+    );
+    return async () => {
+      stopReaction();
+      generation++;
+      await Promise.all(inflight);
+      const held = current;
+      current = new Map();
+      await Promise.all(Array.from(held.values(), (s) => s.dispose()));
+    };
+  };
+
   return {
     subscribe,
+    follow,
     tab: me,
     get connected() {
       return connected;

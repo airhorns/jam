@@ -138,4 +138,21 @@ describe("mount: html", () => {
     replace("counter", "n", 2);
     expect(container.textContent).toBe("count: 2");
   });
+
+  it("invokes the newest handler closure even when a re-render leaves the DOM unchanged", () => {
+    const seen: string[] = [];
+    let label = "first";
+    const Button = () => {
+      when(["tick", $.n]);
+      const captured = label;
+      return h("button", { onClick: () => seen.push(captured) }, "go");
+    };
+    replace("tick", 1);
+    unmount = mount(h(Button, null), container);
+    const button = container.querySelector("button")!;
+    label = "second";
+    replace("tick", 2);
+    button.dispatchEvent(new MouseEvent("click"));
+    expect(seen).toEqual(["second"]);
+  });
 });

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { memoryStorage, type FactStorage } from "@jam/engine/storage";
 import { db, FactDB, _ } from "../db";
 import { claim, forget, remember, replace, scoped, whenever, $ } from "../primitives";
-import { sync, compileFilter, type SyncHandle, type SyncWebSocket } from "../sync";
+import { sync, compileFilter, type SyncHandle, type SyncOptions, type SyncWebSocket } from "../sync";
 import { createSyncServer, type ClientMessage, type ServerMessage, type SyncServer } from "../server";
 import { fakeNetwork, type FakeNetwork } from "./helpers/fake-socket";
 import { fakeTabs } from "./helpers/fake-tabs";
@@ -11,6 +11,14 @@ let storage: FactStorage;
 let handles: SyncHandle[];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function waitFor(predicate: () => boolean, what: string, timeout = 5000): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeout) throw new Error(`timed out waiting for ${what}`);
+    await sleep(2);
+  }
+}
 
 function facts(first: string): unknown[][] {
   return Array.from(db.facts.values())
@@ -140,8 +148,8 @@ describe("sync (server)", () => {
     });
   };
 
-  async function start() {
-    const handle = await sync({ url: "ws://test", storage, socket, retryDelay: 5 });
+  async function start(options: Partial<SyncOptions> = {}) {
+    const handle = await sync({ url: "ws://test", storage, socket, retryDelay: 5, ...options });
     handles.push(handle);
     return handle;
   }
@@ -350,6 +358,63 @@ describe("sync (server)", () => {
     await server.apply([{ op: "upsert", terms: ["issue", 2, "title", "B"], scope: "p1" }]);
     await settle();
     expect(facts("issue")).toHaveLength(0);
+  });
+
+  it("follow() subscribes whatever the matching facts ask for and overlaps each switch", async () => {
+    await server.apply([
+      { op: "upsert", terms: ["issue", 1, "title", "One"], scope: "p1" },
+      { op: "upsert", terms: ["issue", 2, "title", "Two"], scope: "p2" },
+      { op: "upsert", terms: ["project", "p1", "name", "P1"], scope: "" },
+    ]);
+    const s = await start({ exclude: (fact) => fact[0] === "route" });
+    const events: string[] = [];
+    const stopTrace = db.observe((type, _key, fact) => {
+      if (fact[0] === "issue") events.push(`${type} ${fact[1]}`);
+    });
+    const stop = s.follow([["route", "project", $.p]], ([route]) => [{ scope: "" }, ...(route ? [{ scope: String(route.p) }] : [])]);
+    await waitFor(() => db.has("project", "p1", "name", "P1"), "global facts");
+    await settle();
+    expect(db.has("issue", 1, "title", "One")).toBe(false);
+
+    remember("route", "project", "p1");
+    await waitFor(() => db.has("issue", 1, "title", "One"), "p1 facts");
+
+    replace("route", "project", "p2");
+    await waitFor(() => db.has("issue", 2, "title", "Two") && !db.has("issue", 1, "title", "One"), "switch to p2");
+    expect(events).toEqual(["add 1", "add 2", "delete 1"]);
+    expect(db.query(["sync", "shape", $.id, "ready", $.r])).toHaveLength(2);
+
+    await stop();
+    stopTrace();
+    expect(db.has("project", "p1", "name", "P1")).toBe(false);
+    expect(db.has("issue", 2, "title", "Two")).toBe(false);
+    expect(db.query(["sync", "shape", $.id, "ready", $.r])).toEqual([]);
+    expect(db.query(["route", "project", $.p]).map((b) => b.p)).toEqual(["p2"]);
+  });
+
+  it("follow() settles on the last of a burst of changes", async () => {
+    await server.apply([
+      { op: "upsert", terms: ["issue", 1, "title", "One"], scope: "p1" },
+      { op: "upsert", terms: ["issue", 2, "title", "Two"], scope: "p2" },
+      { op: "upsert", terms: ["issue", 3, "title", "Three"], scope: "p3" },
+    ]);
+    const s = await start({ exclude: (fact) => fact[0] === "route" });
+    remember("route", "project", "p1");
+    const stop = s.follow([["route", "project", $.p]], ([route]) => (route ? [{ scope: String(route.p) }] : []));
+    await waitFor(() => db.has("issue", 1, "title", "One"), "p1 facts");
+
+    replace("route", "project", "p2");
+    replace("route", "project", "p3");
+    await waitFor(
+      () => db.has("issue", 3, "title", "Three") && !db.has("issue", 1, "title", "One") && !db.has("issue", 2, "title", "Two"),
+      "p3 only",
+    );
+    await settle();
+    expect(db.query(["sync", "shape", $.id, "ready", $.r]).map((b) => b.id)).toEqual([compileFilter({ scope: "p3" }).id]);
+
+    forget("route", "project", "p3");
+    await waitFor(() => !db.has("issue", 3, "title", "Three"), "nothing followed");
+    await stop();
   });
 });
 

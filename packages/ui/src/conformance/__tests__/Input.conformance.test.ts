@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { runInAction, observable } from "mobx";
 import { h } from "@jam/core/jsx";
-import { render, click, type, focus, setupDefaultUI } from "../../testing";
+import { box, render, click, type, focus, setupDefaultUI } from "../../testing";
 import { Input, TextArea } from "../../components/Input";
 import { Label } from "../../components/Label";
 
@@ -75,12 +74,12 @@ describe("Input / TextArea conformance", () => {
     // React's controlled-input contract: the DOM value is whatever the last
     // render said, so an edit the owner does not accept is undone.
     it("restores a controlled value on the next render after the user types over it", () => {
-      const tick = observable.box(0);
+      const tick = box(0);
       const Field = () => h(Input, { value: "fixed", "data-tick": tick.get() });
       const r = render(h(Field, null));
       const input = r.root as HTMLInputElement;
       type(input, "typed");
-      runInAction(() => tick.set(1));
+      tick.set(1);
       expect(input.value).toBe("fixed");
     });
 

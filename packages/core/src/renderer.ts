@@ -11,7 +11,7 @@
 import { db, type Term } from "./db";
 import { Effect, transaction, untracked } from "./reactive";
 import { vdom } from "./select";
-import { type VChild, type ElementRef, expandRoot, emitExpanded } from "./jsx";
+import { type VChild, type ElementRef, type Cleanup, expandTree, emitExpanded } from "./jsx";
 
 // Props applied as element properties (so form state updates live).
 const DOM_PROPERTIES = new Set([
@@ -82,13 +82,30 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
   const mountOwner = db.createChildOwner(db.getCurrentOwnerId(), "mount");
   let renderOwner: string | null = null;
 
+  // Cleanups registered by the components in the latest render, by component id.
+  let cleanups = new Map<string, Cleanup[]>();
+  function runCleanups(fns: Cleanup[]) {
+    for (const fn of fns) {
+      try {
+        fn();
+      } catch (error) {
+        console.error("useCleanup callback threw", error);
+      }
+    }
+  }
+
   // --- Phase 1: Expand and emit VDOM claims from component tree ---
   const emitEffect = new Effect(() => {
-    const nodes = expandRoot(rootVnode, "dom");
+    const expansion = expandTree(rootVnode, "dom");
+    // Components that left the tree run their cleanups before the DOM is patched.
     untracked(() => {
       if (renderOwner) db.revokeOwner(renderOwner);
       renderOwner = db.createChildOwner(mountOwner, "render");
-      db.withOwnerScope(renderOwner, () => emitExpanded(nodes, "dom", 0));
+      db.withOwnerScope(renderOwner, () => emitExpanded(expansion.nodes, "dom", 0));
+      for (const [id, fns] of cleanups) {
+        if (!expansion.cleanups.has(id)) runCleanups(fns);
+      }
+      cleanups = expansion.cleanups;
     });
   });
 
@@ -193,25 +210,34 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
           if (el.getAttribute(attr) !== strVal) el.setAttribute(attr, strVal);
         }
       }
-      for (let i = el.attributes.length - 1; i >= 0; i--) {
-        const name = el.attributes[i].name;
-        if (name === "class") continue;
-        if (!activeAttrs.has(name)) el.removeAttribute(name);
+      // Only attributes this renderer set last time are swept, so anything an
+      // event handler or third-party code sets on the element survives.
+      const previousAttrs: Set<string> | undefined = (el as any).__attrs;
+      if (previousAttrs) {
+        for (const name of previousAttrs) {
+          if (!activeAttrs.has(name) && el.hasAttribute(name)) el.removeAttribute(name);
+        }
       }
+      (el as any).__attrs = activeAttrs;
 
+      // Listeners look the handler up on each event: a re-render that leaves the
+      // VDOM unchanged still swaps the ref, and this patch does not run for it.
       const oldHandlers: Map<string, EventListener> = (el as any).__handlers ?? new Map();
-      for (const [event, listener] of oldHandlers) el.removeEventListener(event, listener);
       const newHandlers = new Map<string, EventListener>();
       const elHandlers = index.handlers.get(entityId);
       if (elHandlers) {
         for (const [event, refKey] of elHandlers) {
-          const fn = db.getRef(refKey) as EventListener;
-          if (fn) {
-            el.addEventListener(event, fn);
-            newHandlers.set(event, fn);
+          let listener = oldHandlers.get(event);
+          if (listener) {
+            oldHandlers.delete(event);
+          } else {
+            listener = (e) => (db.getRef(refKey) as EventListener | undefined)?.(e);
+            el.addEventListener(event, listener);
           }
+          newHandlers.set(event, listener);
         }
       }
+      for (const [event, listener] of oldHandlers) el.removeEventListener(event, listener);
       (el as any).__handlers = newHandlers;
 
       syncElementRef(entityId, el);
@@ -274,7 +300,11 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
 
   return () => {
     emitEffect.dispose();
-    transaction(() => db.revokeOwner(mountOwner));
+    transaction(() => {
+      for (const fns of cleanups.values()) runCleanups(fns);
+      cleanups = new Map();
+      db.revokeOwner(mountOwner);
+    });
     patchEffect.dispose();
     for (const id of Array.from(mountedRefs.keys())) releaseElementRef(id);
   };

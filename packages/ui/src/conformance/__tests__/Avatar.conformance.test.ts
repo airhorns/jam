@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { runInAction, observable } from "mobx";
 import { h } from "@jam/core/jsx";
-import { render, click, css, setupDefaultUI } from "../../testing";
+import { box, render, click, css, setupDefaultUI } from "../../testing";
 import { Avatar } from "../../components/Avatar";
 import { Text } from "../../components/Text";
 
@@ -100,12 +99,12 @@ describe("Avatar conformance", () => {
     // radix avatar.test.tsx "should render the fallback again after a loaded
     // image unmounts": removing the image brings the fallback back.
     it("still shows the fallback after the image leaves the tree", () => {
-      const show = observable.box(true);
+      const show = box(true);
       const Frame = () =>
         h(Avatar, null, show.get() ? h(Avatar.Image, { src: "/ada.jpg" }) : null, h(Avatar.Fallback, null, "AL"));
       const r = render(h(Frame, null));
       load(r.get("img"));
-      runInAction(() => show.set(false));
+      show.set(false);
       expect(r.query("img")).toBeNull();
       expect(r.get(".is_AvatarFallback").textContent).toBe("AL");
     });
@@ -145,12 +144,12 @@ describe("Avatar conformance", () => {
     // radix avatar.test.tsx "can handle changing src": the new src is loaded
     // afresh, so a failure of the old one does not stick.
     it("paints again when the src changes after a failure", () => {
-      const src = observable.box("/missing.jpg");
+      const src = box("/missing.jpg");
       const Frame = () => h(Avatar, null, h(Avatar.Image, { src: src.get() }), h(Avatar.Fallback, null, "AL"));
       const r = render(h(Frame, null));
       fail(r.get("img"));
       expect(hidden(r.get("img"))).toBe(true);
-      runInAction(() => src.set("/ada.jpg"));
+      src.set("/ada.jpg");
       expect(r.get("img").getAttribute("src")).toBe("/ada.jpg");
       expect(hidden(r.get("img"))).toBe(false);
     });
@@ -158,12 +157,12 @@ describe("Avatar conformance", () => {
     // Avatar.ts keys the failure on the src, so going back to one that already
     // failed stays hidden. Radix re-requests it and ends up in the same place.
     it("stays hidden when the src goes back to one that already failed", () => {
-      const src = observable.box("/missing.jpg");
+      const src = box("/missing.jpg");
       const Frame = () => h(Avatar, null, h(Avatar.Image, { src: src.get() }), h(Avatar.Fallback, null, "AL"));
       const r = render(h(Frame, null));
       fail(r.get("img"));
-      runInAction(() => src.set("/ada.jpg"));
-      runInAction(() => src.set("/missing.jpg"));
+      src.set("/ada.jpg");
+      src.set("/missing.jpg");
       expect(hidden(r.get("img"))).toBe(true);
     });
 

@@ -169,6 +169,8 @@ The renderer works in two phases:
 1. **Emit** — executes the component tree, writing VDOM claims into the fact database
 2. **Patch** — reads all VDOM claims and reconciles them into the real DOM
 
+A component that keeps state outside the tree — a timer, per-instance facts keyed by `useComponentId()` — releases it with `useCleanup(fn)`, which runs once when the component leaves the tree or the root unmounts.
+
 ### Reactive rules with `whenever`
 
 `whenever` creates a rule that fires when patterns match, producing derived facts:
@@ -317,6 +319,16 @@ await current.dispose();                                               // its fa
 ```
 
 Scopes are how a client decides what to load. Facts written without `scoped()` inherit the scope of the fact they replace, else of their `[entity, id]`, else the global scope `""`. A subscription's `FactFilter` is `{ scope?, pattern? }`, where a pattern narrows on literal terms (`["issue", _, "project"]`); subscribing to the same filter twice shares one stream, and facts stay in memory while any subscription holds them.
+
+Most apps want subscriptions to track some other fact — the route, the selected workspace — rather than being managed by hand. `follow()` takes patterns and a function from their matches to the filters that should be live, and keeps the two in step: new filters are subscribed and ready before the ones they replace are released, so a switch never empties the screen first, and a burst of changes settles on the last one.
+
+```typescript
+const stop = handle.follow([["route", "project", $.id]], ([route]) => [
+  { scope: "" },
+  ...(route ? [{ scope: `project:${route.id}` }] : []),
+]);
+await stop();   // releases everything it holds
+```
 
 Give it a `url` and the facts live on a sync server:
 

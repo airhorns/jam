@@ -85,14 +85,15 @@ All application state — including the VDOM — lives in a shared **fact databa
 - **@jam/core** (`packages/core/`): The reactive database and rendering engine.
   - `db.ts` — FactDB: reactive fact store over the `@jam/engine` WASM engine (indexing, pattern matching, owners/scopes); `reactive.ts` — the tracking primitives (`autorun`, `reaction`, `transaction`)
   - `primitives.ts` — Public API: `claim`, `remember`, `replace`, `forget`, `when`, `whenever`, `transaction`, `$`, `_`
-  - `jsx.ts` — Custom JSX factory (`h`/`Fragment`) with deterministic entity ID generation; `expandRoot` runs the component tree (with `createContext`/`useContext`, `useComponentId`, `Portal`) and `emitExpanded` writes the result as facts
-  - `renderer.ts` — Two-phase rendering: expand the tree in a tracked reaction, emit VDOM claims into the fact DB, then patch the real DOM
+  - `jsx.ts` — Custom JSX factory (`h`/`Fragment`) with deterministic entity ID generation; `expandTree` runs the component tree (with `createContext`/`useContext`, `useComponentId`, `useCleanup`, `Portal`) and `emitExpanded` writes the result as facts
+  - `renderer.ts` — Two-phase rendering: expand the tree in a tracked effect, emit VDOM claims into the fact DB and run the cleanups of components that left, then patch the real DOM
   - `select.ts` — CSS selector queries over VDOM facts
-  - `sync.ts` — `sync()`: every durable fact is mirrored into a `FactStorage` with its `scope`; subscriptions by scope/pattern decide which facts are in memory, local-only or streamed from a sync server over WebSockets with the storage log as the outbox; browser tabs sharing a storage elect one leader that holds the connection
+  - `sync.ts` — `sync()`: every durable fact is mirrored into a `FactStorage` with its `scope`; subscriptions by scope/pattern (or `follow()` driven by other facts) decide which facts are in memory, local-only or streamed from a sync server over WebSockets with the storage log as the outbox; browser tabs sharing a storage elect one leader that holds the connection
   - `tabs.ts` — `TabCoordinator`: BroadcastChannel + Web Locks between the tabs of one origin (`browserTabs`), or none (`soloTabs`)
   - `filter.ts` — `FactFilter` compilation and the wire protocol types shared by client and server
   - `server.ts` (`@jam/core/server`) — `createSyncServer`: the Node side, an engine over any `FactStorage` (`sqliteStorage`, `memoryStorage`) with per-connection filters, snapshot/replay, `allow` authorization
   - `persist.ts` — mirrors device-local facts into their own storage and restores them on load
+  - `__bench__/sync.bench.ts` — sync throughput against an in-process `createSyncServer`: initial load, remote-change latency, write round-trips (vitest bench mode skips suite hooks, so fixtures use tinybench `setup`/`teardown`)
 
 - **@jam/engine** (`packages/engine/`, `crates/`): The fact engine. `crates/jam-engine` is the Rust store (facts, owners, scopes, pattern queries, change tracking) and `crates/jam-engine-wasm` its wasm-bindgen wrapper; `packages/engine/pkg/` holds the committed WASM build (`pnpm build:engine` regenerates it — needs `cargo` and `wasm-bindgen-cli`; CI checks it matches the source). `src/index.ts` is the typed TS wrapper (`Engine`), `src/wasm.ts` loads the module in browsers and Node, `src/storage/` the `FactStorage` adapters (`memoryStorage`, `indexedDBStorage`, `sqliteStorage`). See `docs/rust-engine-spec.md`.
 
@@ -119,6 +120,7 @@ Component-level primitives from `@jam/core`:
 
 - `createContext(default)` / `useContext(ctx)` — `<ctx.Provider value>` scopes a value to a subtree; resolved during expansion
 - `useComponentId()` — the stable entity id of the calling component instance; use it to key per-instance state in the fact DB (`replace(id, "open", true)`)
+- `useCleanup(fn)` — run `fn` once when the calling component leaves the tree (or the root unmounts). Use it to forget per-instance facts, cancel timers and release anything keyed by the component id in module state; cleanups run before the DOM patch, in the same transaction as the new VDOM facts
 - Entity ids: an element's `id` prop is its entity id (a global address, so DOM ids must be unique); otherwise ids derive from `key` or tree position. A component's `id` prop is *not* its entity id — it is an ordinary prop the component may hand to a nested element.
 - `<Portal>` — renders children as direct children of the mount container (for overlays); ids stay derived from the portal's own tree position
 - `injectVdom(parentId, startIndex, ...nodes)` — add children to an existing element from outside the tree

@@ -44,11 +44,14 @@ async function installTimerTracker(page: Page) {
       if (id != null) pending.delete(Number(id));
       originalClear(id as number);
     }) as typeof window.clearTimeout;
+    // The renderer's event dispatch sits under every handler; it is not what scheduled the timer.
+    const ownFrames = (stack: string) => stack.split("\n").filter((frame) => !frame.includes("packages/core/src/renderer.ts"));
     window.__timers = {
       pending: () =>
         Array.from(pending.values())
-          .filter((stack) => /packages\/(ui|core)|examples\/catalog\/src/.test(stack))
-          .map((stack) => stack.split("\n").slice(1, 4).join(" | ")),
+          .map(ownFrames)
+          .filter((frames) => /packages\/(ui|core)|examples\/catalog\/src/.test(frames.join("\n")))
+          .map((frames) => frames.slice(1, 4).join(" | ")),
     };
   });
 }
