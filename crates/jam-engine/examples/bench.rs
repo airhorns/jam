@@ -16,15 +16,9 @@ fn main() {
     let status = e.interner.intern_str("status");
     let name = e.interner.intern_str("name");
     let open = e.interner.intern_str("open");
-    let projects: Vec<u32> = (0..4)
-        .map(|i| e.interner.intern_str(&format!("p{i}")))
-        .collect();
-    let ids: Vec<u32> = (0..issues)
-        .map(|i| e.interner.intern_str(&format!("i{i}")))
-        .collect();
-    let titles: Vec<u32> = (0..issues)
-        .map(|i| e.interner.intern_str(&format!("Issue {i}")))
-        .collect();
+    let projects: Vec<u32> = (0..4).map(|i| e.interner.intern_str(&format!("p{i}"))).collect();
+    let ids: Vec<u32> = (0..issues).map(|i| e.interner.intern_str(&format!("i{i}"))).collect();
+    let titles: Vec<u32> = (0..issues).map(|i| e.interner.intern_str(&format!("Issue {i}"))).collect();
 
     let v = |i: u32| VAR_BASE + i;
     // [issue $id project $p] [issue $id title $t] [issue $id status open] [project $p name $n]
@@ -37,12 +31,7 @@ fn main() {
     let q_titles = e.register(vec![vec![issue, v(0), title, v(1)]]);
     let q_by_project: Vec<u32> = projects
         .iter()
-        .map(|&p| {
-            e.register(vec![
-                vec![issue, v(0), project, p],
-                vec![issue, v(0), status, v(1)],
-            ])
-        })
+        .map(|&p| e.register(vec![vec![issue, v(0), project, p], vec![issue, v(0), status, v(1)]]))
         .collect();
 
     let mut ops = Vec::new();
@@ -53,9 +42,7 @@ fn main() {
     for i in 0..issues {
         let p = projects[i % projects.len()];
         ops.extend([OP_ASSERT, ROOT_OWNER, NONE, 4, issue, ids[i], project, p]);
-        ops.extend([
-            OP_ASSERT, ROOT_OWNER, NONE, 4, issue, ids[i], title, titles[i],
-        ]);
+        ops.extend([OP_ASSERT, ROOT_OWNER, NONE, 4, issue, ids[i], title, titles[i]]);
         ops.extend([OP_ASSERT, ROOT_OWNER, NONE, 4, issue, ids[i], status, open]);
     }
     let t = Instant::now();
@@ -82,11 +69,7 @@ fn main() {
             issue,
             id,
             title,
-            if i % 2 == 0 {
-                new_title
-            } else {
-                titles[i % issues]
-            },
+            if i % 2 == 0 { new_title } else { titles[i % issues] },
         ])
         .unwrap();
         let ev = e.drain();
@@ -99,23 +82,11 @@ fn main() {
     let t = Instant::now();
     for i in 0..iterations {
         let id = ids[i % issues];
-        e.apply(&[
-            OP_REPLACE,
-            ROOT_OWNER,
-            NONE,
-            4,
-            issue,
-            id,
-            status,
-            if i % 2 == 0 { closed } else { open },
-        ])
-        .unwrap();
+        e.apply(&[OP_REPLACE, ROOT_OWNER, NONE, 4, issue, id, status, if i % 2 == 0 { closed } else { open }])
+            .unwrap();
         e.drain();
     }
-    println!(
-        "replace status (3 queries affected): {:?} per op",
-        t.elapsed() / iterations as u32
-    );
+    println!("replace status (3 queries affected): {:?} per op", t.elapsed() / iterations as u32);
 
     let t = Instant::now();
     for _ in 0..100 {
@@ -126,10 +97,7 @@ fn main() {
         ]);
         assert_eq!(rows[1] as usize, issues);
     }
-    println!(
-        "adhoc 3-way join over {issues} issues: {:?}",
-        t.elapsed() / 100
-    );
+    println!("adhoc 3-way join over {issues} issues: {:?}", t.elapsed() / 100);
 
     let t = Instant::now();
     let owner = e.create_owner(ROOT_OWNER).unwrap();
@@ -137,9 +105,7 @@ fn main() {
     let tag = e.interner.intern_str("tag");
     let div = e.interner.intern_str("div");
     let q_dom = e.register(vec![vec![dom, v(0), tag, v(1)]]);
-    let nodes: Vec<u32> = (0..1000)
-        .map(|i| e.interner.intern_str(&format!("n{i}")))
-        .collect();
+    let nodes: Vec<u32> = (0..1000).map(|i| e.interner.intern_str(&format!("n{i}"))).collect();
     for round in 0..100u32 {
         let mut ops = vec![OP_REVOKE, owner];
         let owner = e.create_owner(ROOT_OWNER).unwrap();
@@ -150,15 +116,7 @@ fn main() {
         e.apply(&ops).unwrap();
         e.drain();
     }
-    println!(
-        "revoke+reclaim 1000 dom facts: {:?} per round",
-        t.elapsed() / 100
-    );
+    println!("revoke+reclaim 1000 dom facts: {:?} per round", t.elapsed() / 100);
     let _ = (q_titles, q_by_project, q_dom);
-    println!(
-        "indexes: {}, queries: {}, facts: {}",
-        e.index_count(),
-        e.query_count(),
-        e.fact_count()
-    );
+    println!("indexes: {}, queries: {}, facts: {}", e.index_count(), e.query_count(), e.fact_count());
 }

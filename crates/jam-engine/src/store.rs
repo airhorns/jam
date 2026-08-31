@@ -184,23 +184,14 @@ impl Store {
         for key in &self.by_len[terms.len()] {
             let index = self.indexes.get_mut(key).unwrap();
             let tuple = index.tuple(&terms);
-            index
-                .buckets
-                .entry(tuple)
-                .or_insert_with(|| Bucket::Small(SmallVec::new()))
-                .insert(id);
+            index.buckets.entry(tuple).or_insert_with(|| Bucket::Small(SmallVec::new())).insert(id);
         }
         self.by_key.insert(terms.clone(), id);
         let mut owners = SmallVec::new();
         owners.push(owner);
         let seq = self.next_seq;
         self.next_seq += 1;
-        self.slots[id as usize] = Some(FactRecord {
-            terms,
-            scope,
-            owners,
-            seq,
-        });
+        self.slots[id as usize] = Some(FactRecord { terms, scope, owners, seq });
         id
     }
 
@@ -210,10 +201,10 @@ impl Store {
         for key in &self.by_len[record.terms.len()] {
             let index = self.indexes.get_mut(key).unwrap();
             let tuple = index.tuple(&record.terms);
-            if let Some(bucket) = index.buckets.get_mut(&tuple) {
-                if bucket.remove(id) {
-                    index.buckets.remove(&tuple);
-                }
+            if let Some(bucket) = index.buckets.get_mut(&tuple)
+                && bucket.remove(id)
+            {
+                index.buckets.remove(&tuple);
             }
         }
         self.free.push(id);
@@ -225,19 +216,13 @@ impl Store {
             self.by_len.push(Vec::new());
         }
         if self.by_len[len].is_empty() {
-            self.create_index(IndexKey {
-                len: len as u8,
-                mask: 0,
-            });
+            self.create_index(IndexKey { len: len as u8, mask: 0 });
         }
     }
 
     /// Make sure facts of length `len` can be looked up by the positions in `mask`.
     pub fn ensure_index(&mut self, len: usize, mask: Mask) {
-        let key = IndexKey {
-            len: len as u8,
-            mask,
-        };
+        let key = IndexKey { len: len as u8, mask };
         self.ensure_len_index(len);
         if !self.indexes.contains_key(&key) {
             self.create_index(key);
@@ -245,18 +230,11 @@ impl Store {
     }
 
     fn create_index(&mut self, key: IndexKey) {
-        let mut index = Index {
-            positions: positions_of(key.mask),
-            buckets: HashMap::new(),
-        };
+        let mut index = Index { positions: positions_of(key.mask), buckets: HashMap::new() };
         for (id, record) in self.iter() {
             if record.terms.len() == key.len as usize {
                 let tuple = index.tuple(&record.terms);
-                index
-                    .buckets
-                    .entry(tuple)
-                    .or_insert_with(|| Bucket::Small(SmallVec::new()))
-                    .insert(id);
+                index.buckets.entry(tuple).or_insert_with(|| Bucket::Small(SmallVec::new())).insert(id);
             }
         }
         self.indexes.insert(key, index);
@@ -266,10 +244,7 @@ impl Store {
     /// Facts of length `len` whose `mask` positions equal `tuple`; the index must exist.
     #[inline]
     pub fn lookup(&self, len: usize, mask: Mask, tuple: &[TermId]) -> BucketIter<'_> {
-        let index = match self.indexes.get(&IndexKey {
-            len: len as u8,
-            mask,
-        }) {
+        let index = match self.indexes.get(&IndexKey { len: len as u8, mask }) {
             Some(index) => index,
             None => return BucketIter::Empty,
         };
@@ -281,19 +256,13 @@ impl Store {
 
     pub fn bucket_size(&self, len: usize, mask: Mask, tuple: &[TermId]) -> usize {
         self.indexes
-            .get(&IndexKey {
-                len: len as u8,
-                mask,
-            })
+            .get(&IndexKey { len: len as u8, mask })
             .and_then(|index| index.buckets.get(tuple))
             .map_or(0, Bucket::len)
     }
 
     pub fn has_index(&self, len: usize, mask: Mask) -> bool {
-        self.indexes.contains_key(&IndexKey {
-            len: len as u8,
-            mask,
-        })
+        self.indexes.contains_key(&IndexKey { len: len as u8, mask })
     }
 
     pub fn index_count(&self) -> usize {
@@ -333,10 +302,7 @@ mod tests {
         assert_eq!(store.lookup(3, 0b101, &[10, 30]).count(), 2);
         assert_eq!(store.lookup(3, 0b101, &[10, 31]).count(), 0);
         store.remove(a);
-        assert_eq!(
-            store.lookup(3, 0b101, &[10, 30]).collect::<Vec<_>>(),
-            vec![b]
-        );
+        assert_eq!(store.lookup(3, 0b101, &[10, 30]).collect::<Vec<_>>(), vec![b]);
         assert_eq!(store.find(&[10, 20, 30]), None);
         assert_eq!(store.find(&[10, 21, 30]), Some(b));
         // Full scan of a length uses the always-present empty mask.
@@ -347,17 +313,12 @@ mod tests {
     fn buckets_promote_and_shrink() {
         let mut store = Store::new();
         store.ensure_index(2, 0b01);
-        let ids: Vec<_> = (0..40)
-            .map(|i| store.insert(fact(&[7, 100 + i]), 2, ROOT_OWNER))
-            .collect();
+        let ids: Vec<_> = (0..40).map(|i| store.insert(fact(&[7, 100 + i]), 2, ROOT_OWNER)).collect();
         assert_eq!(store.lookup(2, 0b01, &[7]).count(), 40);
         for id in &ids[..39] {
             store.remove(*id);
         }
-        assert_eq!(
-            store.lookup(2, 0b01, &[7]).collect::<Vec<_>>(),
-            vec![ids[39]]
-        );
+        assert_eq!(store.lookup(2, 0b01, &[7]).collect::<Vec<_>>(), vec![ids[39]]);
         store.remove(ids[39]);
         assert_eq!(store.lookup(2, 0b01, &[7]).count(), 0);
         let reused = store.insert(fact(&[7, 1]), 2, ROOT_OWNER);

@@ -18,7 +18,24 @@ pnpm test          # Unit tests (vitest run)
 pnpm test:watch    # Watch mode tests
 pnpm test:e2e      # E2e tests (Playwright, in examples that have them)
 pnpm run bench     # Benchmarks (packages/core only)
+
+# Rust engine (crates/), from the repo root
+pnpm rust:check    # fmt --check, clippy (host + wasm32), cargo-deny, no ignored tests, cargo test — what CI runs
+pnpm build:engine  # Rebuild packages/engine/pkg from crates/jam-engine-wasm; commit the result
 ```
+
+### Rust conventions
+
+`crates/rust-toolchain.toml` pins the toolchain (rustup installs it on first use, including the
+`wasm32-unknown-unknown` target); `cargo install cargo-deny --locked` and
+`cargo install wasm-bindgen-cli --locked --version 0.2.127` (the version pinned in
+`crates/jam-engine-wasm/Cargo.toml`) are the only extra tools. Edition 2024, `#![forbid(unsafe_code)]`
+via the workspace lints, `warnings = "deny"` and `clippy::all = "deny"` — every lint is an error and is
+checked in CI. Prefer fixing over allowing; if you must, `#[allow(lint, reason = "...")]` with a real
+reason. No `todo!`/`unimplemented!`/`dbg!`, no `#[ignore]` tests (delete or fix them), no wildcard
+dependency versions. `crates/deny.toml` lists the allowed licenses — add one only when a new
+dependency actually needs it. `cargo fmt` uses `crates/rustfmt.toml` (120 columns). CI also rebuilds the
+WASM and fails if `packages/engine/pkg` differs, so run `pnpm build:engine` after touching the crates.
 
 ## New Worktree Setup With Mise
 
@@ -72,7 +89,7 @@ All application state — including the VDOM — lives in a shared **fact databa
   - `server.ts` (`@jam/core/server`) — `createSyncServer`: the Node side, an engine over any `FactStorage` (`sqliteStorage`, `memoryStorage`) with per-connection filters, snapshot/replay, `allow` authorization
   - `persist.ts` — mirrors device-local facts into their own storage and restores them on load
 
-- **@jam/engine** (`packages/engine/`, `crates/`): The fact engine. `crates/jam-engine` is the Rust store (facts, owners, scopes, pattern queries, change tracking) and `crates/jam-engine-wasm` its wasm-bindgen wrapper; `packages/engine/pkg/` holds the committed WASM build (`pnpm --dir packages/engine build` regenerates it — needs `cargo`, the `wasm32-unknown-unknown` target and `wasm-bindgen-cli`). `src/index.ts` is the typed TS wrapper (`Engine`), `src/wasm.ts` loads the module in browsers and Node, `src/storage/` the `FactStorage` adapters (`memoryStorage`, `indexedDBStorage`, `sqliteStorage`). See `docs/rust-engine-spec.md`.
+- **@jam/engine** (`packages/engine/`, `crates/`): The fact engine. `crates/jam-engine` is the Rust store (facts, owners, scopes, pattern queries, change tracking) and `crates/jam-engine-wasm` its wasm-bindgen wrapper; `packages/engine/pkg/` holds the committed WASM build (`pnpm build:engine` regenerates it — needs `cargo` and `wasm-bindgen-cli`; CI checks it matches the source). `src/index.ts` is the typed TS wrapper (`Engine`), `src/wasm.ts` loads the module in browsers and Node, `src/storage/` the `FactStorage` adapters (`memoryStorage`, `indexedDBStorage`, `sqliteStorage`). See `docs/rust-engine-spec.md`.
 
 - **@jam/ui** (`packages/ui/`): Port of tamagui's web style system and components onto the fact DB. `createJamUI(defaultConfig)` sets up tokens, 390 generated themes (CSS variables behind `t_light t_light_blue t_light_blue_Button` class chains), fonts, media queries and animations; `styled()` supports tamagui-style variants, styled contexts, pseudo/media props and sub-tree theming via `<Theme>`. Read `packages/ui/docs/STYLE-SYSTEM.md` before changing the style system; `docs/STATUS.md` tracks what is still rough.
 

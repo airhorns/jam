@@ -10,7 +10,7 @@ pub mod wire;
 pub use engine::Engine;
 pub use query::{Clause, QueryId, RowId};
 pub use store::{FactId, OwnerId, ROOT_OWNER};
-pub use term::{Interner, Term, TermId, EMPTY, FALSE, NONE, TRUE, VAR_BASE, WILD};
+pub use term::{EMPTY, FALSE, Interner, NONE, TRUE, Term, TermId, VAR_BASE, WILD};
 
 #[cfg(test)]
 mod tests;

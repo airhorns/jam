@@ -4,7 +4,11 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 root="$(cd "$here/../.." && pwd)"
 cd "$root/crates"
-cargo build --release -p jam-engine-wasm --target wasm32-unknown-unknown
+# Registry sources are referenced by absolute path in panic locations; remapping them keeps the
+# artifact byte-identical across machines so CI can check the committed build against the source.
+registry="${CARGO_HOME:-$HOME/.cargo}/registry/src"
+RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$registry=/cargo/registry/src" \
+  cargo build --locked --release -p jam-engine-wasm --target wasm32-unknown-unknown
 wasm-bindgen --target web --out-dir "$here/pkg" --out-name jam_engine_wasm \
   target/wasm32-unknown-unknown/release/jam_engine_wasm.wasm
 rm -f "$here/pkg/.gitignore" "$here/pkg/package.json"

@@ -48,10 +48,7 @@ impl<'a> Reader<'a> {
     }
 
     pub fn u32(&mut self) -> Result<u32, String> {
-        let v = *self
-            .data
-            .get(self.pos)
-            .ok_or_else(|| format!("truncated at {}", self.pos))?;
+        let v = *self.data.get(self.pos).ok_or_else(|| format!("truncated at {}", self.pos))?;
         self.pos += 1;
         Ok(v)
     }

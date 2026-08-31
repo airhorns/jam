@@ -1,0 +1,22 @@
+# Supply-chain policy for the Rust dependency graph.
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+private = { ignore = true }
+allow = ["Apache-2.0", "MIT", "Unicode-3.0", "Zlib"]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

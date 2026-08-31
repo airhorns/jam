@@ -41,6 +41,38 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain pinned in crates/rust-toolchain.toml
+        working-directory: crates
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2,wasm-bindgen-cli@0.2.127
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack pnpm rust:fmt
+      - run: corepack pnpm rust:clippy
+      - run: corepack pnpm rust:deny
+      - run: corepack pnpm rust:no-ignored-tests
+      - run: corepack pnpm rust:test
+      - name: Committed WASM build matches the Rust source
+        run: |
+          corepack pnpm build:engine
+          git diff --exit-code --stat -- packages/engine/pkg
+
   core-benchmarks:
     name: Core Benchmarks
     runs-on: ubuntu-latest

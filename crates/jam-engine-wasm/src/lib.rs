@@ -14,14 +14,10 @@ pub struct JamEngine {
 fn unpack_clauses(packed: &[u32]) -> Result<Vec<Clause>, JsError> {
     let mut clauses = Vec::new();
     let mut i = 0;
-    let n = *packed
-        .first()
-        .ok_or_else(|| JsError::new("empty clause list"))? as usize;
+    let n = *packed.first().ok_or_else(|| JsError::new("empty clause list"))? as usize;
     i += 1;
     for _ in 0..n {
-        let len = *packed
-            .get(i)
-            .ok_or_else(|| JsError::new("truncated clause list"))? as usize;
+        let len = *packed.get(i).ok_or_else(|| JsError::new("truncated clause list"))? as usize;
         i += 1;
         let end = i + len;
         if end > packed.len() {
@@ -37,9 +33,7 @@ fn unpack_clauses(packed: &[u32]) -> Result<Vec<Clause>, JsError> {
 impl JamEngine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> JamEngine {
-        JamEngine {
-            inner: Engine::new(),
-        }
+        JamEngine { inner: Engine::new() }
     }
 
     // --- terms ---

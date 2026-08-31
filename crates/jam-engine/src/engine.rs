@@ -5,9 +5,9 @@
 use hashbrown::{HashMap, HashSet};
 
 use crate::owner::Owners;
-use crate::query::{adhoc, evaluate, row_order, Clause, Queries, QueryId};
-use crate::store::{FactId, Mask, OwnerId, Store, ROOT_OWNER};
-use crate::term::{Interner, TermId, EMPTY, NONE, VAR_BASE, WILD};
+use crate::query::{Clause, Queries, QueryId, adhoc, evaluate, row_order};
+use crate::store::{FactId, Mask, OwnerId, ROOT_OWNER, Store};
+use crate::term::{EMPTY, Interner, NONE, TermId, VAR_BASE, WILD};
 use crate::wire::*;
 
 struct EntityScope {
@@ -168,11 +168,7 @@ impl Engine {
             }
             if owner == ROOT_OWNER && !had_root {
                 let scope = record.scope;
-                self.emit_fact(
-                    FACT_ADDED | FACT_DURABLE | FACT_EXISTING | replace_flag,
-                    scope,
-                    terms,
-                );
+                self.emit_fact(FACT_ADDED | FACT_DURABLE | FACT_EXISTING | replace_flag, scope, terms);
             }
             return;
         }
@@ -203,11 +199,7 @@ impl Engine {
     /// Fact ids matching a pattern of literals and `WILD`s, via the index over the literal positions.
     fn matching(&mut self, pattern: &[u32]) -> Vec<FactId> {
         let mask = literal_mask(pattern);
-        let tuple: Vec<TermId> = pattern
-            .iter()
-            .filter(|&&p| p != WILD && !is_var(p))
-            .copied()
-            .collect();
+        let tuple: Vec<TermId> = pattern.iter().filter(|&&p| p != WILD && !is_var(p)).copied().collect();
         self.store.ensure_index(pattern.len(), mask);
         self.store.lookup(pattern.len(), mask, &tuple).collect()
     }
@@ -271,11 +263,8 @@ impl Engine {
 
     pub fn clear(&mut self) {
         if self.fact_events == FACT_EVENTS_ALL {
-            let all: Vec<(TermId, Box<[TermId]>)> = self
-                .store
-                .iter()
-                .map(|(_, r)| (r.scope, r.terms.clone()))
-                .collect();
+            let all: Vec<(TermId, Box<[TermId]>)> =
+                self.store.iter().map(|(_, r)| (r.scope, r.terms.clone())).collect();
             for (scope, terms) in all {
                 self.emit_fact(0, scope, &terms);
             }
@@ -288,12 +277,7 @@ impl Engine {
 
     // --- scopes ---
 
-    fn resolve_scope(
-        &self,
-        terms: &[TermId],
-        explicit: TermId,
-        inherited: Option<TermId>,
-    ) -> TermId {
+    fn resolve_scope(&self, terms: &[TermId], explicit: TermId, inherited: Option<TermId>) -> TermId {
         if explicit != NONE {
             return explicit;
         }
@@ -301,10 +285,7 @@ impl Engine {
             return scope;
         }
         if terms.len() >= 2 && !self.entity_scopes.is_empty() {
-            return self
-                .entity_scopes
-                .get(&(terms[0], terms[1]))
-                .map_or(EMPTY, |e| e.scope);
+            return self.entity_scopes.get(&(terms[0], terms[1])).map_or(EMPTY, |e| e.scope);
         }
         EMPTY
     }
@@ -432,11 +413,8 @@ fn push_order(out: &mut Vec<u32>, order: u64) {
 }
 
 fn literal_mask(pattern: &[u32]) -> Mask {
-    pattern.iter().enumerate().fold(0, |m, (i, &p)| {
-        if p != WILD && !is_var(p) {
-            m | (1 << i)
-        } else {
-            m
-        }
-    })
+    pattern
+        .iter()
+        .enumerate()
+        .fold(0, |m, (i, &p)| if p != WILD && !is_var(p) { m | (1 << i) } else { m })
 }

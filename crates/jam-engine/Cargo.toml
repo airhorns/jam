@@ -4,10 +4,14 @@ description = "Incremental fact store: interned tuples, self-tuning indexes, inc
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
-hashbrown = { version = "0.15", default-features = false, features = ["default-hasher", "inline-more"] }
+hashbrown = { version = "0.17", default-features = false, features = ["default-hasher", "inline-more"] }
 indexmap = "2"
 smallvec = { version = "1", features = ["union", "const_generics"] }
 
-[dev-dependencies]
