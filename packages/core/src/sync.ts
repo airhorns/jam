@@ -96,6 +96,8 @@ export interface SyncHandle {
   readonly connected: boolean;
   /** Whether this tab holds the server connection on behalf of the tabs sharing its storage. */
   readonly leading: boolean;
+  /** This tab's id among the tabs sharing its storage. */
+  readonly tab: string;
 }
 
 export const SYNC_STATUS_FACT = "sync";
@@ -179,16 +181,20 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   // --- local state ---
   const mirror = new Map<string, StoredFact>();
   for (const fact of await storage.load()) mirror.set(factKey(fact.terms), fact);
+  // The log is read before the acked watermark so an entry acknowledged in between is still skipped.
+  const storedLog = url ? await storage.readLog(0) : [];
+  let lastAcked = Number((await storage.getMeta("acked")) ?? 0);
   // Entries carry `seq: 0` until the storage write that assigns their seq settles.
-  let outbox: LogEntry[] = url ? await storage.readLog(0) : [];
+  let outbox: LogEntry[] = [];
   const pendingKeys = new Map<string, number>();
+  /** Keys where this tab's mirror may differ from what the leader wrote, to be written from the mirror if it takes the lead. */
+  const unwritten = new Set<string>();
   const holdKey = (key: string) => pendingKeys.set(key, (pendingKeys.get(key) ?? 0) + 1);
   const releaseKey = (key: string) => {
     const n = (pendingKeys.get(key) ?? 0) - 1;
     if (n <= 0) pendingKeys.delete(key);
     else pendingKeys.set(key, n);
   };
-  for (const entry of outbox) holdKey(factKey(entry.terms));
 
   const subscriptions = new Map<string, Subscription>();
   const matchesActive = (terms: Fact, scope: string, except?: Subscription): boolean => {
@@ -304,27 +310,39 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     if (matchesActive(terms, scope)) db.drop(...terms);
   };
 
-  const applyChange = (change: SyncChange) => {
+  /**
+   * Mirror one change; false when a pending local write or the lack of any interested tab leaves it alone.
+   * A pending write to the same fact wins, and so does a pending replace of the same attribute, which
+   * will evict this value once it reaches the server.
+   */
+  const applyChange = (change: SyncChange): boolean => {
     const key = factKey(change.terms);
-    if (pendingKeys.has(key)) return;
-    if (leading && !matchesRemote(change.terms, change.scope)) return;
+    if (pendingKeys.has(key) || (change.op !== "delete" && replacedAfter(change.terms, 0))) {
+      if (!leading) unwritten.add(key);
+      return false;
+    }
+    if (leading && !matchesRemote(change.terms, change.scope)) return false;
     if (change.op === "delete") {
       unload(change.terms, change.scope);
       forget(change.terms, leading && mirror.has(key));
-      return;
+      return true;
     }
     load(change.terms, change.scope);
     const known = mirror.get(key);
     remember(change.terms, change.scope, leading && known?.scope !== change.scope);
+    return true;
   };
 
-  /** Apply what the server (or, on a follower, the leader) reports; the leader passes it on to the other tabs. */
+  /**
+   * Apply what the server (or, on a follower, the leader) reports. The leader passes on exactly what it
+   * applied, so every tab's mirror stays a copy of what storage holds — that is what lets a tab that
+   * takes over the lead trust its mirror when deciding which changes still need writing. A follower that
+   * leaves one out because of its own pending write notes the key, since the leader did write it.
+   */
   const applyChanges = (changes: SyncChange[]) => {
     if (changes.length === 0) return;
-    applyFacts(() => {
-      for (const change of changes) applyChange(change);
-    }, db);
-    if (leading) post({ t: "state", changes });
+    const applied = applyFacts(() => changes.filter(applyChange), db);
+    if (leading && applied.length > 0) post({ t: "state", changes: applied });
   };
 
   /** A snapshot as changes: everything the mirror holds for the filter but the server no longer does goes, the rest comes. */
@@ -338,27 +356,69 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     return changes;
   };
 
-  /** Local writes another tab stored: show them and hold their keys until the server acknowledges them. */
-  const applyLocal = (entries: LogEntry[]) => {
+  const samePrefix = (a: Fact, b: Fact) => a.length === b.length && a.every((term, i) => i === a.length - 1 || term === b[i]);
+  /** Whether the outbox holds a change to `terms` written after `seq`; an unassigned seq is newer than any. */
+  const changedAfter = (terms: Fact, seq: number) => {
+    const key = factKey(terms);
+    return outbox.some((e) => (e.seq === 0 || e.seq > seq) && factKey(e.terms) === key);
+  };
+  const replacedAfter = (terms: Fact, seq: number) =>
+    outbox.some((e) => (e.seq === 0 || e.seq > seq) && e.op === "replace" && e.terms.length > 1 && samePrefix(e.terms, terms));
+
+  /**
+   * Local writes other tabs stored: show them and hold their keys until the server acknowledges them.
+   * Each entry takes effect at its place in the log — the writer's database may not have held what this
+   * one does, so a replace evicts the other values of its prefix here too, a fact a later replace evicts
+   * goes even though its writer stored it, and anything a later entry already rewrote is left as that
+   * entry made it. The leader writes the outcome to storage so it lands after the writers' own partial
+   * views; a starting tab does the same for the log it finds. A follower only notes what it changed,
+   * since the leader may have heard of these entries in a different order and decided otherwise.
+   */
+  const applyLog = (entries: LogEntry[], persist = leading) => {
     const known = new Set(outbox.map((e) => e.seq));
-    const fresh = entries.filter((e) => e.seq === 0 || !known.has(e.seq));
+    const fresh = entries.filter((e) => e.seq === 0 || (e.seq > lastAcked && !known.has(e.seq)));
     if (fresh.length === 0) return;
+    const keep = (terms: Fact, scope: string) => {
+      load(terms, scope);
+      remember(terms, scope, persist);
+      if (!persist) unwritten.add(factKey(terms));
+    };
+    const evict = (terms: Fact, scope: string) => {
+      unload(terms, scope);
+      forget(terms, persist);
+      if (!persist) unwritten.add(factKey(terms));
+    };
     applyFacts(() => {
       for (const entry of fresh) {
+        const { terms, scope, seq } = entry;
+        const key = factKey(terms);
         if (entry.op === "delete") {
-          unload(entry.terms, entry.scope);
-          forget(entry.terms, false);
+          if (!changedAfter(terms, seq)) evict(terms, scope);
         } else {
-          load(entry.terms, entry.scope);
-          remember(entry.terms, entry.scope, false);
+          if (entry.op === "replace" && terms.length > 1) {
+            for (const fact of Array.from(mirror.values())) {
+              if (!samePrefix(fact.terms, terms) || factKey(fact.terms) === key || changedAfter(fact.terms, seq)) continue;
+              evict(fact.terms, fact.scope);
+            }
+          }
+          if (changedAfter(terms, seq)) {
+            // The later entry for this fact already decided.
+          } else if (replacedAfter(terms, seq)) {
+            evict(terms, scope);
+          } else {
+            keep(terms, scope);
+          }
         }
-        if (entry.seq > 0) {
+        if (seq > 0) {
           outbox.push(entry);
-          holdKey(factKey(entry.terms));
+          holdKey(key);
         }
       }
     }, db);
     updatePending();
+  };
+  const applyLocal = (entries: LogEntry[]) => {
+    applyLog(entries);
     pushNow();
   };
 
@@ -376,7 +436,6 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     applyFacts(() => {
       for (const fact of mirror.values()) {
         if (!released.compiled.matches(fact.terms, fact.scope) || matchesActive(fact.terms, fact.scope, released)) continue;
-        if (pendingKeys.has(factKey(fact.terms))) continue;
         db.drop(...fact.terms);
       }
     }, db);
@@ -390,13 +449,13 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   };
 
   /** Forget acknowledged outbox entries; the leader also trims them from storage and tells the other tabs. */
-  let lastAcked = 0;
   const retire = (upTo: number) => {
     const done = outbox.filter((e) => e.seq > 0 && e.seq <= upTo);
     outbox = outbox.filter((e) => !(e.seq > 0 && e.seq <= upTo));
     for (const entry of done) releaseKey(factKey(entry.terms));
+    lastAcked = Math.max(lastAcked, upTo);
     if (leading) {
-      lastAcked = Math.max(lastAcked, upTo);
+      write((w) => (w.meta.acked = String(lastAcked)));
       flushWrites();
       writing = writing.then(() => storage.trimLog(upTo)).catch((e) => console.error("[jam] sync outbox trim failed", e));
       post({ t: "acked", upTo });
@@ -460,6 +519,16 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     leading = true;
     disconnected(false);
     remote.clear();
+    if (unwritten.size > 0) {
+      write((w) => {
+        for (const key of unwritten) {
+          const fact = mirror.get(key);
+          if (fact) w.upserts.set(key, fact);
+          else w.deletes.set(key, JSON.parse(key) as Fact);
+        }
+      });
+      unwritten.clear();
+    }
     for (const [id, sub] of subscriptions) want(me, id, sub.compiled);
     post({ t: "lead", tab: me });
     connect();
@@ -472,6 +541,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         if (!leading) return;
         postConn();
         if (lastAcked > 0) post({ t: "acked", upTo: lastAcked });
+        pushNow();
         return;
       case "lead":
         if (leading) return;
@@ -487,7 +557,10 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         if (leading) drop(message.tab, message.id);
         return;
       case "bye":
-        if (leading) for (const id of Array.from(remote.keys())) drop(message.tab, id);
+        if (!leading) return;
+        for (const id of Array.from(remote.keys())) drop(message.tab, id);
+        // A tab that left may have stored a write it never got to announce.
+        pushNow();
         return;
       case "conn":
         if (leading) return;
@@ -545,7 +618,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     });
   };
 
-  /** Push everything in the shared outbox, in the order storage assigned. */
+  /** Push everything in the shared outbox, in the order storage assigned; entries this tab has not heard of yet are applied first. */
   const pushNow = () => {
     if (!leading || !connected || inflight) return;
     if (reading) {
@@ -561,6 +634,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         const again = pushAgain;
         pushAgain = false;
         if (!connected || inflight) return;
+        applyLog(entries);
         if (entries.length === 0) {
           if (again) pushNow();
           return;
@@ -688,6 +762,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   });
 
   // --- start ---
+  applyLog(storedLog, true);
   updateStatus();
   updatePending();
   started = true;
@@ -750,6 +825,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   };
   return {
     subscribe,
+    tab: me,
     get connected() {
       return connected;
     },
@@ -776,14 +852,15 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
       socket = null;
       connected = false;
       ws?.close();
+      for (const resolve of drainWaiters.splice(0)) resolve();
+      transaction(() => db.revokeOwner(owner));
+      // The last writes land and are announced before this tab leaves the channel.
+      await settled();
       if (leading) post({ t: "conn", open: false, lost: false });
       else post({ t: "bye", tab: me });
       lead?.release();
       closed = true;
       tabs.close();
-      for (const resolve of drainWaiters.splice(0)) resolve();
-      transaction(() => db.revokeOwner(owner));
-      await settled();
       if (ownsStorage) await storage.close();
     },
   };

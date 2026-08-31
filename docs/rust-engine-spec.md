@@ -416,6 +416,23 @@ new leader posts `lead`, after which every tab re-sends its `want`s, and
 resumes from the per-subscription seqs recorded in storage. Pushes are
 idempotent per entry, so the handover can at worst repeat a batch.
 
+Other tabs' writes take effect at their place in the log, not as the writer
+saw them: a tab applying a `local` entry (or the log it finds at startup, or
+the log the leader reads before a push) lets a later outbox entry for the same
+fact win, lets a replace evict the other values of its attribute — including
+one a later replace evicts even though its writer stored it — and re-persists
+the outcome so it lands after anything written from a partial view. Incoming
+server changes are fenced by pending writes to the same fact and by pending
+replaces of the same attribute. Only the leader writes what it applies; a
+follower that decides differently (from a fence or a log entry the leader
+heard in another order) notes the key and writes its mirror's value for it if
+it later takes the lead. The leader records `acked` in storage meta before
+trimming the log so a tab starting later skips acknowledged entries, and a
+closing tab lets its last writes land and announces them before leaving.
+`sync-convergence.test.ts` runs a deterministic randomized simulation of this
+(three browsers, two tabs in one, drops, reloads, subscription churn) against a
+real `createSyncServer` and checks that memory, storage and server agree.
+
 `@jam/core/server` exports `createSyncServer({ storage, allow })` returning a
 handler for `ws` connections; linearlite's `server.ts` becomes this plus a
 Node `WebSocketServer`. A native Rust server would reuse `filter.rs` and the

@@ -1,24 +1,33 @@
 import type { Lead, TabCoordinator } from "../../tabs";
 
-/** An in-memory stand-in for BroadcastChannel + Web Locks: messages reach the other open tabs on a later tick and one tab at a time holds the lead. */
-export function fakeTabs() {
+/**
+ * An in-memory stand-in for BroadcastChannel + Web Locks: messages reach the other open tabs on a
+ * later tick — after `latency()` more milliseconds, in order per receiver — and one tab at a time
+ * holds the lead.
+ */
+export function fakeTabs(latency: () => number = () => 0, onPost?: (from: string, message: unknown) => void) {
   interface Tab {
     coordinator: TabCoordinator;
     handlers: Array<(message: unknown) => void>;
     open: boolean;
+    inbox: Promise<void>;
   }
   const tabs = new Set<Tab>();
   const waiting: Array<{ tab: Tab; grant: () => void }> = [];
   let holder: Tab | null = null;
   let pending = 0;
-  let idleWaiters: Array<() => void> = [];
+  const idleWaiters: Array<() => void> = [];
 
-  const deliver = (fn: () => void) => {
+  const finish = () => {
+    if (--pending === 0) for (const resolve of idleWaiters.splice(0)) resolve();
+  };
+  const deliver = (tab: Tab, fn: () => void) => {
     pending++;
-    setTimeout(() => {
+    const delay = latency();
+    tab.inbox = tab.inbox.then(() => new Promise<void>((resolve) => setTimeout(resolve, delay))).then(() => {
       fn();
-      if (--pending === 0) for (const resolve of idleWaiters.splice(0)) resolve();
-    }, 0);
+      finish();
+    });
   };
 
   const handOver = () => {
@@ -26,16 +35,17 @@ export function fakeTabs() {
     const next = waiting.shift();
     if (!next) return;
     holder = next.tab;
-    deliver(next.grant);
+    deliver(holder, next.grant);
   };
 
   const join = (): TabCoordinator => {
-    const tab: Tab = { handlers: [], open: true, coordinator: null as unknown as TabCoordinator };
+    const tab: Tab = { handlers: [], open: true, inbox: Promise.resolve(), coordinator: null as unknown as TabCoordinator };
     tab.coordinator = {
       post(message) {
         const data = JSON.parse(JSON.stringify(message)) as unknown;
+        onPost?.(String((message as { tab?: string }).tab ?? ""), data);
         for (const other of tabs) {
-          if (other !== tab) deliver(() => other.open && other.handlers.forEach((h) => h(data)));
+          if (other !== tab) deliver(other, () => other.open && other.handlers.forEach((h) => h(data)));
         }
       },
       onMessage: (handler) => tab.handlers.push(handler),
@@ -46,7 +56,7 @@ export function fakeTabs() {
         if (holder) waiting.push(request);
         else {
           holder = tab;
-          deliver(grant);
+          deliver(tab, grant);
         }
         return {
           acquired,

@@ -134,6 +134,7 @@ All packages use a custom JSX factory — **not React**:
 ## Testing
 
 - **Unit tests**: Vitest, files in `src/__tests__/`. Run a single test file: `cd packages/core && pnpm exec vitest run src/__tests__/db.test.ts`
+- **Sync simulation**: `packages/core/src/__tests__/sync-convergence.test.ts` runs seeded random multi-browser, multi-tab runs against a real sync server under fake timers, so a failure reproduces exactly. Widen or narrow it with `SIM_SEEDS=1,2,3` / `SIM_SEEDS=$(seq -s, 1 2000)` and `SIM_STEPS=1000`; `SIM_TRACE=1` appends every storage write and tab message to a failure, `SIM_DEBUG=1` reports where a stuck run stopped. Touching `sync.ts`? Run a few thousand seeds before pushing.
 - **DOM tests**: add `// @vitest-environment happy-dom` at the top of a test file to get a real DOM. `@jam/ui/testing` exports `render()`, `css(el, pseudo?)` (declarations the style system injected for an element), `computed()`, `click/keydown/type/focus`, and `resetUI()`.
 - **E2E tests**: Playwright (Chromium). Test servers use per-worktree default ports to avoid cross-worktree collisions; set `PLAYWRIGHT_PORT` or the example-specific `*_PLAYWRIGHT_PORT` variable to override.
 - **CI** runs: install → typecheck → UI tests → unit tests → folk-todo, puddy-vite, linearlite and catalog e2e. A separate CI job runs the core benchmarks.
