@@ -64,7 +64,7 @@ describe("Select conformance", () => {
   describe("keyboard selection from an already-focused option", () => {
     it("Space on a keyboard-focused option selects it and closes the list", async () => {
       const onValueChange = vi.fn();
-      const { get, query } = render(h(Example, { defaultValue: "apple", onValueChange }));
+      const { get } = render(h(Example, { defaultValue: "apple", onValueChange }));
       const trigger = get("[data-testid=trigger]");
       click(trigger);
       await tick();
@@ -72,12 +72,12 @@ describe("Select conformance", () => {
       expect(document.activeElement).toBe(get("[data-testid=item-banana]"));
       keydown(document.activeElement!, " ");
       expect(onValueChange).toHaveBeenCalledWith("banana");
-      expect(query("[data-testid=content]")).toBeNull();
+      expect(get("[data-testid=content]").hidden).toBe(true);
     });
 
     it("Escape after navigating away from the committed option closes without changing the value", async () => {
       const onValueChange = vi.fn();
-      const { get, query } = render(h(Example, { defaultValue: "apple", onValueChange }));
+      const { get } = render(h(Example, { defaultValue: "apple", onValueChange }));
       const trigger = get("[data-testid=trigger]");
       trigger.focus();
       click(trigger);
@@ -86,7 +86,7 @@ describe("Select conformance", () => {
       keydown(document.activeElement!, "ArrowDown");
       expect(document.activeElement).toBe(get("[data-testid=item-cherry]"));
       keydown(document.activeElement!, "Escape");
-      expect(query("[data-testid=content]")).toBeNull();
+      expect(get("[data-testid=content]").hidden).toBe(true);
       expect(onValueChange).not.toHaveBeenCalled();
       expect(get("[data-testid=value]").textContent).toBe("Apple");
       await tick();
@@ -210,13 +210,13 @@ describe("Select conformance", () => {
 
   describe("disabled trigger blocks every open key", () => {
     it("ignores ArrowDown, Enter and Space while disabled, never opening the list", () => {
-      const { get, query } = render(h(Example, { disabled: true, defaultValue: "apple" }));
+      const { get } = render(h(Example, { disabled: true, defaultValue: "apple" }));
       const trigger = get("[data-testid=trigger]");
       keydown(trigger, "ArrowDown");
       keydown(trigger, "Enter");
       keydown(trigger, " ");
       click(trigger);
-      expect(query("[data-testid=content]")).toBeNull();
+      expect(get("[data-testid=content]").hidden).toBe(true);
     });
   });
 

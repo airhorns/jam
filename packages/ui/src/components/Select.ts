@@ -1,5 +1,5 @@
-import { Portal } from "@jam/core";
-import { createContext, h, useContext } from "@jam/core/jsx";
+import { $, _, Portal, forget, replace, when } from "@jam/core";
+import { createContext, h, useCleanup, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { styled } from "../styled";
 import type { StyledProps } from "../styled";
@@ -55,24 +55,56 @@ function textOf(children: VChild[]): string {
   return text.trim();
 }
 
-/**
- * Items declared anywhere under the Select, in order, so the trigger can show
- * the selected label and keyboard navigation works before the list opens.
- */
+function optionOf(props: SelectItemProps, children: VChild[]): SelectOption {
+  return { value: props.value, label: props.label ?? textOf(children), disabled: props.disabled === true };
+}
+
+/** Items declared directly under the Select, in order; the first render's guess before the items themselves have reported in. */
 export function collectOptions(children: VChild | VChild[]): SelectOption[] {
   const options: SelectOption[] = [];
   const visit = (nodes: VChild[]) => {
     for (const child of nodes.flat(10)) {
       if (!isVNode(child)) continue;
-      if (child.tag === SelectItem) {
-        const props = child.props as SelectItemProps;
-        options.push({ value: props.value, label: props.label ?? textOf(child.children), disabled: props.disabled === true });
-      } else {
-        visit(child.children);
-      }
+      if (child.tag === SelectItem) options.push(optionOf(child.props as SelectItemProps, child.children));
+      else visit(child.children);
     }
   };
   visit([children].flat(10) as VChild[]);
+  return options;
+}
+
+type OptionRegistry = { seen: SelectOption[]; known: string };
+
+/**
+ * Options each mounted Select saw its items report during the current render.
+ * The content renders (hidden) while closed, so items created by any component
+ * register on every pass; when the list differs from what the trigger rendered
+ * with, it is published as a fact after the pass and the Select re-renders.
+ */
+const registries = new Map<string, OptionRegistry>();
+const publishing = new Set<string>();
+
+function publishOptions(id: string): void {
+  publishing.delete(id);
+  const registry = registries.get(id);
+  if (!registry) return;
+  const json = JSON.stringify(registry.seen);
+  if (json !== registry.known) replace(id, "options", json);
+}
+
+function useOptions(id: string, children: VChild | VChild[] | undefined): SelectOption[] {
+  const stored = when([id, "options", $.json]);
+  const options = stored.length > 0 ? (JSON.parse(stored[0].json as string) as SelectOption[]) : collectOptions(children ?? []);
+  registries.set(id, { seen: [], known: JSON.stringify(options) });
+  useCleanup(() => {
+    registries.delete(id);
+    forget(id, "options", _);
+    if (typeahead.id === id) typeahead = { id: "", query: "", at: 0 };
+  });
+  if (!publishing.has(id)) {
+    publishing.add(id);
+    queueMicrotask(() => publishOptions(id));
+  }
   return options;
 }
 
@@ -133,7 +165,7 @@ function SelectRoot(props: SelectProps): VNode {
     setOpen,
     value,
     setValue,
-    options: collectOptions(props.children),
+    options: useOptions(id, props.children),
     disabled,
     required: props.required === true,
     size: props.size,
@@ -320,9 +352,9 @@ export type SelectContentProps = StyledProps & {
   unstyled?: boolean;
 };
 
-function SelectContent(props: SelectContentProps): VNode | null {
+/** The list is in the DOM even while closed, hidden, so items anywhere in its subtree can report their labels; see `useOptions`. */
+function SelectContent(props: SelectContentProps): VNode {
   const ctx = useSelectContext("Content");
-  if (!ctx.open) return null;
   const { children, ...rest } = props;
   const { position, attrs } = floatingContentProps(ctx.id, ctx.placement, rest);
   const style = attrs.style as Record<string, unknown>;
@@ -336,8 +368,10 @@ function SelectContent(props: SelectContentProps): VNode | null {
         id: ctx.contentId,
         role: "listbox",
         "aria-labelledby": ctx.triggerId,
-        "data-state": "open",
+        "data-state": dataState(ctx.open),
         tabIndex: -1,
+        hidden: !ctx.open || undefined,
+        display: ctx.open ? undefined : "none",
         ...attrs,
         onKeyDown: (event: KeyboardEvent) => {
           (rest.onKeyDown as ((e: KeyboardEvent) => void) | undefined)?.(event);
@@ -477,6 +511,7 @@ export type SelectItemProps = StyledProps & {
 function SelectItem(props: SelectItemProps): VNode {
   const ctx = useSelectContext("Item");
   const { value, label, disabled = false, children, ...rest } = props;
+  registries.get(ctx.id)?.seen.push(optionOf(props, [children].flat(10) as VChild[]));
   const selected = ctx.value === value;
   const choose = () => {
     if (disabled) return;
@@ -496,7 +531,7 @@ function SelectItem(props: SelectItemProps): VNode {
         "data-state": selected ? "checked" : "unchecked",
         "data-disabled": disabled ? "" : undefined,
         tabIndex: -1,
-        autofocus: selected || undefined,
+        autofocus: (selected && ctx.open) || undefined,
         disabled,
         ...rest,
         onClick: (event: MouseEvent) => {

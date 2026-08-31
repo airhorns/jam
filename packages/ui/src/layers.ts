@@ -202,7 +202,9 @@ function finishLayer(layer: Layer): void {
     queueMicrotask(() => {
       if (!previous.isConnected) return;
       const active = document.activeElement;
-      if (active == null || active === document.body || !active.isConnected) previous.focus();
+      // Content that stays mounted but hidden still holds focus until the browser's focus fixup runs.
+      const stranded = active == null || active === document.body || !active.isConnected || contentElement(layer.id)?.contains(active) === true;
+      if (stranded) previous.focus();
     });
   }
 }
