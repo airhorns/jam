@@ -1,7 +1,7 @@
 # Checkbox
 
 A single on/off control for a form field or setting. Renders a real
-`<button role="checkbox">` so click, Space, Enter and focus work natively, and
+`<button role="checkbox">` so click, Space and focus work natively, and
 supports a third `"indeterminate"` state for "some of the children are
 checked" summaries. Use `Switch` for settings that take effect immediately and
 `RadioGroup` when exactly one of several options must be chosen.
@@ -79,8 +79,11 @@ together.
 - `role="checkbox"` with `aria-checked` `"true"` / `"false"` / `"mixed"`, plus
   a `data-state` attribute (`checked` / `unchecked` / `indeterminate`) for
   styling.
-- A native `<button type="button">`, so Space and Enter toggle it and it takes
-  part in the tab order without a `tabIndex`.
+- A native `<button type="button">`, so Space toggles it and it takes part in
+  the tab order without a `tabIndex`; Enter is swallowed, as on a native
+  checkbox.
+- `data-disabled=""` while disabled, for styling alongside the real attribute.
+- With `name`, resetting the surrounding `<form>` restores `defaultChecked`.
 - Focus shows a 2px `$outlineColor` outline via `focusVisibleStyle`, so it only
   appears for keyboard focus.
 - `disabled` sets the real attribute: the button leaves the tab order, stops

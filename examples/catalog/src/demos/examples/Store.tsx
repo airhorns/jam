@@ -19,6 +19,7 @@ import {
   Accordion,
   Circle,
   useStableId,
+  useControllableState,
 } from "@jam/ui";
 import type { ComponentDemos } from "../../types";
 import { useDemoState } from "../state";
@@ -143,6 +144,7 @@ function CartButton({ onClick }: { onClick: () => void }) {
 
 function StoreHeader({ onOpenCart }: { onOpenCart: () => void }) {
   const id = useStableId();
+  const [query, setQuery] = useDemoState("store.query", "");
   return (
     <XStack alignItems="center" justifyContent="space-between" gap="$space.4" flexWrap="wrap">
       <YStack gap={2}>
@@ -154,7 +156,7 @@ function StoreHeader({ onOpenCart }: { onOpenCart: () => void }) {
           <YStack position="absolute" left={12} color="$color10" pointerEvents="none" zIndex={1}>
             <SearchIcon size={16} />
           </YStack>
-          <Input id={`${id}-search`} aria-label="Search products" size="$3" placeholder="Search products" width="100%" paddingLeft={36} />
+          <Input id={`${id}-search`} aria-label="Search products" size="$3" placeholder="Search products" width="100%" paddingLeft={36} value={query} onChangeText={setQuery} />
         </XStack>
         <CartButton onClick={onOpenCart} />
       </XStack>
@@ -221,7 +223,23 @@ function ProductCard({ product }: { product: Product }) {
 
 function ProductGrid() {
   const [filter] = useDemoState("store.filter", "All");
-  const visible = filter === "All" ? products : products.filter((p) => p.category === filter);
+  const [query] = useDemoState("store.query", "");
+  const byCategory = filter === "All" ? products : products.filter((p) => p.category === filter);
+  const q = query.trim().toLowerCase();
+  const visible = q ? byCategory.filter((p) => p.name.toLowerCase().includes(q)) : byCategory;
+
+  if (visible.length === 0) {
+    return (
+      <YStack flex={1} width="100%" alignItems="center" justifyContent="center" gap="$space.3" paddingVertical="$space.8">
+        <Circle size={64} backgroundColor="$color3" color="$color10">
+          <SearchIcon size={28} strokeWidth={1.5} />
+        </Circle>
+        <SizableText fontWeight="600">No products found</SizableText>
+        <Paragraph size="$2" color="$color10" margin={0} textAlign="center">Try a different search or filter.</Paragraph>
+      </YStack>
+    );
+  }
+
   return (
     <XStack flexWrap="wrap" gap="$space.4" alignItems="stretch">
       {visible.map((product) => <ProductCard key={product.id} product={product} />)}
@@ -250,17 +268,21 @@ function QuantityStepper({ value, onChange, size = "$2", testId }: { value: numb
 function CartLine({ product, qty }: { product: Product; qty: number }) {
   const { add, remove } = useCart();
   return (
-    <XStack gap="$space.3" alignItems="center">
-      <YStack width={56}>
-        <ProductTile product={product} height={56} iconSize={24} radius="$radius.3" />
-      </YStack>
-      <YStack flex={1} minWidth={0} gap={2}>
-        <SizableText fontWeight="600" ellipsis>{product.name}</SizableText>
-        <SizableText size="$2" color="$color10">{money(product.price)} each</SizableText>
-      </YStack>
-      <QuantityStepper value={qty} onChange={(next) => (next > 0 ? add(product.id, next - qty) : remove(product.id))} />
-      <SizableText fontWeight="600" width={72} textAlign="right">{money(product.price * qty)}</SizableText>
-      <Button size="$2" chromeless circular icon={<Trash2Icon size={14} />} aria-label={`Remove ${product.name}`} color="$color10" onClick={() => remove(product.id)} />
+    <XStack gap="$space.3" alignItems="center" flexWrap="wrap">
+      <XStack flex={1} minWidth={180} gap="$space.3" alignItems="center">
+        <YStack width={56} flexShrink={0}>
+          <ProductTile product={product} height={56} iconSize={24} radius="$radius.3" />
+        </YStack>
+        <YStack flex={1} minWidth={0} gap={2}>
+          <SizableText fontWeight="600" ellipsis>{product.name}</SizableText>
+          <SizableText size="$2" color="$color10" ellipsis>{money(product.price)} each</SizableText>
+        </YStack>
+      </XStack>
+      <XStack flexShrink={0} gap="$space.3" alignItems="center">
+        <QuantityStepper value={qty} onChange={(next) => (next > 0 ? add(product.id, next - qty) : remove(product.id))} />
+        <SizableText fontWeight="600" width={72} textAlign="right" ellipsis>{money(product.price * qty)}</SizableText>
+        <Button size="$2" chromeless circular icon={<Trash2Icon size={14} />} aria-label={`Remove ${product.name}`} color="$color10" onClick={() => remove(product.id)} />
+      </XStack>
     </XStack>
   );
 }
@@ -323,13 +345,13 @@ function CartSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open:
 }
 
 function StorePage() {
-  const [open, setOpen] = useDemoState("store.cartOpen", false);
+  const [open, setOpen] = useControllableState<boolean>("cartOpen", { defaultValue: false });
   return (
     <Page padding="$space.6" gap="$space.5">
       <StoreHeader onOpenCart={() => setOpen(true)} />
       <FilterChips />
       <ProductGrid />
-      <CartSheet open={open} onOpenChange={setOpen} />
+      <CartSheet open={open ?? false} onOpenChange={setOpen} />
     </Page>
   );
 }

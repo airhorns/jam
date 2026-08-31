@@ -16,11 +16,32 @@ Read `STYLE-SYSTEM.md` first.
 - Stateful parts share state through `createStyledContext` (for style props
   like `size`) or `createContext` from `@jam/core` (for behaviour like
   `open`/`onOpenChange`). Store uncontrolled state with `useControllableState`
-  from `../state`.
+  from `../state`; it is forgotten when the component unmounts and its setter
+  is a no-op afterwards, so a late blur, image error or timer cannot resurrect it.
+- Anything else keyed by the component id — hover/dismiss timers, entries in a
+  module-level `Map`, a registered layer — must be released with `useCleanup`
+  from `@jam/core`. The catalog's `leaks.spec.ts` mounts and unmounts every
+  demo and fails on leftover facts, layers, a stuck scroll lock or pending timers.
 - Interactive elements render real `<button>`/`<input>` elements so keyboard
-  and focus work for free; use `role`/`aria-*` for anything else.
+  and focus work for free; use `role`/`aria-*` for anything else. Disabled
+  parts carry `data-disabled=""` (the empty string, as Radix does) next to the
+  real attribute; `rovingFocus` skips items that have it.
+- Form controls with a `name` mirror their value into a visually hidden
+  `<input>` and spread `useFormReset(() => reset(""))` from `../form` onto
+  it, where `reset` is the third element of `useControllableState`, so a
+  `<form>` reset returns to `defaultValue`; with no default it clears the
+  value and reports `""` to `onChange`, as the DOM does for an unselected
+  radio group or select.
+- Composite widgets take `dir?: "ltr" | "rtl"`, render it as the `dir`
+  attribute and pass it to `rovingFocus` so ArrowLeft/ArrowRight follow the
+  reading direction. `rovingFocus`/`rovingItems` are also exported from
+  `@jam/ui` for composites built outside the library (menus, dot pagers).
+- Anything rendered but not currently selected (a `forceMount` panel, an
+  inactive page) gets `tabIndex={-1}` so only the active part is a Tab stop.
 - Overlays register with `useDismissableLayer` (`../layers`) and position with
-  `../floating`; content goes through `Portal` from `@jam/core`.
+  `../floating`; content goes through `Portal` from `@jam/core`. Something that
+  handles Escape itself without being a layer (a toast) marks its element
+  `data-handles-escape` so the key doesn't also dismiss the topmost layer.
 
 ## Styling rules
 
@@ -53,7 +74,11 @@ Read `STYLE-SYSTEM.md` first.
    variant group plus one interactive demo with `data-testid`s. Run
    `CATALOG_PORT=5176 pnpm shots <Name>` from `examples/catalog` and look at
    both PNGs in `shots/` — fix anything that looks off before moving on.
-5. `pnpm exec vitest run` and `pnpm typecheck` pass in `packages/ui`,
+5. **Conformance** in `src/conformance/__tests__/<Name>.conformance.test.ts`:
+   behaviour ported from the matching Radix primitive and the WAI-ARIA APG
+   pattern, one `it` per rule with the source cited. A deliberate divergence
+   is an `it.skip` whose title ends with the reason, so the gap stays visible.
+6. `pnpm exec vitest run` and `pnpm typecheck` pass in `packages/ui`,
    `pnpm typecheck` passes in `examples/catalog`.
 
 ## Doc template (`docs/<Name>.md`)

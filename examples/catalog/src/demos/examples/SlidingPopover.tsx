@@ -1,6 +1,6 @@
 import { h } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
-import { XStack, YStack, H2, H4, Paragraph, SizableText, Button, Popover, Avatar, Separator, ListItem, Square, Circle, Card } from "@jam/ui";
+import { XStack, YStack, H2, H4, Paragraph, SizableText, Button, Popover, Avatar, Separator, ListItem, Square, Circle, Card, rovingFocus } from "@jam/ui";
 import type { ComponentDemos } from "../../types";
 import { useDemoState } from "../state";
 import { Page } from "./shared";
@@ -131,8 +131,12 @@ function MenuItem(props: MenuItemProps) {
   return <ListItem tag="a" href="#" role="menuitem" hoverTheme pressTheme backgroundColor="transparent" borderRadius="$radius.3" textDecorationLine="none" {...props} />;
 }
 
-function MenuRow({ entry }: { entry: MenuEntry }) {
-  return <MenuItem icon={<Tile icon={entry.icon} tint={entry.tint} />} title={entry.title} subTitle={entry.description} />;
+function MenuRow({ entry, first }: { entry: MenuEntry; first: boolean }) {
+  return (
+    <Popover.Close asChild>
+      <MenuItem tabIndex={first ? 0 : -1} icon={<Tile icon={entry.icon} tint={entry.tint} />} title={entry.title} subTitle={entry.description} />
+    </Popover.Close>
+  );
 }
 
 function NavMenuScreen() {
@@ -158,9 +162,16 @@ function NavMenuScreen() {
                     {item.label}
                   </Button>
                 </Popover.Trigger>
-                <Popover.Content role="menu" aria-label={item.label} width={320} padding="$space.2" gap={2}>
+                <Popover.Content
+                  role="menu"
+                  aria-label={item.label}
+                  width={320}
+                  padding="$space.2"
+                  gap={2}
+                  onKeyDown={(e: KeyboardEvent) => rovingFocus(e, "[role=menuitem]", { orientation: "vertical" })}
+                >
                   <Popover.Arrow />
-                  {item.entries.map((entry) => <MenuRow key={entry.title} entry={entry} />)}
+                  {item.entries.map((entry, i) => <MenuRow key={entry.title} entry={entry} first={i === 0} />)}
                 </Popover.Content>
               </Popover>
             );
@@ -207,11 +218,22 @@ function ProfileMenuScreen() {
                 </YStack>
               </XStack>
               <Separator marginBottom="$space.2" />
-              <YStack role="menu" aria-label="Account" gap={2}>
-                <MenuItem size="$3" icon={<SettingsIcon size={16} />} title="Settings" />
-                <MenuItem size="$3" icon={<CreditCardIcon size={16} />} title="Billing" />
+              <YStack
+                role="menu"
+                aria-label="Account"
+                gap={2}
+                onKeyDown={(e: KeyboardEvent) => rovingFocus(e, "[role=menuitem]", { orientation: "vertical" })}
+              >
+                <Popover.Close asChild>
+                  <MenuItem tabIndex={0} size="$3" icon={<SettingsIcon size={16} />} title="Settings" />
+                </Popover.Close>
+                <Popover.Close asChild>
+                  <MenuItem tabIndex={-1} size="$3" icon={<CreditCardIcon size={16} />} title="Billing" />
+                </Popover.Close>
                 <Separator marginVertical="$space.2" />
-                <MenuItem size="$3" color="$red10" icon={<LogOutIcon size={16} />} title="Sign out" />
+                <Popover.Close asChild>
+                  <MenuItem tabIndex={-1} size="$3" color="$red10" icon={<LogOutIcon size={16} />} title="Sign out" />
+                </Popover.Close>
               </YStack>
             </Popover.Content>
           </Popover>

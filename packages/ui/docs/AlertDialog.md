@@ -53,7 +53,7 @@ affordance.
 
 ## Accessibility
 
-Content has `role="alertdialog"` and `aria-modal="true"`. Focus moves into the
-content on open (put `autofocus` on the Cancel button to make the safe choice
-the default) and returns to the trigger on close. Outside presses are ignored;
-Escape behaves like Cancel.
+Content has `role="alertdialog"` and `aria-modal="true"`; the dialog is always
+modal. Focus moves to the Cancel button on open (an `autofocus` element inside
+the content wins) and returns to the trigger on close. Outside presses are
+ignored; Escape behaves like Cancel.

@@ -140,10 +140,80 @@ describe("RadioGroup", () => {
     expect(onValueChange).not.toHaveBeenCalled();
   });
 
-  it("reports required and a form name", () => {
-    const r = group({ required: true, name: "plan" });
+  it("reports required and renders a hidden radio input per item for the given name", () => {
+    const r = group({ required: true, name: "plan", defaultValue: "a" });
     expect(r.root.getAttribute("aria-required")).toBe("true");
-    expect(r.root.dataset.name).toBe("plan");
+    const inputs = r.all("input[type=radio]");
+    expect(inputs).toHaveLength(3);
+    expect(inputs.every((el) => el.hasAttribute("required"))).toBe(true);
+    expect((inputs[0] as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("threads dir into arrow-key navigation and defaults loop to true", () => {
+    const rtl = group({ orientation: "horizontal", dir: "rtl", defaultValue: "a" });
+    expect(rtl.root.getAttribute("dir")).toBe("rtl");
+    const items = rtl.all("[role=radio]");
+    items[0].focus();
+    keydown(items[0], "ArrowRight");
+    expect(items[2].getAttribute("aria-checked")).toBe("true");
+
+    const noLoop = group({ loop: false });
+    const noLoopItems = noLoop.all("[role=radio]");
+    noLoopItems[2].focus();
+    keydown(noLoopItems[2], "ArrowDown");
+    expect(document.activeElement).toBe(noLoopItems[2]);
+  });
+
+  it("preventDefaults Enter on an item", () => {
+    const r = group({ defaultValue: "a" });
+    const items = r.all("[role=radio]");
+    items[0].focus();
+    expect(keydown(items[0], "Enter").defaultPrevented).toBe(true);
+  });
+
+  it("contributes a hidden radio input per item to the owning form and restores the default on reset", () => {
+    const r = render(
+      h(
+        "form",
+        null,
+        h(RadioGroup, { name: "plan", defaultValue: "a" }, h(RadioGroup.Item, { value: "a" }), h(RadioGroup.Item, { value: "b" })),
+      ),
+    );
+    const form = r.get<HTMLFormElement>("form");
+    click(r.all("[role=radio]")[1]);
+    expect(new FormData(form).get("plan")).toBe("b");
+    form.dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
+    expect(r.all("[role=radio]")[0].getAttribute("aria-checked")).toBe("true");
+    expect(new FormData(form).get("plan")).toBe("a");
+  });
+
+  it("resets to no selection when it started without a default, reporting it as an empty value", () => {
+    const onValueChange = vi.fn();
+    const r = render(
+      h("form", null, h(RadioGroup, { name: "plan", onValueChange }, h(RadioGroup.Item, { value: "a" }), h(RadioGroup.Item, { value: "b" }))),
+    );
+    const form = r.get<HTMLFormElement>("form");
+    click(r.all("[role=radio]")[1]);
+    expect(new FormData(form).get("plan")).toBe("b");
+    form.dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
+    expect(r.all("[role=radio]").map((el) => el.getAttribute("aria-checked"))).toEqual(["false", "false"]);
+    expect(new FormData(form).get("plan")).toBeNull();
+    expect(onValueChange).toHaveBeenLastCalledWith("");
+    form.dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
+    expect(onValueChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats a controlled empty value as no selection, so every item stays a Tab stop", () => {
+    const r = render(h(RadioGroup, { value: "" }, h(RadioGroup.Item, { value: "a" }), h(RadioGroup.Item, { value: "b" })));
+    expect(r.all("[role=radio]").map((el) => el.getAttribute("aria-checked"))).toEqual(["false", "false"]);
+    expect(r.all<HTMLElement>("[role=radio]").map((el) => el.tabIndex)).toEqual([0, 0]);
+  });
+
+  it("does not report a change when a form reset clears a group that is already empty", () => {
+    const onValueChange = vi.fn();
+    const r = render(h("form", null, h(RadioGroup, { value: "", onValueChange }, h(RadioGroup.Item, { value: "a" }))));
+    r.get<HTMLFormElement>("form").dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
+    expect(onValueChange).not.toHaveBeenCalled();
   });
 
   it("strips the default look when unstyled", () => {

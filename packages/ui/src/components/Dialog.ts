@@ -6,10 +6,12 @@ import type { StyledProps } from "../styled";
 import { themeableVariants } from "../variants";
 import { useControllableState, useStableId } from "../state";
 import { useDismissableLayer } from "../layers";
+import type { LayerOptions } from "../layers";
 import { Button } from "./Button";
 import { Slot } from "./Slot";
 import { YStack } from "./Stacks";
 import { H2, Paragraph } from "./Text";
+import { containsTag } from "./vnode";
 
 export type DialogContextValue = {
   id: string;
@@ -47,10 +49,15 @@ export type DialogProps = {
 
 /**
  * Register the dialog's open state as a dismissable layer and provide the
- * context its parts read. Shared with AlertDialog, which only changes the
- * role and the outside-press default.
+ * context its parts read. Shared with AlertDialog, which changes the role,
+ * locks the dismissal rules and prefers focusing Cancel.
  */
-export function useDialogRoot(props: DialogProps, role: DialogContextValue["role"], idPrefix: string): DialogContextValue {
+export function useDialogRoot(
+  props: DialogProps,
+  role: DialogContextValue["role"],
+  idPrefix: string,
+  layer: Partial<LayerOptions> = {},
+): DialogContextValue {
   const modal = props.modal ?? true;
   const id = useStableId(idPrefix);
   const [openState, setOpen] = useControllableState<boolean>("open", {
@@ -66,6 +73,7 @@ export function useDialogRoot(props: DialogProps, role: DialogContextValue["role
     restoreFocus: true,
     dismissOnEscape: props.dismissOnEscape,
     dismissOnOutsidePress: props.dismissOnOutsidePress,
+    ...layer,
   });
   return {
     id,
@@ -100,7 +108,7 @@ export function DialogTrigger(props: DialogTriggerProps): VNode {
     ...rest,
     "aria-haspopup": "dialog",
     "aria-expanded": ctx.open,
-    "aria-controls": ctx.contentId,
+    "aria-controls": ctx.open ? ctx.contentId : undefined,
     "data-state": dataState(ctx.open),
     "data-layer-anchor": ctx.id,
     onClick: (event: MouseEvent) => {
@@ -223,16 +231,19 @@ export const DialogContentFrame = styled(YStack, {
 
 export function DialogContent(props: StyledProps): VNode {
   const ctx = useDialogContext("Content");
+  const { "aria-describedby": describedBy, ...rest } = props as StyledProps & { "aria-describedby"?: string };
+  const hasTitle = containsTag(props.children, [DialogTitle]);
+  const hasDescription = containsTag(props.children, [DialogDescription]);
   return h(DialogContentFrame, {
     id: ctx.contentId,
     role: ctx.role,
     "aria-modal": ctx.modal ? "true" : undefined,
-    "aria-labelledby": ctx.titleId,
-    "aria-describedby": ctx.descriptionId,
+    "aria-labelledby": hasTitle ? ctx.titleId : undefined,
+    "aria-describedby": hasDescription ? [describedBy, ctx.descriptionId].filter(Boolean).join(" ") : describedBy,
     "data-state": dataState(ctx.open),
     "data-layer": ctx.id,
     tabIndex: -1,
-    ...props,
+    ...rest,
   });
 }
 DialogContent.displayName = "DialogContent";

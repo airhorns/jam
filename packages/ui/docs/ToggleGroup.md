@@ -39,6 +39,8 @@ const [value, setValue] = useControllableList("marks", { defaultValue: ["bold"] 
 | `onValueChange` | `(value: string) => void` / `(value: string[]) => void` | — | Called with the new value; in single mode deselecting reports `""`. |
 | `disableDeactivation` | `boolean` | `false` | Pressing the active item again leaves it active. |
 | `orientation` | `"horizontal" \| "vertical"` | `"horizontal"` | Layout direction, `aria-orientation`, and which arrows navigate. |
+| `dir` | `"ltr" \| "rtl"` | `"ltr"` | Reading direction; reverses which arrow moves to the next item. |
+| `loop` | `boolean` | `true` | Wrap around at the ends when navigating with the arrow keys. |
 | `disabled` | `boolean` | `false` | Disables every item. |
 | `size` | size token or number | `"$true"` | Item height, padding, radius and font size. |
 
@@ -52,8 +54,8 @@ every style prop.
 ## Parts
 
 `ToggleGroup.Item` — one toggle. Renders `<button type="button" aria-pressed>`
-with `data-state` (`on` / `off`) and `data-value`, toggles itself on click, and
-is disabled when either it or the group is.
+with `data-state` (`on` / `off`), `data-value` and `data-disabled`, toggles
+itself on click, and is disabled when either it or the group is.
 
 `ToggleGroup.Frame` — the styled container.
 
@@ -93,8 +95,9 @@ segment.
   for a toggle that does not switch panels.
 - Every item is a native button, so each is a tab stop and Space/Enter
   activates it. Arrow keys along the orientation additionally move focus
-  between the enabled items and wrap at the ends; Home and End jump to the
-  first and last. Cross-axis arrows are left alone.
+  between the enabled items and wrap at the ends unless `loop` is `false`; Home
+  and End always jump to the first and last. `dir="rtl"` swaps which arrow
+  moves forward. Cross-axis arrows are left alone.
 - The focus ring is drawn inside the item (`outlineOffset: -1`) with
   `zIndex: 10`, so it is not clipped by the neighbouring segment.
 - Disabled items get the real `disabled` attribute and are skipped by both Tab

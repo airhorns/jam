@@ -13,16 +13,19 @@ import {
 } from "./Dialog";
 import type { DialogProps, DialogTriggerProps } from "./Dialog";
 
-export type AlertDialogProps = DialogProps;
+export type AlertDialogProps = Omit<DialogProps, "modal" | "dismissOnOutsidePress">;
 
 function AlertDialogRoot(props: AlertDialogProps): VNode {
-  const value = useDialogRoot({ dismissOnOutsidePress: false, ...props }, "alertdialog", "alertdialog");
+  const value = useDialogRoot({ ...props, modal: true, dismissOnOutsidePress: false }, "alertdialog", "alertdialog", {
+    initialFocus: "[data-alert-dialog-cancel]",
+  });
   return h(DialogContext.Provider, { value }, props.children);
 }
 AlertDialogRoot.displayName = "AlertDialog";
 
 function AlertDialogCancel(props: DialogTriggerProps): VNode {
-  return h(DialogClose, props.asChild ? props : { variant: "outlined", ...props });
+  const cancel = { "data-alert-dialog-cancel": "", ...props };
+  return h(DialogClose, props.asChild ? cancel : { variant: "outlined", ...cancel });
 }
 AlertDialogCancel.displayName = "AlertDialogCancel";
 
@@ -33,8 +36,8 @@ AlertDialogAction.displayName = "AlertDialogAction";
 
 /**
  * AlertDialog: a Dialog that interrupts the user and waits for an explicit
- * choice. It has `role="alertdialog"`, ignores presses outside the content,
- * and closes through Cancel or Action.
+ * choice. It has `role="alertdialog"`, is always modal, ignores presses
+ * outside the content, focuses Cancel first, and closes through Cancel or Action.
  *
  *   <AlertDialog>
  *     <AlertDialog.Trigger asChild><Button>Delete</Button></AlertDialog.Trigger>

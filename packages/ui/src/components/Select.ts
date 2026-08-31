@@ -5,6 +5,8 @@ import { styled } from "../styled";
 import type { StyledProps } from "../styled";
 import { getFontSized, themeableVariants } from "../variants";
 import { useControllableState, useStableId } from "../state";
+import { useFormReset } from "../form";
+import { containsTag, isVNode } from "./vnode";
 import { useDismissableLayer } from "../layers";
 import { repositionLayer } from "../floating";
 import type { Placement } from "../floating";
@@ -26,6 +28,7 @@ export type SelectContextValue = {
   setValue: (value: string) => void;
   options: SelectOption[];
   disabled: boolean;
+  required: boolean;
   size: string | number | undefined;
   placement: Placement;
   triggerId: string;
@@ -42,10 +45,6 @@ export function useSelectContext(part: string): SelectContextValue {
 }
 
 // ---- Option discovery ----
-
-function isVNode(child: VChild): child is VNode {
-  return typeof child === "object" && child !== null && "__vnode" in child;
-}
 
 function textOf(children: VChild[]): string {
   let text = "";
@@ -87,6 +86,8 @@ export type SelectProps = {
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
   disabled?: boolean;
+  /** Marks the trigger `aria-required` and the hidden form input `required`. */
+  required?: boolean;
   /** Size token applied to the trigger and items (default "$true"). */
   size?: string | number;
   /** Side the list opens on (default "bottom-start"). */
@@ -102,11 +103,12 @@ function SelectRoot(props: SelectProps): VNode {
   const id = useStableId("select");
   const disabled = props.disabled === true;
   const placement = props.placement ?? "bottom-start";
-  const [value, setValue] = useControllableState<string>("value", {
+  const [value, setValue, resetValue] = useControllableState<string>("value", {
     value: props.value,
     defaultValue: props.defaultValue,
     onChange: props.onValueChange,
   });
+  const resetProps = useFormReset(() => resetValue(""));
   const [openState, setOpenState] = useControllableState<boolean>("open", {
     value: props.open,
     defaultValue: props.defaultOpen ?? false,
@@ -133,6 +135,7 @@ function SelectRoot(props: SelectProps): VNode {
     setValue,
     options: collectOptions(props.children),
     disabled,
+    required: props.required === true,
     size: props.size,
     placement,
     triggerId: props.id ?? `${id}-trigger`,
@@ -142,7 +145,9 @@ function SelectRoot(props: SelectProps): VNode {
   return h(
     SelectContext.Provider,
     { value: ctx },
-    props.name ? h("input", { type: "hidden", name: props.name, value: value ?? "", "aria-hidden": "true" }) : null,
+    props.name
+      ? h("input", { ...resetProps, type: "hidden", name: props.name, value: value ?? "", required: props.required || undefined, "aria-hidden": "true" })
+      : null,
     props.children,
   );
 }
@@ -206,7 +211,6 @@ const chevron = h("svg", { width: 12, height: 12, viewBox: "0 0 12 12", fill: "n
 function SelectTrigger(props: SelectTriggerProps): VNode {
   const ctx = useSelectContext("Trigger");
   const { asChild, onClick, onKeyDown, ...rest } = props;
-  const selected = ctx.options.find((option) => option.value === ctx.value);
   const base = asChild ? {} : { size: ctx.size, justifyContent: "space-between", iconAfter: chevron };
   return h(asChild ? Slot : Button, {
     ...base,
@@ -216,7 +220,7 @@ function SelectTrigger(props: SelectTriggerProps): VNode {
     "aria-haspopup": "listbox",
     "aria-expanded": ctx.open,
     "aria-controls": ctx.open ? ctx.contentId : undefined,
-    "aria-activedescendant": ctx.open && selected ? ctx.optionId(selected.value) : undefined,
+    "aria-required": ctx.required || undefined,
     disabled: ctx.disabled || undefined,
     "data-state": dataState(ctx.open),
     "data-layer-trigger": ctx.id,
@@ -377,14 +381,14 @@ export const SelectViewport = styled(YStack, {
   },
 });
 
-export const SelectGroup = styled(YStack, {
+export const SelectGroupFrame = styled(YStack, {
   name: "SelectGroup",
   defaultProps: {
     role: "group",
   },
 });
 
-export const SelectLabel = styled(SizableText, {
+export const SelectLabelFrame = styled(SizableText, {
   name: "SelectLabel",
   variants: {
     unstyled: {
@@ -402,6 +406,28 @@ export const SelectLabel = styled(SizableText, {
     unstyled: false,
   },
 });
+
+/** Mints the id a `Select.Label` inside the same `Select.Group` labels the group with. */
+const SelectGroupContext = createContext<string | null>(null);
+
+export type SelectGroupProps = StyledProps;
+
+function SelectGroupComponent(props: SelectGroupProps): VNode {
+  const labelId = useStableId("select-group-label");
+  const { children, ...rest } = props;
+  const labelled = containsTag(children, [SelectLabelComponent]);
+  return h(SelectGroupContext.Provider, { value: labelId }, h(SelectGroupFrame, { "aria-labelledby": labelled ? labelId : undefined, ...rest }, children));
+}
+SelectGroupComponent.displayName = "SelectGroup";
+
+export type SelectLabelProps = StyledProps;
+
+function SelectLabelComponent(props: SelectLabelProps): VNode {
+  const labelId = useContext(SelectGroupContext);
+  const { children, ...rest } = props;
+  return h(SelectLabelFrame, { id: labelId ?? undefined, ...rest }, children);
+}
+SelectLabelComponent.displayName = "SelectLabel";
 
 // ---- Item ----
 
@@ -562,8 +588,8 @@ export const Select = Object.assign(SelectRoot, {
   Value: SelectValue,
   Content: SelectContent,
   Viewport: SelectViewport,
-  Group: SelectGroup,
-  Label: SelectLabel,
+  Group: SelectGroupComponent,
+  Label: SelectLabelComponent,
   Item: SelectItem,
   ItemText: SelectItemText,
   ItemIndicator: SelectItemIndicator,

@@ -180,11 +180,43 @@ describe("Slider", () => {
     pointer(document, "pointerup", 4);
   });
 
+  it("steps by 10x with Shift+Arrow or Page keys, and flips direction for dir=\"rtl\" or inverted", () => {
+    const r = slider({ defaultValue: 50 });
+    keydown(parts(r).thumbs[0], "ArrowRight", { shiftKey: true });
+    expect(parts(r).thumbs[0].getAttribute("aria-valuenow")).toBe("60");
+
+    const rtl = slider({ defaultValue: 50, dir: "rtl" });
+    expect(parts(rtl).frame.getAttribute("dir")).toBe("rtl");
+    keydown(parts(rtl).thumbs[0], "ArrowLeft");
+    expect(parts(rtl).thumbs[0].getAttribute("aria-valuenow")).toBe("51");
+
+    const inverted = slider({ defaultValue: 50, inverted: true });
+    keydown(parts(inverted).thumbs[0], "ArrowRight");
+    expect(parts(inverted).thumbs[0].getAttribute("aria-valuenow")).toBe("49");
+  });
+
+  it("blocks a move that would close the gap set by minStepsBetweenThumbs", () => {
+    const r = slider({ defaultValue: [20, 25], minStepsBetweenThumbs: 5 }, 2);
+    keydown(parts(r).thumbs[0], "ArrowRight");
+    expect(parts(r).thumbs[0].getAttribute("aria-valuenow")).toBe("20");
+  });
+
+  it("contributes a hidden input per value to the owning form and restores the default on reset", () => {
+    const r = render(
+      h("form", {}, h(Slider, { name: "volume", defaultValue: 40 } as never, h(Slider.Thumb, { "aria-label": "Volume" }))),
+    );
+    const thumb = r.get("[role=slider]");
+    keydown(thumb, "ArrowRight");
+    expect(new FormData(r.get<HTMLFormElement>("form")).get("volume")).toBe("41");
+    r.get<HTMLFormElement>("form").dispatchEvent(new Event("reset", { bubbles: true, cancelable: true }));
+    expect(r.get("[role=slider]").getAttribute("aria-valuenow")).toBe("40");
+  });
+
   it("does nothing when disabled", () => {
     const onValueChange = vi.fn();
     const r = slider({ defaultValue: 50, disabled: true, onValueChange });
     const { frame, thumbs } = parts(r);
-    expect(frame.getAttribute("data-disabled")).toBe("true");
+    expect(frame.getAttribute("data-disabled")).toBe("");
     expect(css(frame)).toMatchObject({ opacity: "0.5", cursor: "not-allowed" });
     expect(thumbs[0].hasAttribute("disabled")).toBe(true);
     stubRect(frame);

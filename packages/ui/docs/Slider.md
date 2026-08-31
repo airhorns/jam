@@ -39,11 +39,15 @@ A range needs one `Thumb` per value, each with its `index`:
 | `min` | `number` | `0` | Lowest value. |
 | `max` | `number` | `100` | Highest value. |
 | `step` | `number` | `1` | Granularity; fractional steps stay exact (`0.1` gives `0.2`, not `0.30000000000000004`). |
+| `minStepsBetweenThumbs` | `number` | `0` | Number of steps that must separate two thumbs; a keyboard move that would close the gap is blocked. |
 | `onValueChange` | `(value: number[]) => void` | — | Called on every change, always with an array. |
 | `onSlideEnd` | `(value: number[]) => void` | — | Called once when a drag ends or a key finishes moving a thumb. |
 | `orientation` | `"horizontal" \| "vertical"` | `"horizontal"` | Vertical sliders run bottom to top. |
+| `dir` | `"ltr" \| "rtl"` | `"ltr"` | Rendered as the `dir` attribute; `"rtl"` fills the track from the right and flips which arrow key increases the value. |
+| `inverted` | `boolean` | `false` | Fills the track from the opposite edge (right, or top when vertical) and flips which arrow key increases the value. |
 | `disabled` | `boolean` | `false` | Ignores pointer and keyboard input. |
 | `size` | size token or number | `"$true"` | Knob diameter and rail thickness. |
+| `name` | `string` | — | Submits with the owning form: one hidden input per value (`name[]` for a range), restored to `defaultValue` on form reset. |
 
 `Slider.Thumb`: `index` (`0` unless it is a range), `size`, `unstyled`, plus
 every style prop. `Slider.Track` and `Slider.TrackActive`: `size`, `unstyled`,
@@ -91,10 +95,18 @@ the slider tints the rail and recolours the fill and the knob's hover border.
 - Each thumb is a real button with `role="slider"` and the three `aria-value*`
   attributes, so it is a tab stop and screen readers announce the value.
 - Arrow keys move by one `step` (Left/Down decrease, Right/Up increase),
-  PageUp/PageDown by ten, Home and End jump to `min`/`max`. Handled keys call
-  `preventDefault`, everything else is left alone.
-- In a range, each thumb is clamped between its neighbours, so the values can
-  never cross.
-- `disabled` puts the attribute on every thumb, dims the slider, and drops
-  both pointer and keyboard handling.
+  Shift+Arrow and PageUp/PageDown by ten times that, Home and End jump to the
+  focused thumb's own clamped `min`/`max`. Handled keys call `preventDefault`,
+  everything else is left alone. `dir="rtl"` or `inverted` moves the start
+  of the track to the other edge, so pointer, keys and the filled part all
+  grow from there.
+- In a range, each thumb is clamped between its neighbours (widened by
+  `minStepsBetweenThumbs`), so the values can never cross or close the gap.
+- `aria-disabled` is always present (`"false"` when enabled), and
+  `data-disabled`/`data-orientation` are set on the frame, `Slider.Track`,
+  `Slider.TrackActive` and every `Slider.Thumb`.
+- `disabled` puts the `disabled` attribute on every thumb, dims the slider,
+  and drops both pointer and keyboard handling.
 - `touch-action: none` on the frame keeps a drag from scrolling the page.
+- A `name` submits the value(s) with the owning form and restores the initial
+  value when the form is reset, with or without `name` set.

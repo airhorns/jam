@@ -74,35 +74,86 @@ function WeekdayRow() {
   );
 }
 
-function DayGrid({ year, month, renderDay }: { year: number; month: number; renderDay: (date: Date, inMonth: boolean) => VChild }) {
+const GRID_COLUMNS = 7;
+
+function isGridDisabled(el: Element): boolean {
+  return el.hasAttribute("disabled") || el.hasAttribute("data-disabled");
+}
+
+/** The day that should be the grid's one Tab stop: the selected day if it's in view, else today if it's in view, else the month's first day. */
+function focusableDay(days: Date[], month: number, selectedISOs: string[]): string {
+  const isos = days.map(toISO);
+  const inView = selectedISOs.find((iso) => iso && isos.includes(iso));
+  if (inView) return inView;
+  const todayISO = toISO(today);
+  if (isos.includes(todayISO)) return todayISO;
+  return toISO(days.find((d) => d.getMonth() === month) ?? days[0]);
+}
+
+/** APG grid navigation for the day cells: arrows move by row/column, Home/End jump to the focused row's ends, skipping disabled cells and clamping to the grid's bounds. */
+function moveDayFocus(event: KeyboardEvent, selector: string): HTMLElement | null {
+  const target = event.target as HTMLElement | null;
+  if (!target?.matches(selector)) return null;
+  const container = event.currentTarget as HTMLElement;
+  const cells = Array.from(container.querySelectorAll<HTMLElement>(selector));
+  const from = cells.indexOf(target);
+  if (from === -1) return null;
+
+  const rowStart = from - (from % GRID_COLUMNS);
+  let to: number;
+  if (event.key === "ArrowLeft") to = from - 1;
+  else if (event.key === "ArrowRight") to = from + 1;
+  else if (event.key === "ArrowUp") to = from - GRID_COLUMNS;
+  else if (event.key === "ArrowDown") to = from + GRID_COLUMNS;
+  else if (event.key === "Home") to = rowStart;
+  else if (event.key === "End") to = rowStart + GRID_COLUMNS - 1;
+  else return null;
+
+  const step = to >= from ? 1 : -1;
+  to = Math.min(Math.max(to, 0), cells.length - 1);
+  while (isGridDisabled(cells[to])) {
+    const next = to + step;
+    if (next < 0 || next >= cells.length) break;
+    to = next;
+  }
+  if (isGridDisabled(cells[to])) return null;
+
+  event.preventDefault();
+  cells[to].focus();
+  return cells[to];
+}
+
+function DayGrid({ year, month, selectedISOs, renderDay }: { year: number; month: number; selectedISOs: string[]; renderDay: (date: Date, inMonth: boolean, tabbable: boolean) => VChild }) {
   const days = monthDays(year, month);
+  const focused = focusableDay(days, month, selectedISOs);
   return (
-    <YStack width={GRID_WIDTH} gap={ROW_GAP}>
+    <YStack width={GRID_WIDTH} gap={ROW_GAP} role="grid" onKeyDown={(event: KeyboardEvent) => moveDayFocus(event, "[data-day]")}>
       {Array.from({ length: 6 }, (_, row) => (
-        <XStack key={row}>{days.slice(row * 7, row * 7 + 7).map((date) => renderDay(date, date.getMonth() === month))}</XStack>
+        <XStack key={row} role="row">{days.slice(row * 7, row * 7 + 7).map((date) => renderDay(date, date.getMonth() === month, toISO(date) === focused))}</XStack>
       ))}
     </YStack>
   );
 }
 
-function DayView({ year, month, renderDay }: { year: number; month: number; renderDay: (date: Date, inMonth: boolean) => VChild }) {
+function DayView({ year, month, selectedISOs, renderDay }: { year: number; month: number; selectedISOs: string[]; renderDay: (date: Date, inMonth: boolean, tabbable: boolean) => VChild }) {
   return (
     <YStack gap={8} height={DAY_VIEW_HEIGHT}>
       <WeekdayRow />
-      <DayGrid year={year} month={month} renderDay={renderDay} />
+      <DayGrid year={year} month={month} selectedISOs={selectedISOs} renderDay={renderDay} />
     </YStack>
   );
 }
 
 type Band = "start" | "middle" | "end";
 
-function DayCell({ date, inMonth, selected, band, onClick }: { date: Date; inMonth: boolean; selected: boolean; band?: Band; onClick: () => void }) {
+function DayCell({ date, inMonth, selected, tabbable, band, onClick }: { date: Date; inMonth: boolean; selected: boolean; tabbable: boolean; band?: Band; onClick: () => void }) {
   const isToday = toISO(date) === toISO(today);
   const outlined = isToday && !selected;
   const roundLeft = band === "start";
   const roundRight = band === "end";
   return (
     <YStack
+      role="gridcell"
       width={CELL}
       height={CELL}
       alignItems="center"
@@ -125,6 +176,8 @@ function DayCell({ date, inMonth, selected, band, onClick }: { date: Date; inMon
         fontWeight={selected || isToday ? "600" : "400"}
         aria-label={date.toDateString()}
         aria-pressed={selected}
+        data-day={toISO(date)}
+        tabIndex={tabbable ? 0 : -1}
         onClick={onClick}
       >
         {String(date.getDate())}
@@ -189,7 +242,7 @@ function PopoverDatePicker() {
               onPrev={() => view.show(view.year, view.month - 1)}
               onNext={() => view.show(view.year, view.month + 1)}
             />
-            <DayView year={view.year} month={view.month} renderDay={(date, inMonth) => <DayCell key={toISO(date)} date={date} inMonth={inMonth} selected={toISO(date) === selected} onClick={() => choose(toISO(date))} />} />
+            <DayView year={view.year} month={view.month} selectedISOs={[selected]} renderDay={(date, inMonth, tabbable) => <DayCell key={toISO(date)} date={date} inMonth={inMonth} selected={toISO(date) === selected} tabbable={tabbable} onClick={() => choose(toISO(date))} />} />
             <Separator marginVertical="$space.1" />
             <XStack justifyContent="space-between">
               <Button size="$2" chromeless onClick={() => choose(toISO(today))}>Today</Button>
@@ -243,7 +296,7 @@ function InlineCalendar() {
           testId="datepicker-title"
         />
         {mode === "day" ? (
-          <DayView year={view.year} month={view.month} renderDay={(date, inMonth) => <DayCell key={toISO(date)} date={date} inMonth={inMonth} selected={toISO(date) === selected} onClick={() => { setSelected(toISO(date)); view.show(date.getFullYear(), date.getMonth()); }} />} />
+          <DayView year={view.year} month={view.month} selectedISOs={[selected]} renderDay={(date, inMonth, tabbable) => <DayCell key={toISO(date)} date={date} inMonth={inMonth} selected={toISO(date) === selected} tabbable={tabbable} onClick={() => { setSelected(toISO(date)); view.show(date.getFullYear(), date.getMonth()); }} />} />
         ) : mode === "month" ? (
           rows(MONTHS.map((name, i) => choice(name.slice(0, 3), i === view.month, () => { view.show(view.year, i); setMode("day"); })))
         ) : (
@@ -295,9 +348,10 @@ function RangeCalendar() {
         <DayView
           year={view.year}
           month={view.month}
-          renderDay={(date, inMonth) => {
+          selectedISOs={[start, end]}
+          renderDay={(date, inMonth, tabbable) => {
             const iso = toISO(date);
-            return <DayCell key={iso} date={date} inMonth={inMonth} selected={iso === start || iso === end} band={bandFor(iso)} onClick={() => pick(iso)} />;
+            return <DayCell key={iso} date={date} inMonth={inMonth} selected={iso === start || iso === end} tabbable={tabbable} band={bandFor(iso)} onClick={() => pick(iso)} />;
           }}
         />
         <Separator marginVertical="$space.1" />

@@ -55,8 +55,8 @@ so it survives re-renders and is inspectable like any other fact.
 ## Parts
 
 - `Dialog.Trigger` — a `Button` that toggles the dialog and carries
-  `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls` and
-  `data-state`. With `asChild` those attributes and the click handler are
+  `aria-haspopup="dialog"`, `aria-expanded`, `data-state` and, while open,
+  `aria-controls`. With `asChild` those attributes and the click handler are
   merged onto the single child instead. Accepts every Button prop.
 - `Dialog.Portal` — renders its children at the document root while the dialog
   is open (`forceMount` keeps them mounted). Its frame is a fixed, fullscreen,
@@ -64,8 +64,9 @@ so it survives re-renders and is inspectable like any other fact.
   content receive input.
 - `Dialog.Overlay` — fixed fullscreen backdrop in `$shadow6`, fades in.
 - `Dialog.Content` — the window itself: `role="dialog"`, `aria-modal`,
-  `aria-labelledby`/`aria-describedby` pointing at Title/Description,
-  `tabIndex={-1}`. A `YStack` with `$background`, 1px `$borderColor` border,
+  `tabIndex={-1}`, and `aria-labelledby`/`aria-describedby` pointing at a
+  Title/Description when one is rendered (a caller's `aria-describedby` is
+  kept alongside). A `YStack` with `$background`, 1px `$borderColor` border,
   `$true` padding and radius, `$4` gap, elevation, `maxWidth: min(90vw, 560px)`,
   `maxHeight: 85vh` and scrolling overflow. Animates in from
   `enterStyle={{ opacity: 0, scale: 0.96, y: 10 }}` with `animation="quick"`.
@@ -99,6 +100,7 @@ makes a filled, inverted dialog.
   focusable element, else the content; closing returns focus to the element
   that was focused before, typically the trigger.
 - While modal, Tab and Shift+Tab cycle inside the content and body scroll is
-  locked.
+  locked; the scrollbar's width is kept as body padding so the page doesn't
+  shift when it disappears.
 - Escape closes the topmost open layer only, so nested overlays close one at a
   time.

@@ -61,8 +61,8 @@ with `-start` / `-end`.
 ## Parts
 
 - `Popover.Trigger` — a `Button` that toggles the popover; carries
-  `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`, `data-state`
-  and `data-layer-trigger`. With `asChild` these merge onto the single child.
+  `aria-haspopup="dialog"`, `aria-expanded`, `data-state`,
+  `data-layer-trigger` and, while open, `aria-controls`. With `asChild` these merge onto the single child.
 - `Popover.Anchor` — optional `YStack` (or its child with `asChild`) the
   content is positioned against instead of the trigger.
 - `Popover.Content` — the panel, rendered in a portal only while open:

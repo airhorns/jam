@@ -44,14 +44,18 @@ carry a tooltip:
 | `placement` | `Placement` | `"top"` | Preferred side; flips when it would leave the viewport. |
 | `offset` | `number` | `6` | Gap in px between trigger and content. |
 | `delay` | `number` | `400` | Hover delay in ms before opening. Focus opens immediately; `0` opens on enter. |
+| `skipDelayDuration` | `number` | `300` | Reopening any tooltip within this many ms of the last tooltip closing skips `delay`. There is no `Tooltip.Provider`; this pooling is global across every mounted `Tooltip`. |
 
 ## Parts
 
 - `Tooltip.Trigger` — an inline-flex `span` with `tabIndex={0}`, or the
   single child with `asChild`. Carries `data-state`, `data-layer-trigger`
-  and, while open, `aria-describedby` pointing at the content. Handles
-  `pointerenter` (schedule open), `pointerleave` / `pointerdown` / `blur`
-  (close) and `focus` (open now).
+  and, while open, `aria-describedby` pointing at the content — appended to
+  a caller-supplied `aria-describedby` rather than replacing it. Handles
+  `pointerenter` (schedule open, ignoring touch pointers), `pointerleave` /
+  `blur` (close) and `focus` (open now, unless a pointerdown on the trigger
+  is what caused the focus — e.g. a mouse click) and `pointerdown` (close,
+  and mark the trigger so the focus it causes doesn't reopen it).
 - `Tooltip.Content` — the chip, rendered in a portal only while open:
   `role="tooltip"`, `pointerEvents: none`, `data-placement`. Extends
   `Popover.Content` with no border, centred items and a compact `size`
@@ -83,5 +87,7 @@ coloured chip. `Tooltip.Text` reads `$color` from that theme.
   revealed.
 - Escape closes an open tooltip without affecting other layers underneath
   it.
+- Opening a tooltip closes any other tooltip that's currently open, so at
+  most one is ever visible at a time.
 - Because tooltip content is not interactive (`pointerEvents: none`), keep
   it to a phrase; put controls in a `Popover` instead.

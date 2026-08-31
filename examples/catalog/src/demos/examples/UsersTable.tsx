@@ -16,6 +16,7 @@ import {
   H4,
   styled,
   useStableId,
+  rovingFocus,
 } from "@jam/ui";
 import type { ComponentDemos } from "../../types";
 import { useDemoState } from "../state";
@@ -195,9 +196,9 @@ function UserCell({ user, dense }: { user: User; dense: boolean }) {
 }
 
 function RowMenu({ user, testId }: { user: User; testId?: string }) {
-  const item = (label: string, icon: VChild, theme?: string) => (
+  const item = (label: string, icon: VChild, first: boolean, theme?: string) => (
     <Popover.Close asChild>
-      <Button size="$3" variant="ghost" theme={theme} justifyContent="flex-start" width="100%" icon={icon}>
+      <Button size="$3" variant="ghost" role="menuitem" tabIndex={first ? 0 : -1} theme={theme} justifyContent="flex-start" width="100%" icon={icon}>
         {label}
       </Button>
     </Popover.Close>
@@ -214,12 +215,19 @@ function RowMenu({ user, testId }: { user: User; testId?: string }) {
           data-testid={testId}
         />
       </Popover.Trigger>
-      <Popover.Content size="$3" padding="$space.1.5" width={180}>
+      <Popover.Content
+        role="menu"
+        aria-label={`Actions for ${user.name}`}
+        size="$3"
+        padding="$space.1.5"
+        width={180}
+        onKeyDown={(e: KeyboardEvent) => rovingFocus(e, "[role=menuitem]", { orientation: "vertical" })}
+      >
         <YStack>
-          {item("Edit", <PencilIcon size={14} />)}
-          {item("Suspend", <ShieldIcon size={14} />)}
+          {item("Edit", <PencilIcon size={14} />, true)}
+          {item("Suspend", <ShieldIcon size={14} />, false)}
           <Separator marginVertical="$space.1.5" />
-          {item("Remove", <Trash2Icon size={14} />, "red")}
+          {item("Remove", <Trash2Icon size={14} />, false, "red")}
         </YStack>
       </Popover.Content>
     </Popover>
@@ -324,15 +332,19 @@ function UsersTable({ stateKey, rows, sortable = false, selectable = false, dens
               </Checkbox>
             </Table.HeaderCell>
           ) : null}
-          {columns.map((col) => (
-            <Table.HeaderCell
-              key={col.key}
-              {...cellLayout(col)}
-              aria-sort={sortable && sort.key === col.key ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
-            >
-              {header(col)}
-            </Table.HeaderCell>
-          ))}
+          {columns.map((col) => {
+            const isSortableCol = sortable && col.sortable;
+            const active = isSortableCol && sort.key === col.key;
+            return (
+              <Table.HeaderCell
+                key={col.key}
+                {...cellLayout(col)}
+                aria-sort={!isSortableCol ? undefined : active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+              >
+                {header(col)}
+              </Table.HeaderCell>
+            );
+          })}
           <Table.HeaderCell width={56} paddingHorizontal={0} />
         </Table.Row>
       </Table.Head>

@@ -357,7 +357,7 @@ function SwipeableTabsScreen() {
         >
           <XStack width={`${pages.length * 100}%`} flex={1} x={`${(-index * 100) / pages.length}%`} animation="quick">
             {pages.map((page) => (
-              <Tabs.Content key={page.value} value={page.value} forceMount width={`${100 / pages.length}%`} flexGrow={0} flexShrink={0} padding="$space.4" gap="$space.3">
+              <Tabs.Content key={page.value} value={page.value} forceMount inert={page.value !== value} width={`${100 / pages.length}%`} flexGrow={0} flexShrink={0} padding="$space.4" gap="$space.3">
                 <H5 margin={0} color="$color11">{page.label}</H5>
                 {page.rows.map((row) => <RowCard key={row.title} row={row} icon={page.icon} tint={page.tint} />)}
               </Tabs.Content>

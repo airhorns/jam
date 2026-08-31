@@ -1,8 +1,11 @@
 import type { Page } from "@playwright/test";
-import type { ShotRecipe } from "../src/types";
+import type { DemoGroup, ShotRecipe } from "../src/types";
 
 export type CatalogDemo = { title: string; shot?: ShotRecipe };
-export type CatalogEntry = { name: string; group: string; demos: CatalogDemo[] };
+export type CatalogEntry = { name: string; group: DemoGroup; demos: CatalogDemo[] };
+
+/** Sidebar groups, so sweeps can be split into one test per group; a test checks it matches the registry. */
+export const GROUPS: DemoGroup[] = ["Layout", "Typography", "Forms", "Overlays", "Content", "Feedback", "Navigation", "Utilities", "Examples"];
 
 /** Load the catalog once and return the registered components. */
 export async function loadRegistry(page: Page): Promise<CatalogEntry[]> {

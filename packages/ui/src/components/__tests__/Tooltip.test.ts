@@ -50,6 +50,16 @@ describe("Tooltip", () => {
     expect(query("[data-testid=content]")).toBeNull();
   });
 
+  it("drops a pending open when the tooltip unmounts", async () => {
+    const onOpenChange = vi.fn();
+    const { get, unmount } = render(h(Example, { delay: 50, onOpenChange }));
+    pointerEnter(get("[data-testid=trigger]"));
+    unmount();
+    await tick(80);
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(document.querySelector("[data-testid=content]")).toBeNull();
+  });
+
   it("opens immediately on focus and closes on blur, Escape or press", async () => {
     const { get, query } = render(h(Example, { delay: 500 }));
     const trigger = get("[data-testid=trigger]");
@@ -128,5 +138,70 @@ describe("Tooltip", () => {
     expect(trigger.dataset.layerTrigger).toBeDefined();
     pointerEnter(trigger);
     expect(query("[data-testid=content]")).not.toBeNull();
+  });
+
+  it("skips the hover delay when reopening within skipDelayDuration of closing", async () => {
+    vi.useFakeTimers();
+    try {
+      const { get, query } = render(h(Example, { delay: 100 }));
+      const trigger = get("[data-testid=trigger]");
+      pointerEnter(trigger);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(query("[data-testid=content]")).not.toBeNull();
+      pointerLeave(trigger);
+      pointerEnter(trigger);
+      expect(query("[data-testid=content]")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a pointerdown-caused focus does not reopen the tooltip it just closed", () => {
+    const { get, query } = render(h(Example, { delay: 0 }));
+    const trigger = get("[data-testid=trigger]");
+    trigger.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+    focus(trigger);
+    expect(query("[data-testid=content]")).toBeNull();
+  });
+
+  it("a touch pointerenter does not open the tooltip", async () => {
+    const { get, query } = render(h(Example, { delay: 0 }));
+    const trigger = get("[data-testid=trigger]");
+    trigger.dispatchEvent(new PointerEvent("pointerenter", { bubbles: false, pointerType: "touch" }));
+    await tick();
+    expect(query("[data-testid=content]")).toBeNull();
+  });
+
+  it("preserves a caller-supplied aria-describedby and appends the content id while open", () => {
+    const { get } = render(
+      h(
+        Tooltip,
+        { delay: 0 },
+        h(Tooltip.Trigger, { "data-testid": "trigger", "aria-describedby": "existing" }, "Trigger"),
+        h(Tooltip.Content, { "data-testid": "content" }, "Tip"),
+      ),
+    );
+    const trigger = get("[data-testid=trigger]");
+    focus(trigger);
+    const content = get("[data-testid=content]");
+    expect(trigger.getAttribute("aria-describedby")).toBe(`existing ${content.id}`);
+    blur(trigger);
+    expect(trigger.getAttribute("aria-describedby")).toBe("existing");
+  });
+
+  it("opening a second tooltip closes an already-open first tooltip", () => {
+    const { get, query } = render(
+      h(
+        "div",
+        null,
+        h(Tooltip, { delay: 0 }, h(Tooltip.Trigger, { "data-testid": "triggerA" }, "A"), h(Tooltip.Content, { "data-testid": "contentA" }, "Tip A")),
+        h(Tooltip, { delay: 0 }, h(Tooltip.Trigger, { "data-testid": "triggerB" }, "B"), h(Tooltip.Content, { "data-testid": "contentB" }, "Tip B")),
+      ),
+    );
+    pointerEnter(get("[data-testid=triggerA]"));
+    expect(query("[data-testid=contentA]")).not.toBeNull();
+    pointerEnter(get("[data-testid=triggerB]"));
+    expect(query("[data-testid=contentA]")).toBeNull();
+    expect(query("[data-testid=contentB]")).not.toBeNull();
   });
 });

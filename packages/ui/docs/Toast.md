@@ -69,6 +69,13 @@ toastController.show("Payment failed", {
 | `placement` | `ToastPlacement` | `"bottom-right"` | Corner toasts appear in. |
 | `label` | `string` | `"Notifications"` | Accessible name of the viewport region. |
 
+`Toast.Viewport` also takes its own `placement` and `label` (overriding the
+provider), plus:
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `hotkey` | `string[]` | `["F8"]` | Keys that move focus to the viewport from anywhere in the page. |
+
 `ToastPlacement` is `"top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right"`.
 
 `toastController.show(title, options)` returns the toast's id; `options` is
@@ -92,12 +99,15 @@ most recently shown record for apps that render their own toast UI.
   pinned to a corner with `$4` padding and `$2` gap, `pointer-events: none`
   so the page stays clickable between toasts. Bottom placements stack upward
   (`column-reverse`). Renders every toast shown through `toastController`,
-  then its own `children`. Props: `placement`, `label`.
+  then its own `children`. Pressing a key in `hotkey` (default `["F8"]`)
+  anywhere in the document moves focus to the viewport. Props: `placement`,
+  `label`, `hotkey`.
 - `Toast.Title` — `SizableText` at `$4`, weight 600, `$color`.
 - `Toast.Description` — `SizableText` at `$2` in `$color11`.
 - `Toast.Action` — a `size="$2"` `Button` (or its child with `asChild`) with
   `aria-label` set to the required `altText`, a plain-language description
-  of what pressing it does.
+  of what pressing it does. A blank `altText` logs a `console.error` instead
+  of rendering an action with no accessible name.
 - `Toast.Close` — a small circular chromeless `Button` (or its child with
   `asChild`) labelled "Close" that closes the toast after your own
   `onClick`.
@@ -109,8 +119,11 @@ Imperative toasts render `title` as `Toast.Title`, `message` as
 ## Timing
 
 Each open toast schedules a dismiss after `duration`. Hovering or focusing
-the toast cancels the timer; leaving or blurring restarts it from the full
-duration. Closing a toast clears its timer.
+the toast pauses its timer, remembering the time left; leaving or blurring
+resumes it from there rather than the full duration. Hovering or focusing
+any toast pauses every toast sharing its viewport, not just the one under
+the pointer, so a batch of notifications doesn't disappear while you're
+reading one of them. Closing a toast clears its timer.
 
 ## Theming
 
@@ -125,6 +138,10 @@ declarative `Toast` in a `Theme`, to recolour a single toast.
   without moving focus; use `type="foreground"` only for things the user
   must hear immediately.
 - Toasts are focusable so keyboard users can reach the action and close
-  buttons; a focused toast will not auto-dismiss.
+  buttons; a focused toast will not auto-dismiss. Pressing Escape on a
+  focused toast closes it.
+- The `F8` hotkey (configurable via `Toast.Viewport`'s `hotkey`) moves focus
+  to the viewport from anywhere in the page, letting keyboard users jump
+  straight to any open toasts.
 - `altText` on `Toast.Action` is required because the visible label
   ("Undo") has no context once announced on its own.

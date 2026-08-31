@@ -99,6 +99,7 @@ Component-level primitives from `@jam/core`:
 
 - `createContext(default)` / `useContext(ctx)` — `<ctx.Provider value>` scopes a value to a subtree; resolved during expansion
 - `useComponentId()` — the stable entity id of the calling component instance; use it to key per-instance state in the fact DB (`replace(id, "open", true)`)
+- `useCleanup(fn)` — run `fn` once when the calling component leaves the tree (or the root unmounts). Use it to forget per-instance facts, cancel timers and release anything keyed by the component id in module state; cleanups run before the DOM patch, in the same action as the new VDOM facts
 - Entity ids: an element's `id` prop is its entity id (a global address, so DOM ids must be unique); otherwise ids derive from `key` or tree position. A component's `id` prop is *not* its entity id — it is an ordinary prop the component may hand to a nested element.
 - `<Portal>` — renders children as direct children of the mount container (for overlays); ids stay derived from the portal's own tree position
 - `injectVdom(parentId, startIndex, ...nodes)` — add children to an existing element from outside the tree

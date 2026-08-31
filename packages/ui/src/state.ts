@@ -1,4 +1,4 @@
-import { $, replace, useComponentId, when } from "@jam/core";
+import { $, _, forget, replace, useCleanup, useComponentId, when } from "@jam/core";
 import type { Term } from "@jam/core";
 
 export type ControllableStateOptions<T> = {
@@ -8,25 +8,49 @@ export type ControllableStateOptions<T> = {
   onChange?: (value: T) => void;
 };
 
+/** Ids of components currently in the tree; a setter invoked after unmount (a late blur, image error or timer) must not write. */
+const mounted = new Set<string>();
+
 /**
  * Controlled/uncontrolled state for the component being rendered. The
  * uncontrolled value lives in the fact DB under the component's id, so it
- * survives re-renders and can be inspected or driven by other programs.
+ * survives re-renders and can be inspected or driven by other programs; it is
+ * forgotten when the component leaves the tree, so a later component at the
+ * same position starts from its default. The third element returns to
+ * `defaultValue`; when there is none it clears the stored value, which the
+ * setter cannot express, and reports the given `empty` value (`""` for a
+ * radio group or select, as the DOM does) to `onChange`.
  */
 export function useControllableState<T extends Term>(
   key: string,
   options: ControllableStateOptions<T>,
-): [T | undefined, (value: T) => void] {
+): [T | undefined, (value: T) => void, (empty: T) => void] {
   const id = useComponentId();
   const controlled = options.value !== undefined;
-  const stored = when([id, key, $.value]);
-  const current = controlled ? options.value : stored.length > 0 ? (stored[0].value as T) : options.defaultValue;
+  mounted.add(id);
+  useCleanup(() => {
+    mounted.delete(id);
+    forget(id, key, _);
+  });
+  const read = (): T | undefined => {
+    const stored = when([id, key, $.value]);
+    return controlled ? options.value : stored.length > 0 ? (stored[0].value as T) : options.defaultValue;
+  };
+  // Compare against the live value so a setter kept from an earlier render (a timer, another component's close) still sees changes made since.
   const update = (next: T) => {
-    if (next === current) return;
+    if (!mounted.has(id) || next === read()) return;
     options.onChange?.(next);
     if (!controlled) replace(id, key, next);
   };
-  return [current, update];
+  const reset = (empty: T) => {
+    if (options.defaultValue !== undefined) return update(options.defaultValue);
+    if (!mounted.has(id)) return;
+    const current = read();
+    if (current === undefined || current === empty) return;
+    options.onChange?.(empty);
+    if (!controlled) forget(id, key, _);
+  };
+  return [read(), update, reset];
 }
 
 /** Like `useControllableState` for string arrays, stored as one JSON fact. */

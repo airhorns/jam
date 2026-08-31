@@ -147,13 +147,15 @@ describe("Accordion", () => {
     expect(document.activeElement).toBe(triggers(r)[0]);
     keydown(triggers(r)[0], "ArrowUp");
     expect(document.activeElement).toBe(triggers(r)[2]);
-    expect(keydown(triggers(r)[2], "ArrowLeft").defaultPrevented).toBe(false);
+    // Radix preventDefaults for any of the six accordion keys once the target is a
+    // registered trigger, even one that doesn't move focus in this orientation.
+    expect(keydown(triggers(r)[2], "ArrowLeft").defaultPrevented).toBe(true);
   });
 
   it("disables one item and the whole accordion", () => {
     const onValueChange = vi.fn();
     const one = accordion({ onValueChange }, { disabled: true });
-    expect(one.get("[data-value=c]").dataset.disabled).toBe("true");
+    expect(one.get("[data-value=c]").dataset.disabled).toBe("");
     expect(triggers(one)[2].hasAttribute("disabled")).toBe(true);
     click(triggers(one)[2]);
     expect(onValueChange).not.toHaveBeenCalled();
@@ -200,7 +202,35 @@ describe("Accordion", () => {
     triggers(r)[0].focus();
     keydown(triggers(r)[0], "ArrowRight");
     expect(document.activeElement).toBe(triggers(r)[1]);
-    expect(keydown(triggers(r)[1], "ArrowDown").defaultPrevented).toBe(false);
+    expect(keydown(triggers(r)[1], "ArrowDown").defaultPrevented).toBe(true);
+  });
+
+  it("reverses ArrowLeft/ArrowRight with dir=\"rtl\"", () => {
+    const r = accordion({ orientation: "horizontal", dir: "rtl", defaultValue: "a" });
+    const t = triggers(r);
+    t[0].focus();
+    keydown(t[0], "ArrowRight");
+    expect(document.activeElement).toBe(t[2]);
+  });
+
+  it("carries data-state, data-orientation and data-disabled on the header", () => {
+    const r = accordion({ defaultValue: "a" }, { disabled: true });
+    const headers = r.all("h3");
+    expect(headers[0].getAttribute("data-state")).toBe("open");
+    expect(headers[0].getAttribute("data-orientation")).toBe("vertical");
+    expect(headers[2].getAttribute("data-disabled")).toBe("");
+  });
+
+  it("only sets aria-controls on a trigger while its item is open", () => {
+    const r = accordion({ defaultValue: "a" });
+    const t = triggers(r);
+    expect(t[0].getAttribute("aria-controls")).not.toBeNull();
+    expect(t[1].hasAttribute("aria-controls")).toBe(false);
+  });
+
+  it("never marks the open trigger of a single, non-collapsible accordion aria-disabled", () => {
+    const r = accordion({ defaultValue: "a" });
+    expect(triggers(r)[0].hasAttribute("aria-disabled")).toBe(false);
   });
 
   it("strips the default look when unstyled", () => {

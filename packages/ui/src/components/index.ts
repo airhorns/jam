@@ -49,3 +49,5 @@ export { Tooltip } from "./Tooltip";
 // Utility
 export { VisuallyHidden } from "./VisuallyHidden";
 export { Slot } from "./Slot";
+export { rovingFocus, rovingItems } from "./roving-focus";
+export type { RovingFocusOptions, RovingOrientation, RovingDirection } from "./roving-focus";
