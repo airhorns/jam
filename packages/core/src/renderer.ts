@@ -252,11 +252,15 @@ export function mount(rootVnode: VChild, container: HTMLElement): () => void {
           if (el.getAttribute(attr) !== strVal) el.setAttribute(attr, strVal);
         }
       }
-      for (let i = el.attributes.length - 1; i >= 0; i--) {
-        const name = el.attributes[i].name;
-        if (name === "class") continue;
-        if (!activeAttrs.has(name)) el.removeAttribute(name);
+      // Only attributes this renderer set last time are swept, so anything an
+      // event handler or third-party code sets on the element survives.
+      const previousAttrs: Set<string> | undefined = (el as any).__attrs;
+      if (previousAttrs) {
+        for (const name of previousAttrs) {
+          if (!activeAttrs.has(name) && el.hasAttribute(name)) el.removeAttribute(name);
+        }
       }
+      (el as any).__attrs = activeAttrs;
 
       const oldHandlers: Map<string, EventListener> = (el as any).__handlers ?? new Map();
       for (const [event, listener] of oldHandlers) el.removeEventListener(event, listener);
