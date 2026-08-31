@@ -21,7 +21,7 @@ export const CheckboxDemos: ComponentDemos = {
       render: () => (
         <XStack gap="$space.4" alignItems="center">
           {["$1", "$2", "$3", "$4", "$5", "$6"].map((size) => (
-            <Checkbox key={size} size={size} checked>
+            <Checkbox key={size} size={size} checked aria-label={`Size ${size}`}>
               <Checkbox.Indicator />
             </Checkbox>
           ))}
@@ -34,10 +34,10 @@ export const CheckboxDemos: ComponentDemos = {
         <YStack gap="$space.3">
           {checkboxStates.map(({ label, checked, disabled }) => (
             <XStack key={label} gap="$space.3" alignItems="center">
-              <Checkbox checked={checked} disabled={disabled}>
+              <Checkbox id={`checkbox-${label}`} checked={checked} disabled={disabled}>
                 <Checkbox.Indicator />
               </Checkbox>
-              <Text>{label}</Text>
+              <Label htmlFor={`checkbox-${label}`}>{label}</Label>
             </XStack>
           ))}
         </YStack>
@@ -48,13 +48,13 @@ export const CheckboxDemos: ComponentDemos = {
       description: "The indicator renders its children instead of the default check.",
       render: () => (
         <XStack gap="$space.4" alignItems="center">
-          <Checkbox checked size="$5">
+          <Checkbox checked size="$5" aria-label="Starred">
             <Checkbox.Indicator>★</Checkbox.Indicator>
           </Checkbox>
-          <Checkbox checked size="$5" theme="accent">
+          <Checkbox checked size="$5" theme="accent" aria-label="Accent">
             <Checkbox.Indicator />
           </Checkbox>
-          <Checkbox checked size="$5" borderRadius={100000}>
+          <Checkbox checked size="$5" borderRadius={100000} aria-label="Round">
             <Checkbox.Indicator />
           </Checkbox>
         </XStack>

@@ -23,10 +23,10 @@ export const InputDemos: ComponentDemos = {
       render: () => (
         <YStack gap="$space.3" maxWidth={360}>
           <Input placeholder="Placeholder text" />
-          <Input value="With a value" />
-          <Input disabled value="Disabled" />
-          <Input readOnly value="Read only" />
-          <Input type="password" value="secret" />
+          <Input value="With a value" aria-label="With a value" />
+          <Input disabled value="Disabled" aria-label="Disabled" />
+          <Input readOnly value="Read only" aria-label="Read only" />
+          <Input type="password" value="secret" aria-label="Password" />
           <Input unstyled placeholder="unstyled" paddingHorizontal="$space.3" height={44} />
         </YStack>
       ),

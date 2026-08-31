@@ -61,7 +61,7 @@ export type AvatarImageProps = StyledProps & {
  * never sits on top of the fallback.
  */
 function AvatarImageComponent(props: AvatarImageProps): VNode {
-  const [brokenSrc, setBrokenSrc] = useControllableState<string>("brokenSrc", { defaultValue: "" });
+  const [brokenSrc, setBrokenSrc] = useControllableState<string>("brokenSrc", { defaultValue: "", drive: false });
   const { onError, ...rest } = props;
   const broken = props.src != null && props.src === brokenSrc;
   return h(AvatarImageFrame, {

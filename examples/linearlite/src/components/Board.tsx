@@ -7,7 +7,7 @@ import { StatusDisplay, StatusValues, type Issue, type StatusValue } from "../ty
 import { Avatar } from "./Avatar";
 import { StatusIcon } from "./icons";
 import { link } from "./links";
-import { PriorityMenu } from "./properties";
+import { PriorityMenu, StatusMenu } from "./properties";
 
 // Browsers hand the dragged data to drop handlers only; the id is also kept
 // here so a drop can be resolved even when dataTransfer is unavailable.
@@ -72,8 +72,11 @@ function IssueCard({ issueId: id }: { issueId: string }) {
       >
         {issue.title}
       </SizableText>
-      <XStack alignItems="center" justifyContent="space-between">
-        <PriorityMenu menu={`card-priority:${id}`} value={issue.priority} onChange={(priority) => updateIssue(id, { priority })} />
+      <XStack alignItems="center" justifyContent="space-between" gap="$2">
+        <XStack alignItems="center" gap="$1">
+          <PriorityMenu menu={`card-priority:${id}`} value={issue.priority} onChange={(priority) => updateIssue(id, { priority })} />
+          <StatusMenu menu={`card-status:${id}`} value={issue.status} onChange={(status) => updateIssue(id, { status })} />
+        </XStack>
         <Avatar name={issue.username} />
       </XStack>
     </Card>
@@ -87,6 +90,8 @@ function BoardColumn({ status }: { status: StatusValue }) {
   const hidden = Math.max(0, meta.total - ids.length);
   return (
     <YStack
+      tag="section"
+      aria-label={StatusDisplay[status]}
       width={300}
       borderRadius="$4"
       backgroundColor="$color3"
@@ -97,7 +102,7 @@ function BoardColumn({ status }: { status: StatusValue }) {
     >
       <XStack tag="header" alignItems="center" gap="$2" paddingHorizontal="$3" paddingVertical="$2.5">
         <StatusIcon status={status} />
-        <SizableText size="$2" fontWeight="600" data-testid="board-column-title">
+        <SizableText tag="h3" size="$2" fontWeight="600" data-testid="board-column-title">
           {StatusDisplay[status]}
         </SizableText>
         <SizableText size="$2" color="$color10" data-testid="board-column-count">

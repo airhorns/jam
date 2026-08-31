@@ -1,4 +1,4 @@
-import { $, _, forget, replace, useCleanup, useComponentId, when } from "@jam/core";
+import { $, _, forget, replace, useCleanup, useComponentId, useDriver, when } from "@jam/core";
 import type { Term } from "@jam/core";
 
 export type ControllableStateOptions<T> = {
@@ -6,9 +6,23 @@ export type ControllableStateOptions<T> = {
   value?: T;
   defaultValue?: T;
   onChange?: (value: T) => void;
+  /** Expose the state to `drive()`/`describeUI()` under its key (default true); false for internal bookkeeping. */
+  drive?: boolean;
 };
 
-/** Ids of components currently in the tree; a setter invoked after unmount (a late blur, image error or timer) must not write. */
+/** Read a driven value in the type the state currently holds, so `drive(id, "open", "true")` works like `true`. */
+function coerce<T extends Term>(value: Term, like: T | undefined): T {
+  if (typeof like === "boolean") return (value === true || value === "true") as T;
+  if (typeof like === "number" && typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) return Number(value) as T;
+  return value as T;
+}
+
+/**
+ * Ids of components currently in the tree; a setter invoked after unmount (a
+ * late blur, image error or timer) must not store anything. A controlled
+ * owner is still told, since the change it is being told about may be what
+ * re-keyed the component (a menu whose selection moved its row).
+ */
 const mounted = new Set<string>();
 
 /**
@@ -19,7 +33,9 @@ const mounted = new Set<string>();
  * same position starts from its default. The third element returns to
  * `defaultValue`; when there is none it clears the stored value, which the
  * setter cannot express, and reports the given `empty` value (`""` for a
- * radio group or select, as the DOM does) to `onChange`.
+ * radio group or select, as the DOM does) to `onChange`. The state is also
+ * registered as a driver, so `drive(id, key, value)` goes through the same
+ * setter a user's input would, controlled or not.
  */
 export function useControllableState<T extends Term>(
   key: string,
@@ -38,7 +54,7 @@ export function useControllableState<T extends Term>(
   };
   // Compare against the live value so a setter kept from an earlier render (a timer, another component's close) still sees changes made since.
   const update = (next: T) => {
-    if (!mounted.has(id) || next === read()) return;
+    if (next === read() || (!mounted.has(id) && !controlled)) return;
     options.onChange?.(next);
     if (!controlled) replace(id, key, next);
   };
@@ -50,10 +66,13 @@ export function useControllableState<T extends Term>(
     options.onChange?.(empty);
     if (!controlled) forget(id, key, _);
   };
+  if (options.drive !== false) {
+    useDriver(key, { set: (next) => update(coerce(next, read() ?? options.defaultValue)), get: read });
+  }
   return [read(), update, reset];
 }
 
-/** Like `useControllableState` for string arrays, stored as one JSON fact. */
+/** Like `useControllableState` for string arrays, stored as one JSON fact; driven with a JSON array or a single value. */
 export function useControllableList(
   key: string,
   options: ControllableStateOptions<string[]>,
@@ -62,8 +81,25 @@ export function useControllableList(
     value: options.value === undefined ? undefined : JSON.stringify(options.value),
     defaultValue: JSON.stringify(options.defaultValue ?? []),
     onChange: options.onChange ? (v) => options.onChange!(JSON.parse(v)) : undefined,
+    drive: false,
   });
-  return [json ? (JSON.parse(json) as string[]) : [], (next) => setJson(JSON.stringify(next))];
+  const list = json ? (JSON.parse(json) as string[]) : [];
+  const setList = (next: string[]) => setJson(JSON.stringify(next));
+  if (options.drive !== false) {
+    useDriver(key, { set: (next) => setList(parseList(next)), get: () => JSON.stringify(list) });
+  }
+  return [list, setList];
+}
+
+function parseList(value: Term): string[] {
+  if (typeof value !== "string") return [String(value)];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+    // Not JSON: a single item.
+  }
+  return value === "" ? [] : [value];
 }
 
 /** A stable, DOM-safe id for the current component, for `id`/`aria-*` wiring. */

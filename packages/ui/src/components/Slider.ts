@@ -1,3 +1,5 @@
+import { useDriver } from "@jam/core";
+import type { Term } from "@jam/core";
 import { createContext, h, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { createStyledContext, styled } from "../styled";
@@ -379,6 +381,19 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 const toArray = (value: number | number[] | undefined, fallback: number): number[] =>
   value === undefined ? [fallback] : Array.isArray(value) ? value : [value];
 
+function parseDrivenValues(value: Term): number[] {
+  if (typeof value === "number") return [value];
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    return list.map(Number).filter((n) => !Number.isNaN(n));
+  } catch {
+    const n = Number(value);
+    return Number.isNaN(n) ? [] : [n];
+  }
+}
+
 /**
  * Slider: one or more thumbs on a track. Press anywhere on the slider to move
  * the nearest thumb there and start dragging; the arrow, Page and Home/End
@@ -405,6 +420,7 @@ function SliderComponent(props: SliderProps): VNode {
     value: props.value === undefined ? undefined : JSON.stringify(toArray(props.value, min)),
     defaultValue: JSON.stringify(toArray(defaultValue, min)),
     onChange: onValueChange ? (next) => onValueChange(JSON.parse(next) as number[]) : undefined,
+    drive: false,
   });
   const values = JSON.parse(json ?? "[]") as number[];
   const disabled = props.disabled === true;
@@ -427,6 +443,22 @@ function SliderComponent(props: SliderProps): VNode {
     setJson(JSON.stringify(next));
     return next;
   };
+  // Driven with a number for the first thumb or a JSON array for all of them; values snap and clamp as if dragged.
+  useDriver("value", {
+    set: (driven: Term) => {
+      if (disabled) return;
+      const wanted = parseDrivenValues(driven);
+      if (wanted.length === 1) {
+        commit(0, wanted[0]);
+        return;
+      }
+      if (wanted.length !== values.length) throw new Error(`Slider has ${values.length} thumbs; got ${wanted.length} values`);
+      const next: number[] = [];
+      for (const v of wanted.map(snap)) next.push(next.length ? clamp(v, next[next.length - 1] + gap, max) : v);
+      setJson(JSON.stringify(next));
+    },
+    get: () => (values.length === 1 ? values[0] : JSON.stringify(values)),
+  });
 
   const state: SliderStateValue = {
     values,

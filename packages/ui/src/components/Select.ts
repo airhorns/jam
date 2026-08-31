@@ -1,4 +1,4 @@
-import { $, _, Portal, forget, replace, when } from "@jam/core";
+import { $, _, Portal, forget, replace, useDriver, when } from "@jam/core";
 import { createContext, h, useCleanup, useContext } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { styled } from "../styled";
@@ -159,13 +159,16 @@ function SelectRoot(props: SelectProps): VNode {
     dismissOnFocusOutside: true,
     onReposition: () => repositionLayer(id, { placement, offset: 4 }),
   });
+  const options = useOptions(id, props.children);
+  // Read-only: tells `describeUI()` which values `drive(id, "value", …)` accepts.
+  useDriver("options", { get: () => JSON.stringify(options.filter((o) => !o.disabled).map((o) => o.value)) });
   const ctx: SelectContextValue = {
     id,
     open,
     setOpen,
     value,
     setValue,
-    options: useOptions(id, props.children),
+    options,
     disabled,
     required: props.required === true,
     size: props.size,

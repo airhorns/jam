@@ -457,11 +457,13 @@ function AccordionComponent(props: AccordionProps): VNode {
     value: multiple ? undefined : (props.value as string | undefined),
     defaultValue: multiple ? undefined : ((defaultValue as string | undefined) ?? ""),
     onChange: multiple ? undefined : (onValueChange as unknown as (value: string) => void | undefined),
+    drive: !multiple,
   });
   const [list, setList] = useControllableList("values", {
     value: multiple ? (props.value as string[] | undefined) : undefined,
     defaultValue: multiple ? (defaultValue as string[] | undefined) : undefined,
     onChange: multiple ? (onValueChange as unknown as (value: string[]) => void | undefined) : undefined,
+    drive: multiple,
   });
 
   const state: AccordionStateValue = {

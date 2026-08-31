@@ -304,3 +304,100 @@ change reruns the single `expandTree` reaction. Nothing in the apps is slow
 enough to block on it yet, but it is the ceiling on how large a `@jam/ui` app
 can get before renders need to be scoped to the components whose facts
 changed.
+
+## After the legibility round
+
+The question this round answered: can an agent read a Jam UI and operate it
+without selectors, screenshots or new fact writes? Yes — from what is
+already there.
+
+**describeUI().** `@jam/core` reads the VDOM facts the renderer emits (tags,
+attributes, text, children) plus the component structure of the mount and
+produces an accessibility outline: one node per element with a role, its
+accessible name computed the way name-from-content and `aria-labelledby`
+compute it, its ARIA/DOM state (`expanded`, `checked`, `value`, `href`,
+`level`…), the semantic component that starts there and, in parentheses,
+the state keys `drive()` can set with their current values. Unnamed
+containers collapse into their parents; `styled()` frames are
+`presentational`, so component chains name only function components
+(`<IssueRow/ListItemFrame>`, not `<IssueRow/ListItemFrame/ListItem/YStack>`);
+children of buttons, images and other children-presentational roles are
+dropped, though a misplaced control inside one still surfaces; hidden
+subtrees are omitted; portals appear at the root. A component's parts
+belong to it even when the page wrote them as its children, so a compound
+whose root renders no element of its own (Dialog, Menu, Tooltip, Popover)
+starts at its first part and its state appears there — `button "New issue"
+… (Dialog open=false)` on the trigger — and `describeUI({ root })` on its id
+covers the trigger and the portalled content alike. A drivable component
+that renders nothing at all (a Sheet or Toast opened by the program) is
+listed as `hidden … (Sheet open=false)` so its state stays readable and
+settable. `outlineUI()` is the same tree as text, and a LinearLite list page
+comes out at ~60 lines in `interactive` mode.
+
+**drive() / press().** `drive(id, key, value)` finds the nearest component
+around an entity id that registered a driver for `key` and calls it, so the
+component's own `onChange` runs — controlled or not, and an owner that
+declines to change is honoured, exactly as if the user had done it. Native
+inputs receive the value with `input`/`change` events. `press(id)` dispatches
+`pointerdown`, `mousedown`, focus, `pointerup`, `mouseup` and `click` on the
+element in the browser's order (triggers that open on pointerdown open;
+tooltips that guard focus against a press stay closed) and falls back to the
+`onClick` handler fact when no DOM node exists. Both assert a transient,
+non-durable `["drive", …]` fact while their effects happen so a fact log
+shows what caused a change; nothing is stored and there is no idle cost. The
+effects run outside any action, so each handler's writes render before the
+next event, as they do between the events of a user's own input. Ids are
+accepted with or without the outline's `#`. `useControllableState`
+registers a driver by default, and Slider, Select and the multi-value
+Accordion/ToggleGroup register their own, so every stateful `@jam/ui`
+component is drivable; a 112-test conformance suite proves it per component
+(uncontrolled, controlled, declining owner, from any descendant element,
+via `press` on the trigger, and every interactive node named).
+
+**What the consumers found.** `@jam/ui/playwright` (`find`, `pressNode`,
+`driveNode`, `outline`) let LinearLite's and the notes app's e2e ceremonies
+run the way an agent runs them, and the meta-agent gained `describeUI`,
+`drive` and `press` tools. The catalog's `legibility.spec.ts` sweeps every
+demo asserting each control has a name; it found the Input, Checkbox,
+Switch, RadioGroup and Select demos rendering unlabelled controls (now
+labelled) and Checkbox's check glyph naming every checked box "✓" (now
+`aria-hidden`). The apps' outlines showed LinearLite's dialog owner
+declining `open=true` (its `onOpenChange` only handled closing), avatars
+carrying `aria-label` on a `div` (now `role="img"`) and the notes list
+naming each note by its whole card text (now by title). Combobox triggers
+report the value they show; `data-state` is no longer reported since ARIA
+already carries the state it mirrors.
+
+**QA.** Two agents then worked the apps with nothing but `outlineUI()`,
+`press()` and `drive()` through a browser CLI — filtering, sorting, changing
+status and priority, creating, editing, commenting on and deleting an issue,
+switching project; creating, linking and editing notes — and every ceremony
+succeeded from the outline alone, each state change confirmed by the next
+read. What they could not do was the round's real yield. LinearLite's board
+cards could only be moved by mouse (they now carry a status menu, and the
+columns are named regions with real headings); the same selection then left
+the menu open, because moving the card re-keyed the `Menu` and
+`useControllableState` refused to tell a controlled owner about a change
+from an unmounted instance (it now does — the change it is reporting may be
+what re-keyed it). `press()` on a tooltip trigger opened the tooltip, since
+`focus()` came before `pointerdown` and the whole sequence ran in one MobX
+action, so the trigger's `close()` read a stale `open` (fixed as above).
+`describeUI({ root })` given a component id — the id the outline prints for a
+closed dialog — returned nothing once the dialog opened (it now describes the
+component's elements, portalled ones included), and labelled a scoped root
+with `<App>`, the outermost component begun above it (components begun
+before the root now count as seen). `header` inside a column was a `banner`
+landmark (now scoped to sectioning content, as HTML-AAM says). Both theme
+toggles were named "Toggle theme" with no state (now "Dark theme"
+`pressed=true/false`), and the notes inspector's cards had no names in
+`interactive` mode (now labelled regions). Findings that were not bugs:
+"theme persisted but notes did not" — the notes app has no persistence and
+its default theme is dark; the agent had no before-measurement, so its first
+press did work. Screenshots the agents took after acting are in
+`scratch/qa/` (gitignored). Review of the PR then caught that a component's
+parent was the component whose render *created* its vnode, so a
+`Dialog.Trigger` a page wrote parented to the page and skipped the `Dialog`:
+in an app the dialog's `open` sat on a stray `hidden` node instead of on its
+trigger, and `root` on its id found nothing — while the conformance suite,
+which writes the parts outside any component, saw the intended tree by
+accident. Parents and element owners now follow the tree being expanded.

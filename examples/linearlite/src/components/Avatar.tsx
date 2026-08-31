@@ -17,7 +17,7 @@ export function Avatar({ name, size = 22 }: { name?: unknown; size?: number }) {
     .slice(0, 2)
     .toUpperCase();
   return (
-    <UIAvatar size={size} circular title={label} aria-label={label} data-testid="avatar" data-user={label}>
+    <UIAvatar size={size} circular role="img" title={label} aria-label={label} data-testid="avatar" data-user={label}>
       <UIAvatar.Fallback backgroundColor={`hsl(${hue(label)} 55% 48%)`}>
         <SizableText size="$1" fontSize={Math.round(size * 0.42)} fontWeight="700" color="#fff">
           {initials}

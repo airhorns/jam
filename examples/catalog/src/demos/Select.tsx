@@ -58,7 +58,7 @@ export const SelectDemos: ComponentDemos = {
         <XStack gap="$3" flexWrap="wrap" alignItems="flex-end">
           {(["$2", "$3", "$4", "$5"] as const).map((size) => (
             <Select key={size} size={size} defaultValue="cherry">
-              <Select.Trigger width={150}>
+              <Select.Trigger width={150} aria-label={`Size ${size}`}>
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
@@ -69,7 +69,7 @@ export const SelectDemos: ComponentDemos = {
             </Select>
           ))}
           <Select defaultValue="banana" disabled>
-            <Select.Trigger width={150}>
+            <Select.Trigger width={150} aria-label="Disabled">
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
@@ -79,7 +79,7 @@ export const SelectDemos: ComponentDemos = {
             </Select.Content>
           </Select>
           <Select>
-            <Select.Trigger width={150}>
+            <Select.Trigger width={150} aria-label="Empty">
               <Select.Value placeholder="Placeholder" />
             </Select.Trigger>
             <Select.Content>
@@ -99,7 +99,7 @@ export const SelectDemos: ComponentDemos = {
         return (
           <Select value={team || undefined} onValueChange={setTeam} placement="bottom-end">
             <Select.Trigger asChild>
-              <Button variant="outlined" data-testid="team-select-trigger" iconAfter="▾">
+              <Button variant="outlined" data-testid="team-select-trigger" iconAfter="▾" aria-label="Team">
                 <Select.Value placeholder="Assign to a team…" />
               </Button>
             </Select.Trigger>

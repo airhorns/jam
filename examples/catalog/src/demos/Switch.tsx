@@ -14,14 +14,14 @@ export const SwitchDemos: ComponentDemos = {
         <YStack gap="$space.4">
           <XStack gap="$space.4" alignItems="center">
             {["$1", "$2", "$3", "$4", "$5", "$6"].map((size) => (
-              <Switch key={size} size={size}>
+              <Switch key={size} size={size} aria-label={`Size ${size} off`}>
                 <Switch.Thumb />
               </Switch>
             ))}
           </XStack>
           <XStack gap="$space.4" alignItems="center">
             {["$1", "$2", "$3", "$4", "$5", "$6"].map((size) => (
-              <Switch key={size} size={size} checked>
+              <Switch key={size} size={size} checked aria-label={`Size ${size} on`}>
                 <Switch.Thumb />
               </Switch>
             ))}
@@ -40,10 +40,10 @@ export const SwitchDemos: ComponentDemos = {
             { label: "Disabled on", checked: true, disabled: true },
           ].map(({ label, checked, disabled }) => (
             <XStack key={label} gap="$space.3" alignItems="center">
-              <Switch checked={checked} disabled={disabled}>
+              <Switch id={`switch-${label}`} checked={checked} disabled={disabled}>
                 <Switch.Thumb />
               </Switch>
-              <Text>{label}</Text>
+              <Label htmlFor={`switch-${label}`}>{label}</Label>
             </XStack>
           ))}
         </YStack>
@@ -55,7 +55,7 @@ export const SwitchDemos: ComponentDemos = {
       render: () => (
         <XStack gap="$space.4" alignItems="center">
           {["blue", "green", "orange", "red", "purple"].map((theme) => (
-            <Switch key={theme} theme={theme} checked>
+            <Switch key={theme} theme={theme} checked aria-label={`${theme} switch`}>
               <Switch.Thumb />
             </Switch>
           ))}

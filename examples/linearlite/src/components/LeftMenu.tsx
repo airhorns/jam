@@ -191,7 +191,15 @@ function ThemeToggle() {
   return (
     <Tooltip placement="top">
       <Tooltip.Trigger asChild>
-        <Button size="$2" chromeless circular aria-label="Toggle theme" data-testid="theme-toggle" onClick={() => setTheme(dark ? "light" : "dark")}>
+        <Button
+          size="$2"
+          chromeless
+          circular
+          aria-label="Dark theme"
+          aria-pressed={dark ? "true" : "false"}
+          data-testid="theme-toggle"
+          onClick={() => setTheme(dark ? "light" : "dark")}
+        >
           {dark ? "☾" : "☀"}
         </Button>
       </Tooltip.Trigger>

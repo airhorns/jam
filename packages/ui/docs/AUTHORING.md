@@ -67,6 +67,32 @@ Read `STYLE-SYSTEM.md` first.
   scheduled from render, guarded by a check that the component is still
   mounted; `layers.ts` and `Select`'s option registry are the pattern.
 
+## Legibility to agents
+
+`describeUI()` in `@jam/core` reads the rendered tree as an accessibility
+outline and `drive()` sets component state through the same path a user's
+input takes. A component is legible when what it renders carries the right
+role, name and ARIA state (that is all the outline reports), and drivable
+when its state goes through `useControllableState`:
+
+- `useControllableState(key, …)` registers a driver for `key` by default, so
+  `drive(id, key, value)` runs the component's `onChange` whether it is
+  controlled or not. Pass `drive: false` for internal state that is not part
+  of the component's contract (an image's `brokenSrc`), and register a
+  `useDriver(key, { set, get })` of your own when the public shape differs
+  from the stored one (Slider's `values`, Select's `options`).
+- Every interactive element needs an accessible name from its content,
+  `aria-label`, `aria-labelledby` or a `Label`; a glyph or icon that only
+  decorates a control is `aria-hidden` so it does not become the name
+  (Checkbox.Indicator's check does this).
+- `styled()` frames are `presentational`, so the outline names their
+  elements by role and leaves them out of component chains; function
+  components appear by `displayName`, so set it.
+- The drive conformance suite (`src/conformance/__tests__/drive.conformance.test.ts`)
+  checks every stateful component can be driven uncontrolled and controlled,
+  from any of its elements, and that every interactive node it renders is
+  named; the catalog's `legibility.spec.ts` checks the same across demos.
+
 ## Per-component checklist
 
 1. **Implementation** in `src/components/<Name>.ts` following the rules above.
