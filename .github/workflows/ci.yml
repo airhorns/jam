@@ -52,13 +52,14 @@ jobs:
         working-directory: crates
         run: |
           rustup toolchain install
+          rustup component add llvm-tools-preview
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny@0.20.2,wasm-bindgen-cli@0.2.127
+          tool: cargo-deny@0.20.2,cargo-llvm-cov@0.9.0,wasm-bindgen-cli@0.2.127
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -68,6 +69,7 @@ jobs:
       - run: corepack pnpm rust:deny
       - run: corepack pnpm rust:no-ignored-tests
       - run: corepack pnpm rust:test
+      - run: corepack pnpm rust:coverage
       - name: Committed WASM build matches the Rust source
         run: |
           corepack pnpm build:engine

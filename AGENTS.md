@@ -21,19 +21,22 @@ pnpm run bench     # Benchmarks (packages/core only)
 
 # Rust engine (crates/), from the repo root
 pnpm rust:check    # fmt --check, clippy (host + wasm32), cargo-deny, no ignored tests, cargo test — what CI runs
+pnpm rust:coverage # cargo-llvm-cov over the crates; CI fails under 95% line coverage
 pnpm build:engine  # Rebuild packages/engine/pkg from crates/jam-engine-wasm; commit the result
 ```
 
 ### Rust conventions
 
 `crates/rust-toolchain.toml` pins the toolchain (rustup installs it on first use, including the
-`wasm32-unknown-unknown` target); `cargo install cargo-deny --locked` and
+`wasm32-unknown-unknown` target); `cargo install cargo-deny --locked`,
+`cargo install cargo-llvm-cov --locked` (plus `rustup component add llvm-tools-preview`) and
 `cargo install wasm-bindgen-cli --locked --version 0.2.127` (the version pinned in
 `crates/jam-engine-wasm/Cargo.toml`) are the only extra tools. Edition 2024, `#![forbid(unsafe_code)]`
 via the workspace lints, `warnings = "deny"` and `clippy::all = "deny"` — every lint is an error and is
 checked in CI. Prefer fixing over allowing; if you must, `#[allow(lint, reason = "...")]` with a real
 reason. No `todo!`/`unimplemented!`/`dbg!`, no `#[ignore]` tests (delete or fix them), no wildcard
-dependency versions. `crates/deny.toml` lists the allowed licenses — add one only when a new
+dependency versions. Tests live next to the code (`src/tests.rs` for engine-level behaviour, `mod tests`
+per module for internals) and use `pretty_assertions`; keep line coverage at or above 95%. `crates/deny.toml` lists the allowed licenses — add one only when a new
 dependency actually needs it. `cargo fmt` uses `crates/rustfmt.toml` (120 columns). CI also rebuilds the
 WASM and fails if `packages/engine/pkg` differs, so run `pnpm build:engine` after touching the crates.
 

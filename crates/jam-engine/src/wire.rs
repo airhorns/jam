@@ -72,3 +72,35 @@ impl<'a> Reader<'a> {
         self.slice(len)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn reads_words_slices_and_term_lists() {
+        let data = [OP_ASSERT, 7, 2, 3, 10, 11, 12, 1, 5];
+        let mut r = Reader::new(&data);
+        assert!(!r.done());
+        assert_eq!(r.u32(), Ok(OP_ASSERT));
+        assert_eq!(r.slice(2), Ok(&[7, 2][..]));
+        assert_eq!(r.terms(), Ok(&[10, 11, 12][..]));
+        assert_eq!(r.terms(), Ok(&[5][..]));
+        assert!(r.done());
+        assert_eq!(r.u32(), Err("truncated at 9".to_string()));
+        assert_eq!(r.slice(1), Err("truncated slice at 9 (len 1)".to_string()));
+        assert_eq!(r.slice(0), Ok(&[][..]));
+    }
+
+    #[test]
+    fn term_lists_must_have_a_sane_length() {
+        assert_eq!(Reader::new(&[0]).terms(), Err("bad fact length 0".to_string()));
+        assert_eq!(Reader::new(&[33]).terms(), Err("bad fact length 33".to_string()));
+        assert_eq!(Reader::new(&[2, 1]).terms(), Err("truncated slice at 1 (len 2)".to_string()));
+        assert_eq!(Reader::new(&[]).terms(), Err("truncated at 0".to_string()));
+        let full: Vec<u32> = std::iter::once(32).chain(0..32).collect();
+        assert_eq!(Reader::new(&full).terms().map(<[u32]>::len), Ok(32));
+    }
+}

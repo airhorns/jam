@@ -566,3 +566,175 @@ pub fn adhoc(store: &mut Store, clauses: Vec<Clause>) -> Query {
     }
     query
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::store::ROOT_OWNER;
+
+    fn v(i: u32) -> u32 {
+        VAR_BASE + i
+    }
+
+    fn drained(results: &mut ResultSet) -> Vec<(RowId, Vec<TermId>, i32, i32)> {
+        let mut out = Vec::new();
+        results.drain(|id, row, before, after| out.push((id, row.to_vec(), before, after)));
+        out
+    }
+
+    #[test]
+    fn result_sets_track_weights_and_reuse_slots() {
+        let mut results = ResultSet::default();
+        assert!(results.is_empty() && !results.is_dirty());
+        results.apply(&[1, 2], 1);
+        results.apply(&[1, 2], 1);
+        results.apply(&[3, 4], 1);
+        assert!(results.is_dirty());
+        assert_eq!(results.len(), 2);
+        assert_eq!(drained(&mut results), vec![(0, vec![1, 2], 0, 2), (1, vec![3, 4], 0, 1)]);
+        assert!(!results.is_dirty());
+
+        results.apply(&[1, 2], -1);
+        assert_eq!(
+            drained(&mut results),
+            vec![(0, vec![1, 2], 2, 1)],
+            "still present, so it is not reported as a change"
+        );
+        results.apply(&[3, 4], -1);
+        results.apply(&[5, 6], 1);
+        results.apply(&[5, 6], -1);
+        assert_eq!(drained(&mut results), vec![(1, vec![3, 4], 1, 0)], "a row that came and went is silent");
+        assert_eq!(results.len(), 1);
+        let rows: Vec<_> = results.rows().map(|(id, row, w)| (id, row.to_vec(), w)).collect();
+        assert_eq!(rows, vec![(0, vec![1, 2], 1)]);
+
+        results.apply(&[7, 8], 1);
+        let rows: Vec<_> = results.rows().map(|(id, _, _)| id).collect();
+        assert_eq!(rows, vec![0, 2], "the most recently freed slot is reused");
+    }
+
+    #[test]
+    fn settle_accepts_weights_silently_and_frees_zero_rows() {
+        let mut results = ResultSet::default();
+        results.apply(&[1], 1);
+        results.apply(&[2], 1);
+        results.apply(&[2], -1);
+        results.settle();
+        assert!(!results.is_dirty());
+        assert_eq!(results.len(), 1);
+        assert!(drained(&mut results).is_empty());
+        results.apply(&[3], 1);
+        assert_eq!(drained(&mut results), vec![(1, vec![3], 0, 1)], "the settled zero row's slot is reused");
+    }
+
+    #[test]
+    fn bindings_enforce_repeated_variables_and_literals() {
+        let clause = vec![v(0), 5, v(0), WILD];
+        let mut b = Bindings::new(1);
+        assert_eq!(b.bind(&clause, &[1, 5, 1, 9], 0), Some(0));
+        assert_eq!(b.row, vec![1]);
+        b.rollback(0);
+        assert_eq!(b.row, vec![NONE]);
+        assert_eq!(b.bind(&clause, &[1, 5, 2, 9], 0), None, "the same variable cannot bind two values");
+        assert_eq!(b.row, vec![NONE], "a failed bind leaves nothing behind");
+        assert_eq!(b.bind(&clause, &[1, 6, 1, 9], 0), None, "literals must match");
+        assert_eq!(b.bind(&clause, &[1, 6, 1, 9], 0b0010), Some(0), "masked positions are trusted");
+        b.rollback(0);
+        b.row[0] = 7;
+        assert_eq!(b.bind(&clause, &[7, 5, 7, 0], 0), Some(0));
+        assert!(b.undo.is_empty(), "already-bound variables record nothing to undo");
+        assert_eq!(b.bind(&clause, &[8, 5, 8, 0], 0), None);
+    }
+
+    #[test]
+    fn plans_probe_literals_and_bound_variables_first() {
+        let clauses = vec![vec![v(0), 10, v(1)], vec![v(1), 11, v(2)], vec![v(2), 12, 13]];
+        let plan = build_plan(&clauses, 0, true);
+        assert_eq!(
+            plan.steps.iter().map(|s| s.clause).collect::<Vec<_>>(),
+            vec![1, 2],
+            "a tie goes to the earlier clause"
+        );
+        assert_eq!(plan.steps[0].mask, 0b011, "the bound variable and the literal");
+        assert!(!plan.steps[0].exact && !plan.steps[0].exclude_seed);
+        assert_eq!(plan.steps[1].mask, 0b111, "everything is known by the time clause 2 runs");
+        assert!(plan.steps[1].exact);
+        let unbound = build_plan(&[vec![v(0), 10], vec![v(1), 11, v(2)]], 0, false);
+        assert_eq!(unbound.steps[0].mask, 0b010, "a clause sharing nothing is scanned by its literals");
+        let from_last = build_plan(&clauses, 2, true);
+        assert!(from_last.steps.iter().all(|s| s.exclude_seed), "earlier clauses skip the seed fact");
+        let full = build_plan(&clauses, 2, false);
+        assert!(full.steps.iter().all(|s| !s.exclude_seed));
+    }
+
+    #[test]
+    fn queries_choose_the_most_literal_seed_and_request_indexes() {
+        let q = Query::new(vec![vec![v(0), 10, v(1)], vec![v(1), 11, 12]]);
+        assert_eq!(q.nvars, 2);
+        assert_eq!(q.full_seed, 1);
+        assert_eq!(
+            q.index_needs(),
+            vec![(3, 0b110)],
+            "the seed scan and clause 0 probed from clause 1 share one index; clause 1 from clause 0 is a key probe"
+        );
+
+        let wild = Query::new(vec![vec![v(0), WILD, v(1)]]);
+        assert!(
+            wild.index_needs().contains(&(3, 0b101)),
+            "ordering a wildcard clause needs its bound positions"
+        );
+
+        let empty = Query::new(vec![]);
+        assert_eq!((empty.nvars, empty.full_seed), (0, 0));
+        assert!(empty.index_needs().is_empty());
+        let mut rows = 0;
+        evaluate(&Store::new(), &empty, &mut |_| rows += 1);
+        assert_eq!(rows, 0);
+        assert_eq!(row_order(&Store::new(), &[], &[]), 0);
+    }
+
+    #[test]
+    fn registry_reuses_slots_and_prunes_routes() {
+        let mut store = Store::new();
+        let mut queries = Queries::new();
+        assert!(queries.is_empty());
+        let a = queries.register(&mut store, vec![vec![10, v(0)]]);
+        let b = queries.register(&mut store, vec![vec![v(0), 11]]);
+        assert_eq!(queries.len(), 2);
+        assert!(queries.get(a).is_some() && queries.get(b).is_some());
+        assert!(queries.get(7).is_none());
+        assert!(!queries.release(7), "unknown ids are not released");
+        assert!(queries.release(a));
+        assert!(queries.get(a).is_none());
+        let c = queries.register(&mut store, vec![vec![10, v(0), v(1)]]);
+        assert_eq!(c, a, "freed ids are reused");
+        assert!(queries.routes.contains_key(&(3, 10)));
+        assert!(!queries.routes.contains_key(&(2, 10)), "the released query's route is gone");
+        assert!(queries.routes.contains_key(&(2, NONE)));
+        assert!(queries.release(b) && queries.release(c));
+        assert!(queries.routes.is_empty());
+        assert!(queries.is_empty());
+    }
+
+    #[test]
+    fn propagation_ignores_unrouted_facts_and_settles_registered_rows() {
+        let mut store = Store::new();
+        let mut queries = Queries::new();
+        let f = store.insert(vec![10, 1].into(), 2, ROOT_OWNER);
+        let q = queries.register(&mut store, vec![vec![10, v(0)]]);
+        assert_eq!(queries.get(q).unwrap().results.len(), 1, "registration sees existing facts");
+        assert!(queries.take_dirty().is_empty(), "without reporting them");
+        let g = store.insert(vec![11, 1].into(), 2, ROOT_OWNER);
+        queries.propagate(&store, g, &[11, 1], 1);
+        assert!(queries.take_dirty().is_empty(), "no clause can match a fact starting with 11");
+        let h = store.insert(vec![10, 1, 2].into(), 2, ROOT_OWNER);
+        queries.propagate(&store, h, &[10, 1, 2], 1);
+        assert!(queries.take_dirty().is_empty(), "nor one of another length");
+        queries.propagate(&store, f, &[10, 1], -1);
+        assert_eq!(queries.take_dirty(), vec![q]);
+        queries.clear_results();
+        assert!(queries.take_dirty().is_empty(), "the only row is already on its way out");
+    }
+}

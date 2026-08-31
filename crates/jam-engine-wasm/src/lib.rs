@@ -11,22 +11,27 @@ pub struct JamEngine {
     inner: Engine,
 }
 
-fn unpack_clauses(packed: &[u32]) -> Result<Vec<Clause>, JsError> {
+/// `n (len t…)…` → clauses, or a message naming what was malformed.
+fn unpack_clauses(packed: &[u32]) -> Result<Vec<Clause>, String> {
     let mut clauses = Vec::new();
     let mut i = 0;
-    let n = *packed.first().ok_or_else(|| JsError::new("empty clause list"))? as usize;
+    let n = *packed.first().ok_or("empty clause list")? as usize;
     i += 1;
     for _ in 0..n {
-        let len = *packed.get(i).ok_or_else(|| JsError::new("truncated clause list"))? as usize;
+        let len = *packed.get(i).ok_or("truncated clause list")? as usize;
         i += 1;
         let end = i + len;
         if end > packed.len() {
-            return Err(JsError::new("truncated clause"));
+            return Err("truncated clause".to_string());
         }
         clauses.push(packed[i..end].to_vec());
         i = end;
     }
     Ok(clauses)
+}
+
+fn js_error(message: String) -> JsError {
+    JsError::new(&message)
 }
 
 #[wasm_bindgen]
@@ -96,7 +101,7 @@ impl JamEngine {
     }
 
     pub fn apply(&mut self, ops: &[u32]) -> Result<(), JsError> {
-        self.inner.apply(ops).map_err(|e| JsError::new(&e))
+        self.inner.apply(ops).map_err(js_error)
     }
 
     pub fn drain(&mut self) -> Vec<u32> {
@@ -106,7 +111,7 @@ impl JamEngine {
     // --- queries ---
 
     pub fn register(&mut self, clauses: &[u32]) -> Result<u32, JsError> {
-        Ok(self.inner.register(unpack_clauses(clauses)?))
+        Ok(self.inner.register(unpack_clauses(clauses).map_err(js_error)?))
     }
 
     pub fn release(&mut self, id: u32) -> bool {
@@ -118,7 +123,7 @@ impl JamEngine {
     }
 
     pub fn query(&mut self, clauses: &[u32]) -> Result<Vec<u32>, JsError> {
-        Ok(self.inner.query(unpack_clauses(clauses)?))
+        Ok(self.inner.query(unpack_clauses(clauses).map_err(js_error)?))
     }
 
     pub fn facts(&mut self, scope: u32, pattern: &[u32]) -> Vec<u32> {
@@ -151,3 +156,6 @@ impl Default for JamEngine {
         JamEngine::new()
     }
 }
+
+#[cfg(test)]
+mod tests;

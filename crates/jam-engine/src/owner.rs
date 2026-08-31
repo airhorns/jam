@@ -107,6 +107,8 @@ impl Owners {
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use super::*;
 
     #[test]
@@ -119,13 +121,16 @@ mod tests {
         owners.attach(b, 2);
         owners.attach(c, 3);
         owners.attach(ROOT_OWNER, 4);
+        assert_eq!(owners.len(), 4);
         let mut released = owners.revoke(a);
         released.sort();
         assert_eq!(released, vec![(a, 1), (b, 2), (c, 3)]);
         assert!(!owners.exists(a) && !owners.exists(b) && !owners.exists(c));
         assert!(owners.exists(ROOT_OWNER));
+        assert_eq!(owners.len(), 1);
         assert!(owners.create(a).is_none());
         assert!(owners.revoke(ROOT_OWNER).is_empty());
+        assert!(owners.revoke(a).is_empty(), "revoking twice is a no-op");
     }
 
     #[test]
@@ -133,9 +138,49 @@ mod tests {
         let mut owners = Owners::new();
         let a = owners.create(ROOT_OWNER).unwrap();
         owners.attach(a, 7);
+        owners.attach(a, 7);
         owners.detach(a, 7);
         assert!(owners.revoke(a).is_empty());
         let b = owners.create(ROOT_OWNER).unwrap();
         assert_ne!(a, b);
+        owners.attach(a, 8);
+        owners.detach(a, 8);
+        owners.detach(ROOT_OWNER, 8);
+        assert!(owners.revoke(b).is_empty(), "attaching to a revoked owner does nothing");
+    }
+
+    #[test]
+    fn parents_are_tracked_and_pruned() {
+        let mut owners = Owners::new();
+        let a = owners.create(ROOT_OWNER).unwrap();
+        let b = owners.create(a).unwrap();
+        let c = owners.create(a).unwrap();
+        assert_eq!(owners.parent(ROOT_OWNER), Some(ROOT_OWNER));
+        assert_eq!(owners.parent(b), Some(a));
+        assert_eq!(owners.parent(99), None);
+        owners.attach(b, 1);
+        owners.attach(c, 2);
+        assert_eq!(owners.revoke(b), vec![(b, 1)]);
+        assert_eq!(
+            owners.revoke(a),
+            vec![(c, 2)],
+            "a revoked child is no longer part of its parent's subtree"
+        );
+    }
+
+    #[test]
+    fn reset_keeps_only_the_root() {
+        let mut owners = Owners::default();
+        let a = owners.create(ROOT_OWNER).unwrap();
+        let b = owners.create(a).unwrap();
+        owners.attach(b, 1);
+        owners.reset();
+        assert!(!owners.is_empty());
+        assert_eq!(owners.len(), 1);
+        assert!(owners.exists(ROOT_OWNER) && !owners.exists(a) && !owners.exists(b));
+        let c = owners.create(ROOT_OWNER).unwrap();
+        assert!(c > b, "ids keep counting after a reset");
+        assert!(owners.revoke(ROOT_OWNER).is_empty());
+        assert_eq!(owners.revoke(c), vec![]);
     }
 }

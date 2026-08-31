@@ -237,9 +237,6 @@ impl Engine {
 
     pub fn revoke(&mut self, owner: OwnerId) {
         for (owner, fid) in self.owners.revoke(owner) {
-            if !self.store.is_live(fid) {
-                continue;
-            }
             let record = self.store.get_mut(fid);
             record.owners.retain(|o| *o != owner);
             if record.owners.is_empty() {

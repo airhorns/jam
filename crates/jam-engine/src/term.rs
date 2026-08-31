@@ -111,6 +111,8 @@ impl std::fmt::Display for Term {
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use super::*;
 
     #[test]
@@ -122,8 +124,45 @@ mod tests {
         assert_eq!(i.intern_num(1.0), i.intern_num(1.0));
         assert_ne!(i.intern_num(1.0), i.intern_str("1"));
         assert_eq!(i.intern_num(0.0), i.intern_num(-0.0));
+        assert_eq!(i.intern_num(f64::NAN), i.intern_num(f64::NAN));
         assert_eq!(i.intern_bool(true), TRUE);
+        assert_eq!(i.intern_bool(false), FALSE);
         assert_eq!(i.intern_str(""), EMPTY);
         assert_eq!(i.resolve(a), &Term::Str("todo".into()));
+    }
+
+    #[test]
+    fn intern_dispatches_on_the_term_kind() {
+        let mut i = Interner::new();
+        let s = i.intern(&Term::Str("x".into()));
+        let n = i.intern(&Term::Num(4.0));
+        assert_eq!(s, i.intern_str("x"));
+        assert_eq!(n, i.intern_num(4.0));
+        assert_eq!(i.intern(&Term::Bool(true)), TRUE);
+        assert_eq!(i.intern(&Term::Bool(false)), FALSE);
+    }
+
+    #[test]
+    fn lookups_and_sizes() {
+        let mut i = Interner::new();
+        assert_eq!(i.len(), 3, "false, true and the empty string are preinterned");
+        assert!(!i.is_empty());
+        assert_eq!(i.get(FALSE), Some(&Term::Bool(false)));
+        assert_eq!(i.get(TRUE), Some(&Term::Bool(true)));
+        assert_eq!(i.get(EMPTY), Some(&Term::Str("".into())));
+        assert_eq!(i.get(3), None);
+        let n = i.intern_num(-2.5);
+        assert_eq!(i.get(n), Some(&Term::Num(-2.5)));
+        assert_eq!(i.len(), 4);
+        assert!(Interner::default().is_empty(), "the bare default has no preinterned terms");
+    }
+
+    #[test]
+    fn terms_display_like_json() {
+        assert_eq!(Term::Str("a \"b\"".into()).to_string(), "\"a \\\"b\\\"\"");
+        assert_eq!(Term::Num(1.5).to_string(), "1.5");
+        assert_eq!(Term::Num(3.0).to_string(), "3");
+        assert_eq!(Term::Bool(true).to_string(), "true");
+        assert_eq!(Term::Bool(false).to_string(), "false");
     }
 }

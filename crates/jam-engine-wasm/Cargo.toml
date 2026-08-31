@@ -16,3 +16,6 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 jam-engine = { path = "../jam-engine" }
 wasm-bindgen = "=0.2.127"
+
+[dev-dependencies]
+pretty_assertions = "1"

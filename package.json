@@ -18,6 +18,7 @@
     "rust:deny": "cd crates && cargo deny --locked check",
     "rust:no-ignored-tests": "if grep -rn --include='*.rs' --exclude-dir=target -E '#\\[ignore' crates; then echo 'ignored tests are not allowed; delete or fix them' >&2; exit 1; fi",
     "rust:test": "cd crates && cargo test --locked --all-targets",
+    "rust:coverage": "cd crates && cargo llvm-cov --locked --all-targets --fail-under-lines 95",
     "rust:check": "corepack pnpm rust:fmt && corepack pnpm rust:clippy && corepack pnpm rust:deny && corepack pnpm rust:no-ignored-tests && corepack pnpm rust:test"
   },
   "devDependencies": {
