@@ -9,7 +9,8 @@ cd "$root/crates"
 registry="${CARGO_HOME:-$HOME/.cargo}/registry/src"
 RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$registry=/cargo/registry/src" \
   cargo build --locked --release -p jam-engine-wasm --target wasm32-unknown-unknown
-wasm-bindgen --target web --out-dir "$here/pkg" --out-name jam_engine_wasm \
+# The producers section records how the wasm-bindgen binary itself was built (git hash or not).
+wasm-bindgen --target web --remove-producers-section --out-dir "$here/pkg" --out-name jam_engine_wasm \
   target/wasm32-unknown-unknown/release/jam_engine_wasm.wasm
 rm -f "$here/pkg/.gitignore" "$here/pkg/package.json"
 ls -la "$here/pkg"
