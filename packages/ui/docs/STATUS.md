@@ -157,11 +157,6 @@ round, and the examples now wrap or scroll horizontally at phone widths.
 
 **Known constraints.**
 
-- Attributes and inline styles set imperatively by event handlers are removed
-  on the next reconcile; components must drive the DOM through facts.
-- `Select` discovers its options by walking its own VNode children, so items
-  must be direct descendants (arrays/fragments/`Group` are fine), not rendered
-  by another component.
 - `$backgroundActive` equals `$background` and `$borderColor` in the base
   light theme equals the `Button` background, as in tamagui's v4 templates.
 - Plain `Card` and `Avatar` fallbacks share the page background in the
@@ -237,3 +232,44 @@ selection" (reported as `""`), a `data-handles-escape` marker so Escape on a foc
 longer also closes the dialog under it, `aria-labelledby` on `Select.Group`
 only when it has a `Select.Label`, and scrollbar-width compensation in the
 body scroll lock so opening a modal doesn't shift the page.
+
+## After the real-app round
+
+Two example applications were ported wholesale onto the library —
+`examples/obsidian-clone` and `examples/linearlite` — with their hand-written
+CSS deleted, and every rough edge the ports hit was fixed in the library or
+core rather than worked around in the app.
+
+**Menu.** `Menu` is a new primitive (Trigger, Content, Item, CheckboxItem,
+RadioGroup/RadioItem, ItemIndicator, Group, Label, Separator, Arrow) following
+the APG menu button pattern and Radix `DropdownMenu`'s keyboard, typeahead and
+pointer behaviour, with a 29-test conformance suite. The examples' hand-rolled
+`role="menu"` popovers are gone.
+
+**Style system.** Defaulted variants apply before the ones a caller sets, so
+`pressTheme` on a `ListItem` beats the `unstyled: false` defaults declared
+after it (tamagui applies explicit variants in definition order, which the
+port hit as a row that took `pressTheme` but kept `cursor: default`). Every
+component suppresses Chrome's focus ring with `outline-style: none` rather
+than `outline-width: 0`, which Chrome ignores for its `outline-style: auto`
+ring. A `numberOfLines` clamp sets `white-space: normal` so a clamped
+subtitle wraps instead of truncating on its first line.
+
+**Components.** `ListItem.Frame` rendered as a `button` or `a` keeps its
+native role instead of `role="listitem"`. `Select` no longer needs its items
+to be direct VNode descendants: the content stays mounted (hidden) while
+closed and items register themselves as they render, publishing the option
+list as a fact after the pass when it differs from the first-render guess, so
+`Select.Value` and typeahead see items produced by any component. The theme
+fact moved from the `ui` entity to `jam-ui` so it cannot collide with an
+application's own `ui` facts.
+
+**Core.** The renderer remembers which attributes it set on each element and
+sweeps only those, so an attribute or inline style an event handler sets
+imperatively (`data-dragging`, a transform during a drag) survives the next
+reconcile.
+
+**Conformance.** Suites now also cover `Form`, `Input`/`TextArea`, `Label`,
+`Avatar`, `Progress` and `ScrollView`, which fixed `TextArea` dropping its
+`defaultValue`, `Progress` emitting `NaN%` for a non-positive `max`, and added
+`getValueLabel` plus indicator `data-value`/`data-max`.
