@@ -1,107 +1,45 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { db, replace, type FactFilter, type FactSubscription, type SyncHandle } from "@jam/core";
+import { db, replace, type Bindings, type FactFilter, type Pattern, type SyncHandle } from "@jam/core";
 import { projectScope } from "../projects";
-import { startSubscriptions } from "../programs/subscriptions";
+import { filtersForRoute, startSubscriptions } from "../programs/subscriptions";
 
-interface FakeSubscription extends FactSubscription {
-  filter: FactFilter;
-  disposed: boolean;
-  resolve: () => void;
-}
-
-function fakeSync() {
-  const subscriptions: FakeSubscription[] = [];
-  const handle = {
-    subscribe(filter: FactFilter = {}) {
-      let resolve!: () => void;
-      const ready = new Promise<void>((r) => (resolve = r));
-      const subscription: FakeSubscription = {
-        id: JSON.stringify(filter),
-        filter,
-        ready,
-        disposed: false,
-        resolve,
-        dispose: async () => {
-          subscription.disposed = true;
-        },
-      };
-      subscriptions.push(subscription);
-      return subscription;
-    },
-  } as unknown as SyncHandle;
-  const active = () => subscriptions.filter((s) => !s.disposed).map((s) => s.filter.scope);
-  return { handle, subscriptions, active };
-}
-
-const tick = () => new Promise<void>((r) => setTimeout(r, 0));
-
-let stop: (() => Promise<void>) | undefined;
+const scopes = (filters: FactFilter[]) => filters.map((f) => f.scope);
 
 beforeEach(() => db.clear());
-afterEach(async () => {
-  await stop?.();
-  stop = undefined;
-  db.clear();
+afterEach(() => db.clear());
+
+describe("filtersForRoute", () => {
+  it("always wants the global scope and adds the route's project", () => {
+    expect(scopes(filtersForRoute(undefined))).toEqual([""]);
+    expect(scopes(filtersForRoute("/"))).toEqual([""]);
+    expect(scopes(filtersForRoute("/web"))).toEqual(["", projectScope("web")]);
+    expect(scopes(filtersForRoute("/web/board?status=todo"))).toEqual(["", projectScope("web")]);
+    expect(scopes(filtersForRoute("/mobile/issue/abc"))).toEqual(["", projectScope("mobile")]);
+  });
 });
 
 describe("startSubscriptions", () => {
-  it("always holds the global scope and follows the route's project", async () => {
-    const sync = fakeSync();
+  it("follows the route url and hands back follow's stop", async () => {
+    let followed: { patterns: Pattern[]; wanted: (matches: Bindings[]) => FactFilter[] } | undefined;
+    let stopped = false;
+    const handle = {
+      follow(patterns: Pattern[], wanted: (matches: Bindings[]) => FactFilter[]) {
+        followed = { patterns, wanted };
+        return async () => {
+          stopped = true;
+        };
+      },
+    } as unknown as SyncHandle;
+
+    const stop = startSubscriptions(handle);
+    expect(followed!.patterns).toEqual([["route", "url", expect.anything()]]);
+    expect(scopes(followed!.wanted([]))).toEqual([""]);
+    expect(scopes(followed!.wanted([{ url: "/api" }]))).toEqual(["", projectScope("api")]);
+
     replace("route", "url", "/web");
-    stop = startSubscriptions(sync.handle);
-    expect(sync.active()).toEqual(["", projectScope("web")]);
+    expect(scopes(followed!.wanted(db.query(...followed!.patterns)))).toEqual(["", projectScope("web")]);
 
-    replace("route", "url", "/web/board?status=todo");
-    await tick();
-    expect(sync.subscriptions).toHaveLength(2);
-  });
-
-  it("releases the previous project only after the next one is ready", async () => {
-    const sync = fakeSync();
-    replace("route", "url", "/web");
-    stop = startSubscriptions(sync.handle);
-    const [, web] = sync.subscriptions;
-    web.resolve();
-    await tick();
-
-    replace("route", "url", "/mobile");
-    const mobile = sync.subscriptions[2];
-    expect(mobile.filter.scope).toBe(projectScope("mobile"));
-    await tick();
-    expect(web.disposed).toBe(false);
-
-    mobile.resolve();
-    await tick();
-    expect(web.disposed).toBe(true);
-    expect(sync.active()).toEqual(["", projectScope("mobile")]);
-  });
-
-  it("drops a superseded subscription that never became current", async () => {
-    const sync = fakeSync();
-    replace("route", "url", "/web");
-    stop = startSubscriptions(sync.handle);
-    const [, web] = sync.subscriptions;
-    web.resolve();
-    await tick();
-
-    replace("route", "url", "/mobile");
-    replace("route", "url", "/api");
-    const [, , mobile, api] = sync.subscriptions;
-    mobile.resolve();
-    api.resolve();
-    await tick();
-    expect(mobile.disposed).toBe(true);
-    expect(web.disposed).toBe(true);
-    expect(sync.active()).toEqual(["", projectScope("api")]);
-  });
-
-  it("disposes everything on stop", async () => {
-    const sync = fakeSync();
-    replace("route", "url", "/web");
-    const stopAll = startSubscriptions(sync.handle);
-    sync.subscriptions[1].resolve();
-    await tick();
-    await stopAll();
-    expect(sync.active()).toEqual([]);
+    await stop();
+    expect(stopped).toBe(true);
   });
 });

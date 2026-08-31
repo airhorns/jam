@@ -6,13 +6,13 @@ import type { WorkerMeta } from "./pglite-worker";
 
 export type LinearlitePG = PGliteWorker & PGliteWithLive & PGliteWithSync & { syncToDisk(): Promise<void> };
 
-export const ELECTRIC_URL: string | undefined = import.meta.env.VITE_ELECTRIC_URL || undefined;
-export const WRITE_SERVER_URL: string = import.meta.env.VITE_WRITE_SERVER_URL || "http://localhost:3001";
+/** The sync server (server.ts); unset means standalone with a locally seeded database. */
+export const SYNC_URL: string | undefined = import.meta.env.VITE_SYNC_URL || undefined;
 
 export const DEFAULT_SEED = 5000;
 
 export function seedCountFromLocation(location: Location): number | undefined {
-  if (ELECTRIC_URL) return undefined;
+  if (SYNC_URL) return undefined;
   const raw = new URL(location.href).searchParams.get("seed");
   const n = raw == null ? DEFAULT_SEED : Number(raw);
   return Number.isFinite(n) && n > 0 ? n : undefined;

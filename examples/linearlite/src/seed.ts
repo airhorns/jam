@@ -84,7 +84,7 @@ export async function insertSeedFacts(
     await query(
       `INSERT INTO ${JAM_FACTS_TABLE} (key, scope)
        SELECT key, scope FROM json_to_recordset($1::text::json) AS t(key TEXT, scope TEXT)
-       ON CONFLICT (key) DO NOTHING`,
+       ON CONFLICT (id) DO NOTHING`,
       [JSON.stringify(facts.slice(i, i + batchSize))],
     );
   }

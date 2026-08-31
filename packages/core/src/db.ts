@@ -15,9 +15,21 @@ import {
   type IComputedValue,
 } from "mobx";
 import { clearSelectCache } from "./select";
+import {
+  _,
+  GLOBAL_SCOPE,
+  isBinding,
+  type Bindings,
+  type BindingMarker,
+  type Fact,
+  type Pattern,
+  type PatternTerm,
+  type Term,
+  type Wildcard,
+} from "./terms";
 
-export type Term = string | number | boolean;
-export type Fact = Term[];
+export { _, GLOBAL_SCOPE } from "./terms";
+export type { Bindings, BindingMarker, Fact, Pattern, PatternTerm, Term, Wildcard } from "./terms";
 
 export type FactChange = "add" | "delete";
 export interface FactChangeInfo {
@@ -32,23 +44,6 @@ export interface FactChangeInfo {
 }
 export type FactListener = (type: FactChange, key: string, fact: Fact, info: FactChangeInfo) => void;
 
-/** Facts with no scope belong to the global partition. */
-export const GLOBAL_SCOPE = "";
-
-// --- Pattern types ---
-
-export interface BindingMarker {
-  __binding: true;
-  name: string;
-}
-
-export const _: unique symbol = Symbol("wildcard");
-export type Wildcard = typeof _;
-
-export type PatternTerm = Term | BindingMarker | Wildcard;
-export type Pattern = PatternTerm[];
-export type Bindings = Record<string, Term>;
-
 // --- Pattern helpers ---
 
 export const $: Record<string, BindingMarker> = new Proxy(
@@ -60,10 +55,6 @@ export const $: Record<string, BindingMarker> = new Proxy(
     },
   },
 );
-
-function isBinding(x: unknown): x is BindingMarker {
-  return x != null && typeof x === "object" && (x as any).__binding === true;
-}
 
 // --- Pattern matching ---
 

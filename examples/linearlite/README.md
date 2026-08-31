@@ -13,35 +13,35 @@ corepack pnpm install
 corepack pnpm --dir examples/linearlite dev    # http://localhost:5173
 ```
 
-**With Electric** — Postgres and Electric in containers (docker or podman), plus the write server:
+**With Electric** — Postgres and Electric in containers (docker or podman), plus the sync server:
 
 ```bash
 corepack pnpm backend:up     # start postgres (:54321) + electric (:3033), create jam_facts, load 5,000 issues (ISSUES_TO_LOAD=N)
-corepack pnpm write-server   # Hono on :3001, accepts POST /jam/changes
-VITE_ELECTRIC_URL=http://localhost:3033 corepack pnpm dev
+corepack pnpm sync-server    # Hono on :3001: GET /jam/shape (proxy to Electric) and POST /jam/changes
+VITE_SYNC_URL=http://localhost:3001 corepack pnpm dev
 ```
 
-The client seeds nothing in this mode: it subscribes to the global scope (projects) and to `project:<id>` for the project on screen, and Electric streams those rows down. `VITE_WRITE_SERVER_URL` overrides the write server location; `DATABASE_URL` overrides the Postgres connection for the scripts (default `postgresql://postgres:password@localhost:54321/linearlite`); `JAM_POSTGRES_PORT`/`JAM_ELECTRIC_PORT` move the container ports. `pnpm backend:down` tears it down; data lives in tmpfs so it's gone on restart.
+The client seeds nothing in this mode: it subscribes to the global scope (projects) and to `project:<id>` for the project on screen, and Electric streams those rows down through the sync server — the browser never talks to Electric directly. `ELECTRIC_URL` tells the sync server where Electric is (default `http://localhost:3033`; `ELECTRIC_SOURCE_ID`/`ELECTRIC_SOURCE_SECRET` are forwarded for Electric Cloud); `DATABASE_URL` overrides the Postgres connection (default `postgresql://postgres:password@localhost:54321/linearlite`); `JAM_POSTGRES_PORT`/`JAM_ELECTRIC_PORT` move the container ports. `pnpm backend:down` tears it down; data lives in tmpfs so it's gone on restart.
 
 ## How it's layered
 
 ```
-Postgres jam_facts (key, scope) ──Electric shape per subscription──▶ PGlite jam_shape_* tables
-        ▲                                                                    │
-        │ POST /jam/changes (jam_outbox)                                     │ live changes
-        │                                                                    ▼
-   write server ◀──────────────── core sync() ──────────────▶ facts ["issue", id, col, value]
-                                                                    │  ▲
-                                                             when() │  │ replace() / remember() / forget()
-                                                                    ▼  │
-                                                              jam components
+Postgres jam_facts (id, key, scope) ──▶ Electric ──▶ sync server GET /jam/shape ──▶ PGlite jam_shape_* tables
+        ▲                                                  (scope policy)                     │
+        │ POST /jam/changes (scope policy)                                                    │ live changes
+        │                                                                                     ▼
+   sync server ◀─────────────────── core sync() (jam_outbox) ────────────────▶ facts ["issue", id, col, value]
+                                                                                       │  ▲
+                                                                                when() │  │ replace() / remember() / forget()
+                                                                                       ▼  │
+                                                                                 jam components
 ```
 
-There is no app-specific storage code. `src/sync.ts` calls `sync()` with the Electric URLs and an `exclude` for the app's ephemeral facts; `src/programs/subscriptions.ts` keeps two subscriptions open — `{ scope: "" }` for projects and `{ scope: "project:<id>" }` for the current project — and disposes the previous project's subscription only after the next one is ready, so the screen never empties on a switch. Everything else is facts:
+There is no app-specific storage code. `src/sync.ts` calls `sync()` with the sync server's URLs and an `exclude` for the app's ephemeral facts; `src/programs/subscriptions.ts` is one `sync.follow()` over the route: `filtersForRoute` maps the current URL to `{ scope: "" }` for projects plus `{ scope: "project:<id>" }` for the project on screen, and core swaps shapes with overlap so the screen never empties on a switch. Everything else is facts:
 
 - `createIssue` and `addComment` write inside `scoped(projectScope(id), …)`, so a new entity lands in its project's partition; later `replace`/`forget` calls inherit the scope from the entity.
 - `src/programs/queries.ts` derives each view in memory with `whenever`: filter, sort and search over the project's issue facts, then emit a window of `["query", name, "row", index, id]` facts (100 rows for the list, moved by `["ui", "list", "scrollTop"]`; 50 per board column; the issue and its comments on a detail page). Components render from those with `when()`.
-- The write server is `parseFactChanges` + `applyFactChanges` from `@jam/core/server` over a `postgres` client, one transaction per batch.
+- The sync server (`server.ts`) is `shapeProxy` + `parseFactChanges`/`applyFactChanges` from `@jam/core/server` over a `postgres` client, with one policy for both directions: only the global scope and `project:*` scopes may be read or written. A request for every partition, a shape over an `admin` scope, or a change that would move a fact into one gets a 403; malformed changes get a 400. A real deployment would decide `allow` from the session instead of a prefix.
 
 ### Fact schema
 
@@ -59,12 +59,12 @@ Routes carry the project: `/:projectId`, `/:projectId/board`, `/:projectId/searc
 ### Source map
 
 - `src/pglite-worker.ts` — PGlite in a worker (leader-elected across tabs); creates `jam_facts` and seeds it in standalone mode.
-- `src/sync.ts` — the one `sync()` call; `src/programs/subscriptions.ts` — which scopes are loaded.
+- `src/sync.ts` — the one `sync()` call; `src/programs/subscriptions.ts` — `filtersForRoute` and the `follow()` that keeps the loaded scopes in step with the route.
 - `src/programs/` — router, in-memory queries, UI state, recent issues.
 - `src/components/` — the UI. Every component returns exactly one root element.
 - `src/mutations.ts` — `createProject`, `createIssue`, `updateIssue`, `deleteIssue`, `moveIssue` (fractional indexing for the board), `addComment`.
 - `src/seed.ts` — deterministic seed as `(key, scope)` rows, shared by the standalone worker and `db/load-data.ts`.
-- `db/migrate.ts` (runs `JAM_FACTS_SQL`), `db/load-data.ts`, `server.ts` — write server, `backend/containers.ts` — docker/podman lifecycle.
+- `db/migrate.ts` (runs `JAM_FACTS_SQL`), `db/load-data.ts`, `server.ts` — sync server (shape proxy + write endpoint), `backend/containers.ts` — docker/podman lifecycle.
 
 ## Gotchas worth knowing
 
@@ -76,9 +76,9 @@ Routes carry the project: `/:projectId`, `/:projectId/board`, `/:projectId/searc
 ## Tests
 
 ```bash
-corepack pnpm test               # query program, mutations and subscription switching against an in-memory FactDB
+corepack pnpm test               # query program, mutations and route→filter mapping against an in-memory FactDB
 corepack pnpm test:e2e           # Playwright against the standalone app with ?seed=100
-corepack pnpm test:e2e:electric  # Playwright against the running backend (pnpm backend:up && pnpm write-server first)
+corepack pnpm test:e2e:electric  # Playwright against the running backend (pnpm backend:up && pnpm sync-server first)
 ```
 
-The Electric suite resets Postgres to the seed and then checks that the page holds exactly the facts Postgres has for the subscribed scope: initial load, local edits reaching `jam_facts`, rows inserted straight into Postgres appearing in the UI, project switches swapping the scope, and two browsers converging. CI runs it with the same containers script (`backend/containers.ts`) that runs locally under podman.
+The Electric suite resets Postgres to the seed and then checks that the page holds exactly the facts Postgres has for the subscribed scope: initial load, local edits reaching `jam_facts`, rows inserted straight into Postgres appearing in the UI, project switches swapping the scope, two browsers converging, and the sync server refusing shapes and writes outside the project partitions. CI runs it with the same containers script (`backend/containers.ts`) that runs locally under podman.

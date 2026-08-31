@@ -63,16 +63,16 @@ jobs:
         run: corepack pnpm backend:up
         env:
           ISSUES_TO_LOAD: "100"
-      - name: Start the write server
+      - name: Start the sync server
         run: |
-          corepack pnpm write-server > write-server.log 2>&1 &
+          corepack pnpm sync-server > sync-server.log 2>&1 &
           for _ in $(seq 1 30); do curl -sf http://localhost:3001 > /dev/null && exit 0; sleep 1; done
-          cat write-server.log; exit 1
+          cat sync-server.log; exit 1
       - run: corepack pnpm test:e2e:electric
       - name: Backend logs
         if: failure()
         run: |
-          cat write-server.log
+          cat sync-server.log
           corepack pnpm backend:logs electric
           corepack pnpm backend:logs postgres
       - uses: actions/upload-artifact@v4

@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import { $, _, db, mount, persist } from "@jam/core";
 import { App } from "./components/App";
-import { ELECTRIC_URL, WRITE_SERVER_URL, openLinearliteDatabase, seedCountFromLocation } from "./pglite";
+import { SYNC_URL, openLinearliteDatabase, seedCountFromLocation } from "./pglite";
 import { startQueries } from "./programs/queries";
 import { startRecent } from "./programs/recent";
 import { startRouter } from "./programs/router";
@@ -12,7 +12,7 @@ import "./styles.css";
 
 async function start() {
   const pg = await openLinearliteDatabase({ seed: seedCountFromLocation(location) });
-  const sync = await startSync(pg, { electricUrl: ELECTRIC_URL, writeServerUrl: WRITE_SERVER_URL });
+  const sync = await startSync(pg, SYNC_URL);
   const persistence = await persist({ pg, include: (fact) => fact[0] === "recent" });
 
   startRouter();
