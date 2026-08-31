@@ -632,8 +632,10 @@ test.describe("Sandbox-agent server integration", () => {
     await expect(page.getByTestId("terminal-tabs")).toContainText("connected");
 
     const terminal = page.getByTestId("terminal-output");
-    await expect(terminal).toContainText(/\$/);
     await terminal.click();
+    // The shell may print its first prompt before the socket attaches; ask for a fresh one.
+    await page.keyboard.press("Enter");
+    await expect(terminal).toContainText(/\$/);
     await page.keyboard.type("pwd");
     await page.keyboard.press("Enter");
 
