@@ -316,6 +316,8 @@ await server.apply([{ op: "upsert", terms: ["project", "p1", "name", "Web"], sco
 
 The handle publishes its state as facts: `["sync", "status", "standalone" | "connecting" | "syncing" | "live" | "offline"]`, `["sync", "pending", n]` unpushed changes, `["sync", "shape", id, "ready", bool]` per subscription (`compileFilter(filter).id`), and `["sync", "error", message]` when the server rejects a batch. `handle.flush()` waits for every queued write to be acknowledged; `handle.dispose()` stops.
 
+Browser tabs that share a `name` share one connection. The tabs elect a leader through a Web Lock; it holds the WebSocket, subscribes to the union of every tab's filters, mirrors what the server sends into IndexedDB and pushes the shared outbox, broadcasting what it applied over a `BroadcastChannel` so the other tabs stay current. Any tab's write lands in the shared outbox and shows up in every tab at once, connected or not. When the leader tab closes, the lock passes to another tab, which reconnects and resumes from the seqs recorded in storage; `handle.leading` says whether this tab holds the connection. Pass `tabs: soloTabs()` to opt a tab out of the coordination, or your own `TabCoordinator` to replace it.
+
 ### Persisting facts locally
 
 `persist()` mirrors facts into its own storage and restores them on the next load — for facts that should survive a reload but never leave the device. Only durable facts are stored; `replace()` is a delete plus an insert.

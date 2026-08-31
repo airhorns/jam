@@ -88,7 +88,8 @@ All application state — including the VDOM — lives in a shared **fact databa
   - `jsx.ts` — Custom JSX factory (`h`/`Fragment`) with deterministic entity ID generation; `expandRoot` runs the component tree (with `createContext`/`useContext`, `useComponentId`, `Portal`) and `emitExpanded` writes the result as facts
   - `renderer.ts` — Two-phase rendering: expand the tree in a tracked reaction, emit VDOM claims into the fact DB, then patch the real DOM
   - `select.ts` — CSS selector queries over VDOM facts
-  - `sync.ts` — `sync()`: every durable fact is mirrored into a `FactStorage` with its `scope`; subscriptions by scope/pattern decide which facts are in memory, local-only or streamed from a sync server over WebSockets with the storage log as the outbox
+  - `sync.ts` — `sync()`: every durable fact is mirrored into a `FactStorage` with its `scope`; subscriptions by scope/pattern decide which facts are in memory, local-only or streamed from a sync server over WebSockets with the storage log as the outbox; browser tabs sharing a storage elect one leader that holds the connection
+  - `tabs.ts` — `TabCoordinator`: BroadcastChannel + Web Locks between the tabs of one origin (`browserTabs`), or none (`soloTabs`)
   - `filter.ts` — `FactFilter` compilation and the wire protocol types shared by client and server
   - `server.ts` (`@jam/core/server`) — `createSyncServer`: the Node side, an engine over any `FactStorage` (`sqliteStorage`, `memoryStorage`) with per-connection filters, snapshot/replay, `allow` authorization
   - `persist.ts` — mirrors device-local facts into their own storage and restores them on load

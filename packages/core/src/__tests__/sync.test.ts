@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { memoryStorage, type FactStorage } from "@jam/engine/storage";
-import { db, _ } from "../db";
+import { db, FactDB, _ } from "../db";
 import { claim, forget, remember, replace, scoped, whenever, $ } from "../primitives";
 import { sync, compileFilter, type SyncHandle, type SyncWebSocket } from "../sync";
-import { createSyncServer, type ServerMessage, type SyncServer } from "../server";
+import { createSyncServer, type ClientMessage, type ServerMessage, type SyncServer } from "../server";
 import { fakeNetwork, type FakeNetwork } from "./helpers/fake-socket";
+import { fakeTabs } from "./helpers/fake-tabs";
 
 let storage: FactStorage;
 let handles: SyncHandle[];
@@ -349,5 +350,211 @@ describe("sync (server)", () => {
     await server.apply([{ op: "upsert", terms: ["issue", 2, "title", "B"], scope: "p1" }]);
     await settle();
     expect(facts("issue")).toHaveLength(0);
+  });
+});
+
+describe("sync (tabs)", () => {
+  let server: SyncServer;
+  let net: FakeNetwork;
+  let hub: ReturnType<typeof fakeTabs>;
+  let pushes: ClientMessage[];
+
+  interface Tab {
+    s: SyncHandle;
+    db: FactDB;
+    facts(first: string): unknown[][];
+    status(kind: string): unknown;
+  }
+
+  beforeEach(async () => {
+    server = await createSyncServer({ storage: memoryStorage() });
+    pushes = [];
+    net = fakeNetwork((socket) => {
+      socket.on("message", (data) => {
+        const message = JSON.parse(String(data)) as ClientMessage;
+        if (message.type === "push") pushes.push(message);
+      });
+      server.handle(socket);
+    });
+    hub = fakeTabs();
+  });
+
+  /** A tab with its own FactDB sharing the test's storage; `url` is omitted for a standalone tab. */
+  async function openTab(url: string | null = "ws://test"): Promise<Tab> {
+    const tabDb = new FactDB();
+    const s = await sync({ url: url ?? undefined, storage, socket: net.connect, retryDelay: 5, tabs: hub.join(), db: tabDb });
+    handles.push(s);
+    return {
+      s,
+      db: tabDb,
+      facts: (first) =>
+        Array.from(tabDb.facts.values())
+          .filter((f) => f[0] === first)
+          .sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1)),
+      status: (kind) => Array.from(tabDb.facts.values()).find((f) => f[0] === "sync" && f[1] === kind)?.[2],
+    };
+  }
+
+  /** Let every tab message, network message, storage write and reconnect timer run. */
+  async function settle() {
+    for (let i = 0; i < 4; i++) {
+      await hub.idle();
+      await net.idle();
+      await sleep(10);
+    }
+    await hub.idle();
+    await net.idle();
+  }
+
+  it("elects one leader that holds the only connection and subscribes on behalf of the others", async () => {
+    await server.apply([
+      { op: "upsert", terms: ["issue", 1, "title", "A"], scope: "p1" },
+      { op: "upsert", terms: ["issue", 2, "title", "B"], scope: "p2" },
+    ]);
+    const a = await openTab();
+    const b = await openTab();
+    await settle();
+    expect(a.s.leading).toBe(true);
+    expect(b.s.leading).toBe(false);
+    expect(net.sockets).toHaveLength(1);
+    expect(b.status("status")).toBe("live");
+
+    const sub = b.s.subscribe({ scope: "p1" });
+    await sub.ready;
+    expect(b.facts("issue")).toEqual([["issue", 1, "title", "A"]]);
+    expect(b.db.scopeOf("issue", 1, "title", "A")).toBe("p1");
+    expect(a.facts("issue")).toEqual([]);
+    expect(server.connections).toBe(1);
+
+    await server.apply([{ op: "upsert", terms: ["issue", 1, "done", true], scope: "p1" }]);
+    await settle();
+    expect(b.facts("issue")).toEqual([
+      ["issue", 1, "done", true],
+      ["issue", 1, "title", "A"],
+    ]);
+    expect(a.facts("issue")).toEqual([]);
+    expect(await stored()).toHaveLength(2);
+
+    const own = a.s.subscribe({ scope: "p1" });
+    await own.ready;
+    expect(a.facts("issue")).toEqual(b.facts("issue"));
+    expect(a.status("status")).toBe("live");
+
+    await sub.dispose();
+    expect(b.facts("issue")).toEqual([]);
+    await server.apply([{ op: "upsert", terms: ["issue", 3, "title", "C"], scope: "p1" }]);
+    await settle();
+    expect(a.facts("issue")).toHaveLength(3);
+    await own.dispose();
+    await server.apply([{ op: "upsert", terms: ["issue", 4, "title", "D"], scope: "p1" }]);
+    await settle();
+    expect((await stored()).map((f) => f.terms[1])).not.toContain(4);
+  });
+
+  it("shows a follower's write in every tab and pushes it once through the leader", async () => {
+    const a = await openTab();
+    const b = await openTab();
+    await Promise.all([a.s.subscribe().ready, b.s.subscribe().ready]);
+    expect(b.s.leading).toBe(false);
+
+    b.db.insert("todo", 1, "title", "A");
+    expect(b.status("pending")).toBe(1);
+    await settle();
+    expect(a.facts("todo")).toEqual([["todo", 1, "title", "A"]]);
+    expect(server.facts()).toEqual([{ terms: ["todo", 1, "title", "A"], scope: "" }]);
+    expect(pushes).toHaveLength(1);
+    expect(a.status("pending")).toBe(0);
+    expect(b.status("pending")).toBe(0);
+    expect(await storage.readLog(0)).toEqual([]);
+
+    a.db.insert("todo", 2, "title", "B");
+    await a.s.flush();
+    await settle();
+    expect(b.facts("todo")).toEqual([
+      ["todo", 1, "title", "A"],
+      ["todo", 2, "title", "B"],
+    ]);
+    expect(pushes).toHaveLength(2);
+
+    b.db.drop("todo", 1, "title", "A");
+    await b.s.flush();
+    expect(server.facts().map((f) => f.terms)).toEqual([["todo", 2, "title", "B"]]);
+    await settle();
+    expect(a.facts("todo")).toEqual([["todo", 2, "title", "B"]]);
+  });
+
+  it("hands the connection to another tab when the leader closes", async () => {
+    await server.apply([{ op: "upsert", terms: ["n", 1], scope: "" }]);
+    const a = await openTab();
+    const b = await openTab();
+    await b.s.subscribe().ready;
+    expect(b.facts("n")).toEqual([["n", 1]]);
+
+    await a.s.dispose();
+    handles.splice(handles.indexOf(a.s), 1);
+    b.db.insert("n", 2);
+    await settle();
+    expect(b.s.leading).toBe(true);
+    expect(b.status("status")).toBe("live");
+    expect(net.sockets).toHaveLength(2);
+    expect(server.connections).toBe(1);
+    expect(server.facts().map((f) => f.terms)).toEqual([["n", 1], ["n", 2]]);
+    expect(b.status("pending")).toBe(0);
+
+    await server.apply([{ op: "upsert", terms: ["n", 3], scope: "" }]);
+    await settle();
+    expect(b.facts("n")).toEqual([["n", 1], ["n", 2], ["n", 3]]);
+
+    const c = await openTab();
+    await c.s.subscribe().ready;
+    expect(c.s.leading).toBe(false);
+    expect(c.facts("n")).toEqual(b.facts("n"));
+  });
+
+  it("reports the leader's connection state to followers and keeps their offline writes for the reconnect", async () => {
+    const a = await openTab();
+    const b = await openTab();
+    await Promise.all([a.s.subscribe().ready, b.s.subscribe().ready]);
+
+    net.sockets[0].drop();
+    await hub.idle();
+    expect(a.status("status")).toBe("offline");
+    expect(b.status("status")).toBe("offline");
+    expect(b.s.connected).toBe(false);
+
+    b.db.insert("n", 1);
+    a.db.insert("n", 2);
+    await settle();
+    expect(a.status("status")).toBe("live");
+    expect(b.status("status")).toBe("live");
+    expect(server.facts().map((f) => f.terms)).toEqual([["n", 1], ["n", 2]]);
+    expect(a.facts("n")).toEqual([["n", 1], ["n", 2]]);
+    expect(b.facts("n")).toEqual([["n", 1], ["n", 2]]);
+    expect(pushes.length).toBeLessThanOrEqual(2);
+  });
+
+  it("shares standalone writes between tabs without any connection", async () => {
+    const a = await openTab(null);
+    const b = await openTab(null);
+    await Promise.all([a.s.subscribe({ scope: "p1" }).ready, b.s.subscribe({ scope: "p1" }).ready]);
+    expect(a.status("status")).toBe("standalone");
+    expect(a.s.leading).toBe(false);
+
+    a.db.withScope("p1", () => a.db.insert("issue", 1, "title", "A"));
+    b.db.withScope("p2", () => b.db.insert("issue", 2, "title", "B"));
+    await settle();
+    expect(b.facts("issue")).toEqual([
+      ["issue", 1, "title", "A"],
+      ["issue", 2, "title", "B"],
+    ]);
+    expect(b.db.scopeOf("issue", 1, "title", "A")).toBe("p1");
+    expect(a.facts("issue")).toEqual([["issue", 1, "title", "A"]]);
+    expect(await stored()).toHaveLength(2);
+    expect(net.sockets).toHaveLength(0);
+
+    a.db.drop("issue", 1, "title", "A");
+    await settle();
+    expect(b.facts("issue")).toEqual([["issue", 2, "title", "B"]]);
+    expect(await stored()).toEqual([{ terms: ["issue", 2, "title", "B"], scope: "p2" }]);
   });
 });

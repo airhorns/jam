@@ -16,8 +16,20 @@ export type { Driver } from "./drive";
 export { nodeFor } from "./mounts";
 export { persist, defaultExclude } from "./persist";
 export type { PersistOptions, PersistHandle } from "./persist";
-export { sync, compileFilter, SYNC_STATUS_FACT } from "./sync";
-export type { SyncOptions, SyncHandle, SyncStatus, SyncWebSocket, FactFilter, FactSubscription, CompiledFilter, SyncChange, SyncOp } from "./sync";
+export { sync, compileFilter, SYNC_STATUS_FACT, browserTabs, soloTabs } from "./sync";
+export type {
+  SyncOptions,
+  SyncHandle,
+  SyncStatus,
+  SyncWebSocket,
+  FactFilter,
+  FactSubscription,
+  CompiledFilter,
+  SyncChange,
+  SyncOp,
+  TabCoordinator,
+  Lead,
+} from "./sync";
 export { applyFacts, isApplying } from "./applying";
 export { memoryStorage } from "@jam/engine/storage";
 export type { FactStorage, StoredFact, LogEntry, StorageWrite } from "@jam/engine/storage";

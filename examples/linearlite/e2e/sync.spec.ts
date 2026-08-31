@@ -172,4 +172,32 @@ test.describe("LinearLite on the sync server", () => {
     await expectMirrored(a, scopeOf(WEB));
     await Promise.all([a.context().close(), b.context().close()]);
   });
+
+  test("tabs of one browser share a single connection and hand it over when the leader closes", async ({ browser }) => {
+    const context = await browser.newContext();
+    const a = await context.newPage();
+    await open(a);
+    const b = await context.newPage();
+    await open(b);
+    expect(server.connections).toBe(1);
+    const leading = (page: Page) => page.evaluate(() => (window as unknown as { __sync: { leading: boolean } }).__sync.leading);
+    expect([await leading(a), await leading(b)]).toEqual([true, false]);
+
+    const id = await b.locator(".issue-row").first().getAttribute("data-issue-id");
+    await b.locator(".issue-row-title").first().click();
+    await b.locator(".issue-title").fill("Edited in the follower tab");
+    await expect(a.locator(`.issue-row[data-issue-id='${id}'] .issue-row-title`)).toHaveText("Edited in the follower tab", { timeout: 15000 });
+    await expect.poll(() => hasFact(["issue", id, "title", "Edited in the follower tab"])).toBe(true);
+    expect(server.connections).toBe(1);
+
+    await a.close();
+    await expect.poll(() => leading(b), { timeout: 15000 }).toBe(true);
+    await expect(b.locator(".sync-badge")).toHaveText("Synced", { timeout: 20000 });
+    expect(server.connections).toBe(1);
+    await insertIssue(WEB, "00000000-0000-4000-8000-00000000e3ec", "Arrived after the handover");
+    await b.goBack();
+    await expect(b.locator(".issue-row-title").first()).toHaveText("Arrived after the handover", { timeout: 15000 });
+    await expectMirrored(b, scopeOf(WEB));
+    await context.close();
+  });
 });

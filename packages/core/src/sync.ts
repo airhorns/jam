@@ -14,18 +14,39 @@
 // for it are ignored so the server's echo can never flicker a local write.
 // Without `url` there is no network and subscribe() only chooses which stored
 // facts are loaded into memory.
+//
+// Browser tabs sharing one database elect a leader through a Web Lock. The
+// leader holds the only WebSocket, subscribes to the union of every tab's
+// filters, mirrors server changes into storage and pushes the shared outbox;
+// it broadcasts what it applied so the other tabs keep their memory current.
+// Any tab writes its own local changes to the outbox and announces them, so
+// every tab shows a write at once and the leader ships it. When the leader
+// closes, the lock passes to another tab, which reconnects and resumes from
+// the seqs recorded in storage.
 
 import { factKey, type Fact } from "@jam/engine";
 import { memoryStorage, type FactStorage, type LogEntry, type StoredFact } from "@jam/engine/storage";
 import { indexedDBStorage } from "@jam/engine/storage/indexeddb";
 import { applyFacts, isApplying } from "./applying";
-import { db, _ } from "./db";
-import { compileFilter, serializeFilter, type ClientMessage, type CompiledFilter, type FactFilter, type ServerMessage, type SyncChange } from "./filter";
+import { db as defaultDb, _, type FactDB } from "./db";
+import {
+  compileFilter,
+  parseFilter,
+  serializeFilter,
+  type ClientMessage,
+  type CompiledFilter,
+  type FactFilter,
+  type ServerMessage,
+  type SyncChange,
+} from "./filter";
 import { defaultExclude } from "./persist";
 import { transaction } from "./reactive";
+import { defaultTabs, type Lead, type TabCoordinator } from "./tabs";
 
 export type { FactFilter, CompiledFilter, SyncChange, SyncOp } from "./filter";
 export { compileFilter } from "./filter";
+export type { TabCoordinator, Lead } from "./tabs";
+export { browserTabs, soloTabs } from "./tabs";
 
 /** The subset of the browser WebSocket API the client uses. */
 export interface SyncWebSocket {
@@ -52,6 +73,10 @@ export interface SyncOptions {
   retryDelay?: number;
   /** WebSocket constructor; defaults to the global `WebSocket`. */
   socket?: (url: string) => SyncWebSocket;
+  /** Coordination with the other tabs sharing `name`; defaults to BroadcastChannel + Web Locks in browsers and to none elsewhere. */
+  tabs?: TabCoordinator;
+  /** @internal The database to mirror into; tests stand up several tabs in one process with it. */
+  db?: FactDB;
 }
 
 export interface FactSubscription {
@@ -69,6 +94,8 @@ export interface SyncHandle {
   flush(): Promise<void>;
   dispose(): Promise<void>;
   readonly connected: boolean;
+  /** Whether this tab holds the server connection on behalf of the tabs sharing its storage. */
+  readonly leading: boolean;
 }
 
 export const SYNC_STATUS_FACT = "sync";
@@ -77,6 +104,7 @@ export type SyncStatus = "standalone" | "offline" | "connecting" | "syncing" | "
 
 const MAX_RETRY_DELAY = 60_000;
 
+/** A filter this tab holds. */
 interface Subscription {
   compiled: CompiledFilter;
   refs: number;
@@ -88,30 +116,71 @@ interface Subscription {
   synced: boolean;
 }
 
+/** A filter some tab holds, as tracked by the leader. */
+interface RemoteSubscription {
+  compiled: CompiledFilter;
+  tabs: Set<string>;
+  synced: boolean;
+}
+
 interface PendingWrite {
   upserts: Map<string, StoredFact>;
   deletes: Map<string, Fact>;
   log: LogEntry[];
   meta: Record<string, string | undefined>;
+  /** Local changes to announce to the other tabs once they are stored. */
+  announce: LogEntry[];
 }
+
+type TabMessage =
+  | { t: "hello"; tab: string }
+  | { t: "lead"; tab: string }
+  | { t: "want"; tab: string; id: string; filter: string }
+  | { t: "drop"; tab: string; id: string }
+  | { t: "bye"; tab: string }
+  | { t: "conn"; open: boolean; lost: boolean }
+  | { t: "state"; changes: SyncChange[] }
+  | { t: "ready"; id: string }
+  | { t: "error"; message: string | null }
+  | { t: "local"; entries: LogEntry[] }
+  | { t: "acked"; upTo: number };
 
 async function defaultStorage(name: string): Promise<FactStorage> {
   return typeof indexedDB === "undefined" ? memoryStorage() : indexedDBStorage(name);
 }
 
+function tabId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+}
+
 export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
-  const { url, exclude = defaultExclude, include, name = "jam" } = options;
+  const { url, exclude = defaultExclude, include, name = "jam", db = defaultDb } = options;
   const retryDelay = options.retryDelay ?? 1000;
   const shouldSync = include ? include : (fact: Fact) => !exclude(fact);
   const ownsStorage = !options.storage;
-  const storage = options.storage ?? (await defaultStorage(name));
   const makeSocket = options.socket ?? ((target: string) => new WebSocket(target) as unknown as SyncWebSocket);
+  const tabs = options.tabs ?? defaultTabs(name);
+  const me = tabId();
+
+  // Messages that arrive while the mirror is still loading are handled once it has.
+  let started = false;
+  let closed = false;
+  const early: unknown[] = [];
+  tabs.onMessage((message) => {
+    if (started) handleTab(message as TabMessage);
+    else early.push(message);
+  });
+  const post = (message: TabMessage) => {
+    if (!closed) tabs.post(message);
+  };
+
+  const storage = options.storage ?? (await defaultStorage(name));
 
   // --- local state ---
   const mirror = new Map<string, StoredFact>();
   for (const fact of await storage.load()) mirror.set(factKey(fact.terms), fact);
   // Entries carry `seq: 0` until the storage write that assigns their seq settles.
-  const outbox: LogEntry[] = url ? await storage.readLog(0) : [];
+  let outbox: LogEntry[] = url ? await storage.readLog(0) : [];
   const pendingKeys = new Map<string, number>();
   const holdKey = (key: string) => pendingKeys.set(key, (pendingKeys.get(key) ?? 0) + 1);
   const releaseKey = (key: string) => {
@@ -128,13 +197,18 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     }
     return false;
   };
+  const remote = new Map<string, RemoteSubscription>();
+  const matchesRemote = (terms: Fact, scope: string): boolean => {
+    for (const sub of remote.values()) if (sub.compiled.matches(terms, scope)) return true;
+    return false;
+  };
 
   // --- storage writes, batched per tick ---
   let pendingWrite: PendingWrite | null = null;
   let writing: Promise<void> = Promise.resolve();
   const write = (fn: (w: PendingWrite) => void) => {
     if (!pendingWrite) {
-      pendingWrite = { upserts: new Map(), deletes: new Map(), log: [], meta: {} };
+      pendingWrite = { upserts: new Map(), deletes: new Map(), log: [], meta: {}, announce: [] };
       queueMicrotask(flushWrites);
     }
     fn(pendingWrite);
@@ -152,6 +226,10 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
           meta: batch.meta,
         });
         batch.log.forEach((entry, i) => (entry.seq = seqs[i]));
+        if (batch.announce.length > 0) {
+          post({ t: "local", entries: batch.announce });
+          pushNow();
+        }
       })
       .catch((e) => console.error("[jam] sync storage write failed", e));
   };
@@ -160,18 +238,21 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     await writing;
   };
 
-  const remember = (terms: Fact, scope: string) => {
+  /** Record a fact in the mirror; `persist` when this tab is the one writing it to storage. */
+  const remember = (terms: Fact, scope: string, persist: boolean) => {
     const key = factKey(terms);
     const fact = { terms, scope };
     mirror.set(key, fact);
+    if (!persist) return;
     write((w) => {
       w.deletes.delete(key);
       w.upserts.set(key, fact);
     });
   };
-  const forget = (terms: Fact) => {
+  const forget = (terms: Fact, persist: boolean) => {
     const key = factKey(terms);
     mirror.delete(key);
+    if (!persist) return;
     write((w) => {
       w.upserts.delete(key);
       w.deletes.set(key, terms);
@@ -187,9 +268,12 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     });
   };
   let status: SyncStatus = url ? "connecting" : "standalone";
+  let connected = false;
+  /** The connection was lost, or never made it, since the last time it was open. */
+  let lost = false;
   const updateStatus = () => {
     if (url) {
-      if (!socketOpen) status = disposed ? "offline" : reconnecting ? "offline" : "connecting";
+      if (!connected) status = disposed || lost ? "offline" : "connecting";
       else status = Array.from(subscriptions.values()).every((s) => s.synced) ? "live" : "syncing";
     }
     setStatusFact(SYNC_STATUS_FACT, "status", status);
@@ -201,38 +285,81 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
       if (message !== null) db.withOwnerScope(owner, () => db.assert(SYNC_STATUS_FACT, "error", message));
     });
   };
+  const disconnected = (wasLost: boolean) => {
+    connected = false;
+    lost = wasLost;
+    for (const sub of subscriptions.values()) sub.synced = false;
+    updateStatus();
+  };
+  const postConn = () => post({ t: "conn", open: connected, lost });
 
-  // --- applying server state ---
-  const applyChange = (change: SyncChange) => {
-    const key = factKey(change.terms);
-    if (pendingKeys.has(key) || !matchesActive(change.terms, change.scope)) return;
-    if (change.op === "delete") {
-      db.drop(...change.terms);
-      forget(change.terms);
-      return;
-    }
-    db.withScope(change.scope, () => db.insert(...change.terms));
-    if (db.scopeOf(...change.terms) !== change.scope) db.setScope(change.terms, change.scope);
-    remember(change.terms, change.scope);
+  // --- applying changes ---
+  /** Load a fact into memory when a subscription of this tab covers it. */
+  const load = (terms: Fact, scope: string) => {
+    if (!matchesActive(terms, scope)) return;
+    db.withScope(scope, () => db.insert(...terms));
+    if (db.scopeOf(...terms) !== scope) db.setScope(terms, scope);
+  };
+  const unload = (terms: Fact, scope: string) => {
+    if (matchesActive(terms, scope)) db.drop(...terms);
   };
 
+  const applyChange = (change: SyncChange) => {
+    const key = factKey(change.terms);
+    if (pendingKeys.has(key)) return;
+    if (leading && !matchesRemote(change.terms, change.scope)) return;
+    if (change.op === "delete") {
+      unload(change.terms, change.scope);
+      forget(change.terms, leading && mirror.has(key));
+      return;
+    }
+    load(change.terms, change.scope);
+    const known = mirror.get(key);
+    remember(change.terms, change.scope, leading && known?.scope !== change.scope);
+  };
+
+  /** Apply what the server (or, on a follower, the leader) reports; the leader passes it on to the other tabs. */
   const applyChanges = (changes: SyncChange[]) => {
     if (changes.length === 0) return;
     applyFacts(() => {
       for (const change of changes) applyChange(change);
-    });
+    }, db);
+    if (leading) post({ t: "state", changes });
   };
 
-  const applySnapshot = (sub: Subscription, facts: Array<[Fact, string]>) => {
+  /** A snapshot as changes: everything the mirror holds for the filter but the server no longer does goes, the rest comes. */
+  const snapshotChanges = (sub: RemoteSubscription, facts: Array<[Fact, string]>): SyncChange[] => {
     const expected = new Set(facts.map(([terms]) => factKey(terms)));
+    const changes: SyncChange[] = [];
+    for (const [key, fact] of mirror) {
+      if (!expected.has(key) && sub.compiled.matches(fact.terms, fact.scope)) changes.push({ op: "delete", terms: fact.terms, scope: fact.scope });
+    }
+    for (const [terms, scope] of facts) changes.push({ op: "upsert", terms, scope });
+    return changes;
+  };
+
+  /** Local writes another tab stored: show them and hold their keys until the server acknowledges them. */
+  const applyLocal = (entries: LogEntry[]) => {
+    const known = new Set(outbox.map((e) => e.seq));
+    const fresh = entries.filter((e) => e.seq === 0 || !known.has(e.seq));
+    if (fresh.length === 0) return;
     applyFacts(() => {
-      for (const [key, fact] of Array.from(mirror)) {
-        if (expected.has(key) || pendingKeys.has(key) || !sub.compiled.matches(fact.terms, fact.scope)) continue;
-        db.drop(...fact.terms);
-        forget(fact.terms);
+      for (const entry of fresh) {
+        if (entry.op === "delete") {
+          unload(entry.terms, entry.scope);
+          forget(entry.terms, false);
+        } else {
+          load(entry.terms, entry.scope);
+          remember(entry.terms, entry.scope, false);
+        }
+        if (entry.seq > 0) {
+          outbox.push(entry);
+          holdKey(factKey(entry.terms));
+        }
       }
-      for (const [terms, scope] of facts) applyChange({ op: "upsert", terms, scope });
-    });
+    }, db);
+    updatePending();
+    pushNow();
   };
 
   /** Bring a subscription's slice of the local mirror into memory. */
@@ -241,7 +368,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
       for (const fact of mirror.values()) {
         if (sub.compiled.matches(fact.terms, fact.scope)) db.withScope(fact.scope, () => db.insert(...fact.terms));
       }
-    });
+    }, db);
   };
 
   /** Drop facts from memory that no remaining subscription covers; the mirror keeps them. */
@@ -252,35 +379,164 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         if (pendingKeys.has(factKey(fact.terms))) continue;
         db.drop(...fact.terms);
       }
-    });
+    }, db);
   };
 
   /** Remember how far each caught-up subscription has seen, so a later connection can ask for a replay. */
   const recordSeq = (seq: number) => {
     write((w) => {
-      for (const [id, sub] of subscriptions) if (sub.synced) w.meta[`sub:${id}`] = String(seq);
+      for (const [id, sub] of remote) if (sub.synced) w.meta[`sub:${id}`] = String(seq);
     });
   };
 
-  // --- connection ---
-  let socket: SyncWebSocket | null = null;
-  let socketOpen = false;
-  let reconnecting = false;
+  /** Forget acknowledged outbox entries; the leader also trims them from storage and tells the other tabs. */
+  let lastAcked = 0;
+  const retire = (upTo: number) => {
+    const done = outbox.filter((e) => e.seq > 0 && e.seq <= upTo);
+    outbox = outbox.filter((e) => !(e.seq > 0 && e.seq <= upTo));
+    for (const entry of done) releaseKey(factKey(entry.terms));
+    if (leading) {
+      lastAcked = Math.max(lastAcked, upTo);
+      flushWrites();
+      writing = writing.then(() => storage.trimLog(upTo)).catch((e) => console.error("[jam] sync outbox trim failed", e));
+      post({ t: "acked", upTo });
+    }
+    updatePending();
+    if (outbox.length === 0) {
+      for (const resolve of drainWaiters.splice(0)) resolve();
+    }
+  };
+
+  // --- leadership ---
+  let leading = false;
+  let lead: Lead | null = null;
   let disposed = false;
+
+  const markReady = (sub: Subscription) => {
+    sub.synced = true;
+    if (!sub.resolved) {
+      sub.resolved = true;
+      setStatusFact(SYNC_STATUS_FACT, "shape", sub.compiled.id, "ready", true);
+      sub.resolveReady();
+    }
+    updateStatus();
+  };
+
+  const markRemoteReady = (id: string) => {
+    const sub = remote.get(id);
+    if (!sub) return;
+    sub.synced = true;
+    post({ t: "ready", id });
+    const own = subscriptions.get(id);
+    if (own) markReady(own);
+  };
+
+  const want = (tab: string, id: string, compiled: CompiledFilter) => {
+    let sub = remote.get(id);
+    if (!sub) {
+      sub = { compiled, tabs: new Set(), synced: false };
+      remote.set(id, sub);
+      if (connected) void subscribeRemote(id, sub);
+    }
+    sub.tabs.add(tab);
+    if (!sub.synced) return;
+    if (tab !== me) post({ t: "ready", id });
+    else {
+      const own = subscriptions.get(id);
+      if (own) markReady(own);
+    }
+  };
+
+  const drop = (tab: string, id: string) => {
+    const sub = remote.get(id);
+    if (!sub) return;
+    sub.tabs.delete(tab);
+    if (sub.tabs.size > 0) return;
+    remote.delete(id);
+    sendMessage({ type: "unsubscribe", id });
+  };
+
+  const becomeLeader = () => {
+    leading = true;
+    disconnected(false);
+    remote.clear();
+    for (const [id, sub] of subscriptions) want(me, id, sub.compiled);
+    post({ t: "lead", tab: me });
+    connect();
+  };
+
+  const handleTab = (message: TabMessage) => {
+    if (disposed) return;
+    switch (message.t) {
+      case "hello":
+        if (!leading) return;
+        postConn();
+        if (lastAcked > 0) post({ t: "acked", upTo: lastAcked });
+        return;
+      case "lead":
+        if (leading) return;
+        disconnected(false);
+        for (const [id, sub] of subscriptions) {
+          post({ t: "want", tab: me, id, filter: serializeFilter(sub.compiled.filter) });
+        }
+        return;
+      case "want":
+        if (leading) want(message.tab, message.id, compileFilter(parseFilter(JSON.parse(message.filter))));
+        return;
+      case "drop":
+        if (leading) drop(message.tab, message.id);
+        return;
+      case "bye":
+        if (leading) for (const id of Array.from(remote.keys())) drop(message.tab, id);
+        return;
+      case "conn":
+        if (leading) return;
+        if (message.open) {
+          connected = true;
+          lost = false;
+          updateStatus();
+        } else disconnected(message.lost);
+        return;
+      case "state":
+        if (!leading) applyChanges(message.changes);
+        return;
+      case "ready": {
+        const sub = subscriptions.get(message.id);
+        if (sub && !leading) markReady(sub);
+        return;
+      }
+      case "error":
+        if (!leading) setError(message.message);
+        return;
+      case "local":
+        applyLocal(message.entries);
+        return;
+      case "acked":
+        if (!leading) retire(message.upTo);
+        return;
+    }
+  };
+
+  // --- connection (leader only) ---
+  let socket: SyncWebSocket | null = null;
   let attempts = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let inflight: { id: number; entries: LogEntry[] } | null = null;
+  let inflight: { id: number; upTo: number } | null = null;
   let nextPushId = 1;
+  /** The outbox is being read from storage for a push; another push was asked for meanwhile. */
+  let reading = false;
+  let pushAgain = false;
   const drainWaiters: Array<() => void> = [];
 
   const sendMessage = (message: ClientMessage) => {
-    if (!socket || !socketOpen) return;
+    if (!socket || !connected) return;
     socket.send(JSON.stringify(message));
   };
 
-  const subscribeRemote = async (id: string, sub: Subscription) => {
+  const subscribeRemote = async (id: string, sub: RemoteSubscription) => {
+    await settled();
     const since = await storage.getMeta(`sub:${id}`);
-    if (!socketOpen || subscriptions.get(id) !== sub) return;
+    if (!connected || remote.get(id) !== sub) return;
     sendMessage({
       type: "subscribe",
       id,
@@ -289,27 +545,37 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     });
   };
 
+  /** Push everything in the shared outbox, in the order storage assigned. */
   const pushNow = () => {
-    if (!socketOpen || inflight || outbox.length === 0) return;
-    const entries = outbox.slice();
-    inflight = { id: nextPushId++, entries };
-    sendMessage({
-      type: "push",
-      id: inflight.id,
-      changes: entries.map((e) => ({ op: e.op, terms: e.terms, scope: e.scope })),
-    });
-  };
-
-  const retire = (entries: LogEntry[]) => {
-    outbox.splice(0, entries.length);
-    for (const entry of entries) releaseKey(factKey(entry.terms));
-    const last = entries[entries.length - 1];
-    flushWrites();
-    writing = writing.then(() => storage.trimLog(last.seq)).catch((e) => console.error("[jam] sync outbox trim failed", e));
-    updatePending();
-    if (outbox.length === 0) {
-      for (const resolve of drainWaiters.splice(0)) resolve();
+    if (!leading || !connected || inflight) return;
+    if (reading) {
+      pushAgain = true;
+      return;
     }
+    reading = true;
+    flushWrites();
+    writing
+      .then(() => storage.readLog(0))
+      .then((entries) => {
+        reading = false;
+        const again = pushAgain;
+        pushAgain = false;
+        if (!connected || inflight) return;
+        if (entries.length === 0) {
+          if (again) pushNow();
+          return;
+        }
+        inflight = { id: nextPushId++, upTo: entries[entries.length - 1].seq };
+        sendMessage({
+          type: "push",
+          id: inflight.id,
+          changes: entries.map((e) => ({ op: e.op, terms: e.terms, scope: e.scope })),
+        });
+      })
+      .catch((e) => {
+        reading = false;
+        console.error("[jam] sync outbox read failed", e);
+      });
   };
 
   const handleMessage = (message: ServerMessage) => {
@@ -317,18 +583,17 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
       case "hello":
         return;
       case "snapshot": {
-        const sub = subscriptions.get(message.id);
+        const sub = remote.get(message.id);
         if (!sub) return;
-        applySnapshot(sub, message.facts);
-        markReady(sub);
+        applyChanges(snapshotChanges(sub, message.facts));
+        markRemoteReady(message.id);
         recordSeq(message.seq);
         return;
       }
       case "replay": {
-        const sub = subscriptions.get(message.id);
-        if (!sub) return;
+        if (!remote.has(message.id)) return;
         applyChanges(message.changes);
-        markReady(sub);
+        markRemoteReady(message.id);
         recordSeq(message.seq);
         return;
       }
@@ -342,28 +607,20 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         const done = inflight;
         inflight = null;
         if (message.type === "reject") console.error("[jam] sync push rejected:", message.error);
-        setError(message.type === "reject" ? message.error : null);
-        retire(done.entries);
+        const error = message.type === "reject" ? message.error : null;
+        setError(error);
+        post({ t: "error", message: error });
+        retire(done.upTo);
         pushNow();
         return;
       }
     }
   };
 
-  const markReady = (sub: Subscription) => {
-    sub.synced = true;
-    if (!sub.resolved) {
-      sub.resolved = true;
-      setStatusFact(SYNC_STATUS_FACT, "shape", sub.compiled.id, "ready", true);
-      sub.resolveReady();
-    }
-    updateStatus();
-  };
-
   const scheduleReconnect = () => {
     if (disposed) return;
-    reconnecting = true;
-    updateStatus();
+    disconnected(true);
+    postConn();
     const delay = Math.min(retryDelay * 2 ** attempts, MAX_RETRY_DELAY);
     attempts++;
     reconnectTimer = setTimeout(connect, delay);
@@ -383,11 +640,12 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     socket = ws;
     ws.onopen = () => {
       if (socket !== ws) return;
-      socketOpen = true;
-      reconnecting = false;
+      connected = true;
+      lost = false;
       attempts = 0;
       updateStatus();
-      for (const [id, sub] of subscriptions) void subscribeRemote(id, sub);
+      postConn();
+      for (const [id, sub] of remote) void subscribeRemote(id, sub);
       pushNow();
     };
     ws.onmessage = (event) => {
@@ -402,9 +660,8 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     ws.onclose = () => {
       if (socket !== ws) return;
       socket = null;
-      socketOpen = false;
       inflight = null;
-      for (const sub of subscriptions.values()) sub.synced = false;
+      for (const sub of remote.values()) sub.synced = false;
       scheduleReconnect();
     };
   };
@@ -412,25 +669,47 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   // --- write side ---
   const unobserve = db.observe((type, key, fact, info) => {
     if (isApplying() || !shouldSync(fact)) return;
-    if (type === "add") remember(fact, info.scope);
-    else forget(fact);
-    if (!url) return;
+    if (type === "add") remember(fact, info.scope, true);
+    else forget(fact, true);
     const entry: LogEntry = {
       seq: 0,
       op: type === "delete" ? "delete" : info.replace ? "replace" : "upsert",
       terms: fact,
       scope: info.scope,
     };
+    write((w) => {
+      w.announce.push(entry);
+      if (url) w.log.push(entry);
+    });
+    if (!url) return;
     outbox.push(entry);
     holdKey(key);
-    write((w) => w.log.push(entry));
     updatePending();
-    pushNow();
   });
 
+  // --- start ---
   updateStatus();
   updatePending();
-  connect();
+  started = true;
+  for (const message of early.splice(0)) handleTab(message as TabMessage);
+  post({ t: "hello", tab: me });
+  if (url) {
+    lead = tabs.lead();
+    lead.acquired.then(
+      () => {
+        if (!disposed) becomeLeader();
+      },
+      (e: unknown) => console.error("[jam] sync: could not request the lead", e),
+    );
+  }
+  const onHide = () => post({ t: "bye", tab: me });
+  const onShow = (event: { persisted?: boolean }) => {
+    if (!event.persisted || leading) return;
+    for (const [id, sub] of subscriptions) post({ t: "want", tab: me, id, filter: serializeFilter(sub.compiled.filter) });
+  };
+  const page = typeof window !== "undefined" && typeof window.addEventListener === "function" ? window : null;
+  page?.addEventListener("pagehide", onHide);
+  page?.addEventListener("pageshow", onShow);
 
   // --- handle ---
   const subscribe = (filter: FactFilter = {}): FactSubscription => {
@@ -444,7 +723,8 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
       subscriptions.set(id, sub);
       loadFromMirror(sub);
       if (!url) markReady(sub);
-      else if (socketOpen) void subscribeRemote(id, sub);
+      else if (leading) want(me, id, compiled);
+      else post({ t: "want", tab: me, id, filter: serializeFilter(compiled.filter) });
       updateStatus();
     }
     sub.refs++;
@@ -459,7 +739,8 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         owned.refs--;
         if (owned.refs > 0 || subscriptions.get(id) !== owned) return;
         subscriptions.delete(id);
-        sendMessage({ type: "unsubscribe", id });
+        if (leading) drop(me, id);
+        else post({ t: "drop", tab: me, id });
         unloadOrphans(owned);
         transaction(() => db.drop(SYNC_STATUS_FACT, "shape", id, "ready", _));
         updateStatus();
@@ -470,11 +751,14 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   return {
     subscribe,
     get connected() {
-      return socketOpen;
+      return connected;
+    },
+    get leading() {
+      return leading;
     },
     async flush() {
       await settled();
-      if (!url || !socketOpen || outbox.length === 0) return;
+      if (!url || !connected || outbox.length === 0) return;
       await new Promise<void>((resolve) => {
         drainWaiters.push(resolve);
         pushNow();
@@ -485,11 +769,18 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
       if (disposed) return;
       disposed = true;
       unobserve();
+      page?.removeEventListener("pagehide", onHide);
+      page?.removeEventListener("pageshow", onShow);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       const ws = socket;
       socket = null;
-      socketOpen = false;
+      connected = false;
       ws?.close();
+      if (leading) post({ t: "conn", open: false, lost: false });
+      else post({ t: "bye", tab: me });
+      lead?.release();
+      closed = true;
+      tabs.close();
       for (const resolve of drainWaiters.splice(0)) resolve();
       transaction(() => db.revokeOwner(owner));
       await settled();

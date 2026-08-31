@@ -403,6 +403,19 @@ applied the transaction with that `seq` — the exact fence Electric could not
 give us. Status facts are unchanged: `["sync","status",…]`,
 `["sync","pending",n]`, `["sync","shape",id,"ready",bool]`, `["sync","error",m]`.
 
+Tabs: every browser tab sharing a storage `name` runs its own `sync()` over
+its own engine, but they hold one connection between them. A Web Lock names
+the **leader**, which owns the socket, subscribes to the union of every tab's
+filters (`want`/`drop`/`bye` messages over a `BroadcastChannel`), persists
+server changes into the shared mirror and broadcasts them (`state`), pushes
+the shared outbox in storage order and broadcasts acks (`acked upTo`). Any tab
+writes its own changes to the outbox and, once storage has assigned their
+seqs, announces them (`local`) so every tab shows the write at once and holds
+its keys until the ack. Followers learn the connection state from `conn`; a
+new leader posts `lead`, after which every tab re-sends its `want`s, and
+resumes from the per-subscription seqs recorded in storage. Pushes are
+idempotent per entry, so the handover can at worst repeat a batch.
+
 `@jam/core/server` exports `createSyncServer({ storage, allow })` returning a
 handler for `ws` connections; linearlite's `server.ts` becomes this plus a
 Node `WebSocketServer`. A native Rust server would reuse `filter.rs` and the
