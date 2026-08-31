@@ -140,6 +140,11 @@ InputComponent.displayName = "Input";
 
 /** TextArea: a multi-line Input. `rows` sets the minimum height. */
 function TextAreaComponent(props: InputProps & { rows?: number }): VNode {
+  // A textarea's default value is its text content, not a `value` attribute.
+  if (props.defaultValue !== undefined && props.children === undefined) {
+    const { defaultValue, ...rest } = props;
+    return withChangeText(TextAreaFrame, { ...rest, children: defaultValue });
+  }
   return withChangeText(TextAreaFrame, props);
 }
 TextAreaComponent.displayName = "TextArea";

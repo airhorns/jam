@@ -28,7 +28,8 @@ import { Progress } from "@jam/ui";
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
 | `value` | `number \| null` | — | Progress so far, clamped to `0…max`. Unset (or `null`) is indeterminate. |
-| `max` | `number` | `100` | The value that counts as complete. |
+| `max` | `number` | `100` | The value that counts as complete. Anything that is not a positive number falls back to `100`. |
+| `getValueLabel` | `(value, max) => string` | percentage | Builds `aria-valuetext` for a known value. |
 | `size` | size token or number | `"$true"` | Track height (a quarter of the size token) and a sensible minimum width. |
 | `unstyled` | `boolean` | `false` | Drops the height, radius, clipping and background. |
 
@@ -37,7 +38,8 @@ import { Progress } from "@jam/ui";
 `Progress.Indicator` — the filled bar. `height: 100%` and `width: 200%`,
 positioned by `translateX` so an animating value that overshoots still covers
 the track. It reads `value`/`max` from the `Progress` above it and needs no
-props; every style prop still works if you want a custom fill.
+props; every style prop still works if you want a custom fill. It carries the
+same `data-state`, `data-value` and `data-max` as the track.
 
 `Progress.Frame` — the styled track, for composing your own root.
 
@@ -72,6 +74,8 @@ without either colour being hard-coded. Both read `$background`.
 
 - `role="progressbar"` with `aria-valuemin`, `aria-valuemax`, and — when the
   value is known — `aria-valuenow` and an `aria-valuetext` percentage.
+  `getValueLabel` replaces that percentage with your own wording, such as
+  "3 of 8 files".
 - `data-state` is `"loading"`, `"complete"` or `"indeterminate"`, and
   `data-value` / `data-max` mirror the numbers for styling and tests.
 - An indeterminate bar deliberately omits `aria-valuenow`, which is how screen

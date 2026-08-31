@@ -33,7 +33,7 @@ Sizes, and a field with no chrome of its own:
 | --- | --- | --- | --- |
 | `size` | size token or number | `"$true"` | Height, radius, horizontal padding and font size. |
 | `value` | `string` | — | Set as a DOM property, so a controlled field works. |
-| `defaultValue` | `string` | — | Initial value for an uncontrolled field. |
+| `defaultValue` | `string` | — | Initial value for an uncontrolled field; a `TextArea` renders it as its text content, which is where a textarea's default lives. |
 | `placeholder` | `string` | — | Styled with `$placeholderColor`. |
 | `onChangeText` | `(text: string) => void` | — | Called with the new value on every edit. |
 | `onInput` | `(event: Event) => void` | — | The raw event; fires alongside `onChangeText`. |
