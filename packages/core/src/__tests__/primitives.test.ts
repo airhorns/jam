@@ -11,6 +11,7 @@ import {
   when,
   whenever,
   transaction,
+  type Pattern,
 } from "../primitives";
 
 beforeEach(() => {
@@ -65,6 +66,28 @@ describe("when", () => {
     const result = when(["x", $.val]);
     expect(result).toContainEqual({ val: 1 });
     expect(result).toContainEqual({ val: 2 });
+  });
+
+  it("keeps rows in creation order of their first binding, tracked or not", () => {
+    remember("todo", "a", "title", "A");
+    remember("todo", "a", "done", false);
+    remember("todo", "b", "title", "B");
+    remember("todo", "b", "done", false);
+    const patterns: Pattern[] = [
+      ["todo", $.id, "title", $.title],
+      ["todo", $.id, "done", $.done],
+    ];
+
+    let tracked: string[] = [];
+    const disposer = autorun(() => {
+      tracked = when(...patterns).map((row) => String(row.id));
+    });
+    replace("todo", "a", "done", true);
+    replace("todo", "a", "title", "A2");
+
+    expect(tracked).toEqual(["a", "b"]);
+    expect(when(...patterns).map((row) => row.id)).toEqual(["a", "b"]);
+    disposer();
   });
 
   it("reacts to new facts inside autorun", () => {

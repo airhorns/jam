@@ -124,6 +124,13 @@ class Index implements Dependency, IndexHandle {
   }
 }
 
+function compareRows(a: Uint32Array, b: Uint32Array): number {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
 // --- FactDB ---
 
 export class FactDB {
@@ -142,6 +149,7 @@ export class FactDB {
   private scopeStack: number[] = [NONE];
 
   private readonly indexes = new Map<string, Index>();
+  private readonly unregisterDrainer: () => void;
   private readonly indexesByHandle = new Map<QueryHandle, Set<Index>>();
   private readonly dependencies = new Set<{ handles: QueryHandle[]; dep: Dependency }>();
   private listeners: FactListener[] = [];
@@ -160,7 +168,7 @@ export class FactDB {
         }
       }
     });
-    registerDrainer(() => this.drain());
+    this.unregisterDrainer = registerDrainer(() => this.drain());
   }
 
   // --- owners ---
@@ -299,6 +307,12 @@ export class FactDB {
     this.changed();
   }
 
+  /** Stop participating in flushes and release the engine's WASM memory; the database is unusable afterwards. */
+  dispose(): void {
+    this.unregisterDrainer();
+    this.engine.free();
+  }
+
   private changed(): void {
     this.pendingEvents = true;
     onWrite();
@@ -379,22 +393,23 @@ export class FactDB {
   /** @internal one-off evaluation */
   evaluate(compiled: CompiledPatterns): Bindings[] {
     const { nvars, data, count } = this.engine.query(compiled.clauses);
-    const out = new Array<Bindings>(count);
-    for (let r = 0; r < count; r++) {
-      const row: Bindings = {};
-      for (let v = 0; v < nvars; v++) row[compiled.names[v]] = this.engine.term(data[r * nvars + v]);
-      out[r] = row;
-    }
-    return out;
+    const rows = new Array<Uint32Array>(count);
+    for (let r = 0; r < count; r++) rows[r] = data.subarray(r * nvars, (r + 1) * nvars);
+    return this.decodeRows(rows, compiled.names);
   }
 
-  /** @internal */
+  /**
+   * @internal Rows ordered by the first-seen order of their bound values, first variable most
+   * significant, so a list keyed by entity id keeps creation order when an attribute changes.
+   */
   decodeRows(rows: Iterable<Uint32Array>, names: string[]): Bindings[] {
-    const out: Bindings[] = [];
-    for (const row of rows) {
+    const sorted = Array.from(rows).sort(compareRows);
+    const out = new Array<Bindings>(sorted.length);
+    for (let r = 0; r < sorted.length; r++) {
+      const row = sorted[r];
       const bindings: Bindings = {};
       for (let v = 0; v < names.length; v++) bindings[names[v]] = this.engine.term(row[v]);
-      out.push(bindings);
+      out[r] = bindings;
     }
     return out;
   }

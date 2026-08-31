@@ -14,8 +14,13 @@ import { FactDB, $, _ } from "../db";
 
 // --- Helpers ---
 
+let current: FactDB | undefined;
+
+/** A new database per iteration; the previous one is freed so WASM memory doesn't pile up across samples. */
 function freshDb(): FactDB {
-  return new FactDB();
+  current?.dispose();
+  current = new FactDB();
+  return current;
 }
 
 /** Populate a DB with N todo-style entities (2 facts each: title + done). */

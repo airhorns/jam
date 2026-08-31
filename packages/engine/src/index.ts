@@ -249,6 +249,11 @@ export class Engine {
     return this.opLen > 0;
   }
 
+  /** Release the WASM instance now instead of waiting for garbage collection; the engine is unusable afterwards. */
+  free(): void {
+    this.raw.free();
+  }
+
   /** Apply queued ops without reporting; events accumulate until the next flush. */
   applyPending(): void {
     if (this.opLen === 0) return;
