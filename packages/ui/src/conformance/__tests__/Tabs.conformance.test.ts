@@ -183,6 +183,25 @@ describe("Tabs conformance", () => {
       expect(contentIds).toContain(items[1].getAttribute("aria-controls"));
     });
 
+    it("an inactive forceMount panel is out of the Tab order (Radix hides it outright; tamagui keeps it visible for pagers, which is what we follow)", () => {
+      const r = render(
+        h(
+          Tabs,
+          { defaultValue: "a" } as never,
+          h(Tabs.List, null, h(Tabs.Tab, { value: "a" }, "First"), h(Tabs.Tab, { value: "b" }, "Second")),
+          h(Tabs.Content, { value: "a", forceMount: true }, "Panel A"),
+          h(Tabs.Content, { value: "b", forceMount: true }, "Panel B"),
+        ),
+      );
+      const panels = r.all("[role=tabpanel]");
+      expect(panels[0].tabIndex).toBe(0);
+      expect(panels[1].tabIndex).toBe(-1);
+      expect(panels[1].hasAttribute("hidden")).toBe(false);
+      click(tabList(r)[1]);
+      expect(panels[0].tabIndex).toBe(-1);
+      expect(panels[1].tabIndex).toBe(0);
+    });
+
     it("switching selection flips data-state on both the previously- and newly-selected tab in the same tick", () => {
       const r = tabs({ defaultValue: "a" });
       const items = tabList(r);

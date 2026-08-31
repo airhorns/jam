@@ -158,34 +158,53 @@ const features = [
 ];
 
 function HoverCards() {
+  const [json, setJson] = useDemoState("micro.hover.pinned", "[]");
+  const pinned = JSON.parse(json) as string[];
+  const toggle = (title: string) => setJson(JSON.stringify(pinned.includes(title) ? pinned.filter((t) => t !== title) : [...pinned, title]));
+
   return (
     <XStack gap="$space.4" flexWrap="wrap" width="100%" justifyContent="center">
-      {features.map(({ icon: Icon, title, body }, i) => (
-        <Card
-          key={title}
-          bordered
-          elevate
-          width={200}
-          padding="$space.4"
-          cursor="pointer"
-          animation="bouncy"
-          hoverStyle={{ scale: 1.03, y: -2, borderColor: "$borderColorHover", shadowColor: "$shadow4", shadowRadius: 20, shadowOffset: { width: 0, height: 10 } }}
-          pressStyle={{ scale: 0.98, y: 0 }}
-          tabIndex={0}
-          focusVisibleStyle={{ outlineColor: "$outlineColor", outlineStyle: "solid", outlineWidth: 2, outlineOffset: 2 }}
-          data-testid={i === 0 ? "micro-hover-card" : undefined}
-        >
-          <YStack gap="$space.3">
-            <Circle size={36} backgroundColor="$color4">
-              <Icon size={18} />
-            </Circle>
-            <YStack gap="$space.1">
-              <SizableText size="$5" fontWeight="600">{title}</SizableText>
-              <SizableText size="$2" color="$color10">{body}</SizableText>
+      {features.map(({ icon: Icon, title, body }, i) => {
+        const pressed = pinned.includes(title);
+        return (
+          <Card
+            key={title}
+            bordered
+            elevate
+            width={200}
+            padding="$space.4"
+            cursor="pointer"
+            animation="bouncy"
+            theme={pressed ? "accent" : undefined}
+            backgroundColor={pressed ? "$background" : undefined}
+            hoverStyle={{ scale: 1.03, y: -2, borderColor: "$borderColorHover", shadowColor: "$shadow4", shadowRadius: 20, shadowOffset: { width: 0, height: 10 } }}
+            pressStyle={{ scale: 0.98, y: 0 }}
+            tabIndex={0}
+            role="button"
+            aria-pressed={pressed}
+            aria-label={`Pin ${title}`}
+            focusVisibleStyle={{ outlineColor: "$outlineColor", outlineStyle: "solid", outlineWidth: 2, outlineOffset: 2 }}
+            onClick={() => toggle(title)}
+            onKeyDown={(event: KeyboardEvent) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                toggle(title);
+              }
+            }}
+            data-testid={i === 0 ? "micro-hover-card" : undefined}
+          >
+            <YStack gap="$space.3">
+              <Circle size={36} backgroundColor="$color4">
+                <Icon size={18} />
+              </Circle>
+              <YStack gap="$space.1">
+                <SizableText size="$5" fontWeight="600">{title}</SizableText>
+                <SizableText size="$2" color="$color10">{body}</SizableText>
+              </YStack>
             </YStack>
-          </YStack>
-        </Card>
-      ))}
+          </Card>
+        );
+      })}
     </XStack>
   );
 }
@@ -395,7 +414,7 @@ export const MicrointeractionsExample: ComponentDemos = {
     },
     {
       title: "Hover and press",
-      description: "Cards lift and grow a shadow on hover, and settle to 98% while pressed.",
+      description: "Cards lift and grow a shadow on hover, settle to 98% while pressed, and pin on click or Enter/Space.",
       render: () => <HoverCards />,
       shot: { hover: "micro-hover-card" },
     },

@@ -12,6 +12,7 @@ function useSignIn(): { status: Status; signIn: () => void } {
   return {
     status: status as Status,
     signIn: () => {
+      if (status !== "idle") return;
       setStatus("loading");
       setTimeout(() => setStatus("success"), 2000);
     },
@@ -56,7 +57,7 @@ function SignInScreen() {
         <Button
           theme="accent"
           width="100%"
-          disabled={status === "loading"}
+          disabled={status !== "idle"}
           onClick={signIn}
           iconAfter={status === "loading" ? <Spinner size="$1" color="$color" /> : undefined}
           data-testid="signin-submit"

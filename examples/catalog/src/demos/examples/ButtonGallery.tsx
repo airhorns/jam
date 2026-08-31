@@ -1,6 +1,6 @@
 import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
-import { XStack, YStack, XGroup, YGroup, Button, Spinner, Tooltip, Popover, ListItem, Separator, SizableText, Paragraph } from "@jam/ui";
+import { XStack, YStack, XGroup, YGroup, Button, Spinner, Tooltip, Popover, ListItem, Separator, SizableText, Paragraph, rovingFocus } from "@jam/ui";
 import type { ComponentDemos } from "../../types";
 import { useDemoState } from "../state";
 import {
@@ -180,12 +180,19 @@ function SplitButton() {
           </Popover.Trigger>
         </XGroup.Item>
       </XGroup>
-      <Popover.Content role="menu" aria-label="Save options" padding={0} width={260} overflow="hidden">
+      <Popover.Content
+        role="menu"
+        aria-label="Save options"
+        padding={0}
+        width={260}
+        overflow="hidden"
+        onKeyDown={(e: KeyboardEvent) => rovingFocus(e, "[role=menuitem]", { orientation: "vertical" })}
+      >
         <YGroup separator={<Separator />}>
-          {actions.map(([title, subtitle, Icon]) => (
+          {actions.map(([title, subtitle, Icon], i) => (
             <YGroup.Item key={title}>
               <Popover.Close asChild>
-                <ListItem tag="button" role="menuitem" hoverTheme pressTheme size="$3" title={title} subTitle={subtitle} icon={<Icon size={16} />} />
+                <ListItem tag="button" role="menuitem" tabIndex={i === 0 ? 0 : -1} hoverTheme pressTheme size="$3" title={title} subTitle={subtitle} icon={<Icon size={16} />} />
               </Popover.Close>
             </YGroup.Item>
           ))}

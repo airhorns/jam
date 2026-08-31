@@ -128,6 +128,8 @@ function TooltipRoot(props: TooltipProps): VNode {
     },
   });
   const open = openState === true;
+  // A tooltip opened by `defaultOpen` or a controlled `open` still yields when another opens.
+  if (open && !openTooltips.has(id)) openTooltips.set(id, () => setOpen(false));
   useDismissableLayer(id, open, {
     onDismiss: () => setOpen(false),
     modal: false,
@@ -188,6 +190,7 @@ function TooltipTrigger(props: TooltipTriggerProps): VNode {
       );
       close();
     },
+    onClick: close,
     onFocus: () => {
       if (pointerDownIds.get(ctx.id)) return;
       cancelOpen(ctx.id);

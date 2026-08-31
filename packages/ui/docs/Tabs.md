@@ -54,8 +54,10 @@ from the root's component id, so nothing needs wiring by hand.
 
 `Tabs.Content` — `role="tabpanel"` with `aria-labelledby` and `tabIndex={0}`.
 Renders nothing unless its tab is selected; `forceMount` renders it regardless
-(visible, with `data-state="inactive"`), for pagers and cross-fades that
-position or hide inactive panels themselves.
+(visible, with `data-state="inactive"` and `tabIndex={-1}` so only the active
+panel is a Tab stop), for pagers and cross-fades that position or hide inactive
+panels themselves. Radix hides inactive force-mounted panels instead; pass
+`inert` to an off-screen panel yourself if it contains focusable content.
 
 `Tabs.Frame` — the styled root. `Tabs.Apply` provides `size`/`orientation` to
 every Tabs beneath.

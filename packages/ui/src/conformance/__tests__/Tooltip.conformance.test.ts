@@ -233,5 +233,41 @@ describe("Tooltip conformance", () => {
       pointerEnter(get("[data-testid=triggerB]"));
       expect(query("[data-testid=contentA]")).toBeNull();
     });
+
+    it("a tooltip open from defaultOpen also closes when another opens (Radix's content listens for tooltip.open regardless of how it opened)", () => {
+      const { get, query } = render(
+        h(
+          "div",
+          null,
+          h(Tooltip, { defaultOpen: true }, h(Tooltip.Trigger, { "data-testid": "triggerA" }, "A"), h(Tooltip.Content, { "data-testid": "contentA" }, "Tip A")),
+          h(Tooltip, { delay: 0 }, h(Tooltip.Trigger, { "data-testid": "triggerB" }, "B"), h(Tooltip.Content, { "data-testid": "contentB" }, "Tip B")),
+        ),
+      );
+      expect(query("[data-testid=contentA]")).not.toBeNull();
+      pointerEnter(get("[data-testid=triggerB]"));
+      expect(query("[data-testid=contentA]")).toBeNull();
+      expect(query("[data-testid=contentB]")).not.toBeNull();
+    });
+  });
+
+  describe("activation", () => {
+    // Radix tooltip.tsx TooltipTrigger: onClick={composeEventHandlers(props.onClick, context.onClose)}.
+    it("clicking the trigger closes an open tooltip, as after keyboard activation of an asChild button", () => {
+      const onClick = vi.fn();
+      const { get, query } = render(
+        h(
+          Tooltip,
+          { delay: 0 },
+          h(Tooltip.Trigger, { asChild: true }, h("button", { "data-testid": "trigger", onClick }, "Save")),
+          h(Tooltip.Content, { "data-testid": "content" }, "Saves the draft"),
+        ),
+      );
+      const trigger = get("[data-testid=trigger]");
+      focus(trigger);
+      expect(query("[data-testid=content]")).not.toBeNull();
+      click(trigger);
+      expect(onClick).toHaveBeenCalledTimes(1);
+      expect(query("[data-testid=content]")).toBeNull();
+    });
   });
 });

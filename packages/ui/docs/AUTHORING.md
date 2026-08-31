@@ -31,7 +31,10 @@ Read `STYLE-SYSTEM.md` first.
   it so a `<form>` reset restores the initial value.
 - Composite widgets take `dir?: "ltr" | "rtl"`, render it as the `dir`
   attribute and pass it to `rovingFocus` so ArrowLeft/ArrowRight follow the
-  reading direction.
+  reading direction. `rovingFocus`/`rovingItems` are also exported from
+  `@jam/ui` for composites built outside the library (menus, dot pagers).
+- Anything rendered but not currently selected (a `forceMount` panel, an
+  inactive page) gets `tabIndex={-1}` so only the active part is a Tab stop.
 - Overlays register with `useDismissableLayer` (`../layers`) and position with
   `../floating`; content goes through `Portal` from `@jam/core`.
 

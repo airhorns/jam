@@ -190,8 +190,10 @@ describe("Tabs", () => {
     const all = r.all("[role=tabpanel]");
     expect(all).toHaveLength(2);
     expect(all[0].dataset.state).toBe("active");
+    expect(all[0].tabIndex).toBe(0);
     expect(all[1].dataset.state).toBe("inactive");
     expect(all[1].hasAttribute("hidden")).toBe(false);
+    expect(all[1].tabIndex).toBe(-1);
   });
 
   it("stacks the list beside the panel when vertical", () => {

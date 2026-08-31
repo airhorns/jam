@@ -218,3 +218,17 @@ happy-dom cannot: placement flips and shifts, Tab trapping, wheel scroll
 locking, slider and sheet drags, select typeahead and real tooltip/toast
 timers. The smoke and leak sweeps run per demo group so a failure names the
 group instead of timing out the whole catalog.
+
+**QA.** A third round of cheap agents worked every demo of the eighteen
+example screens in both schemes and at 390/768 px with keyboard, pointer and
+`__catalog.show` round-trips. The one library finding: an inactive
+`Tabs.Content forceMount` panel was a Tab stop, so tabbing out of a pager
+focused an off-screen panel and Chromium scrolled the `overflow: hidden`
+track to it, permanently desynchronising the pager from its tabs; inactive
+panels are now `tabIndex={-1}` and `rovingFocus`/`rovingItems` are exported
+for hand-rolled composites. The rest were example bugs (a success state that
+replayed on click, a search box wired to nothing, an overlay's open flag held
+in persistent demo state, hand-rolled tablists, grids and `role="menu"`
+popovers without arrow keys) and are fixed in the examples. The examples'
+menus are `Popover`s with menu roles and roving focus; there is still no
+`Menu` primitive.

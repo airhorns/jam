@@ -1,6 +1,6 @@
 import { h } from "@jam/core/jsx";
 import type { VNode } from "@jam/core/jsx";
-import { XStack, YStack, H2, Paragraph, SizableText, Button, Input, Label, Checkbox, Progress, Separator, ScrollView, Circle, useStableId } from "@jam/ui";
+import { XStack, YStack, H2, Paragraph, SizableText, Button, Input, Label, Checkbox, Progress, Separator, ScrollView, Circle, useStableId, rovingFocus } from "@jam/ui";
 import type { ComponentDemos } from "../../types";
 import { useDemoState } from "../state";
 import { PhoneFrame } from "./shared";
@@ -57,7 +57,13 @@ function Walkthrough() {
           </YStack>
         </YStack>
 
-        <XStack justifyContent="center" gap="$space.1" role="tablist" aria-label="Steps">
+        <XStack
+          justifyContent="center"
+          gap="$space.1"
+          role="tablist"
+          aria-label="Steps"
+          onKeyDown={(event: KeyboardEvent) => rovingFocus(event, "[role=tab]", { orientation: "horizontal", onMove: (_el, index) => setStep(index) })}
+        >
           {steps.map((s, i) => (
             <YStack
               key={s.title}
@@ -66,6 +72,7 @@ function Walkthrough() {
               role="tab"
               aria-selected={i === step}
               aria-label={`Step ${i + 1}: ${s.title}`}
+              tabIndex={i === step ? 0 : -1}
               padding={4}
               borderWidth={0}
               backgroundColor="transparent"

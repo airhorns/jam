@@ -330,7 +330,7 @@ TabsTabComponent.displayName = "Tabs.Tab";
 
 export type TabsContentProps = StyledProps & {
   value: string;
-  /** Render the panel even when its tab is not selected (it stays visible with `data-state="inactive"`). */
+  /** Render the panel even when its tab is not selected (it stays visible with `data-state="inactive"` and out of the Tab order). */
   forceMount?: boolean;
   size?: string | number;
   unstyled?: boolean;
@@ -353,7 +353,7 @@ function TabsContentComponent(props: TabsContentProps): VNode | null {
       "aria-labelledby": tabId(state.baseId, value),
       "data-state": selected ? "active" : "inactive",
       "data-orientation": state.orientation,
-      tabIndex: 0,
+      tabIndex: selected ? 0 : -1,
     },
     ...(([] as VChild[]).concat(children ?? [])),
   );

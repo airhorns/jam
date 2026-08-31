@@ -206,6 +206,22 @@ test.describe("keyboard interaction", () => {
     await expect(listbox).toHaveCount(0);
     await expect(page.getByTestId("fruit-value")).toHaveText("Selected: peach");
   });
+
+  test("Tab from a tab skips the off-screen force-mounted panels of a pager", async ({ page }) => {
+    await showComponent(page, "Tab bar", "light", 2);
+    const tab = page.getByTestId("page-tab-for-you");
+    await tab.click();
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+
+    await page.keyboard.press("Tab");
+    await expect(page.locator("[role=tabpanel][data-state=active]")).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(page.locator("[role=tabpanel][data-state=inactive]:focus")).toHaveCount(0);
+
+    const pager = page.locator("[role=tabpanel]").first().locator("xpath=../..");
+    expect(await pager.evaluate((el) => el.scrollLeft)).toBe(0);
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+  });
 });
 
 test.describe("timers", () => {
