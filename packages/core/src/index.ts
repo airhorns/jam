@@ -16,6 +16,9 @@ export type { Driver } from "./drive";
 export { nodeFor } from "./mounts";
 export { persist, defaultExclude } from "./persist";
 export type { PersistOptions, PersistHandle } from "./persist";
+export { sync, compileFilter, SYNC_STATUS_FACT } from "./sync";
+export type { SyncOptions, SyncHandle, SyncStatus, SyncWebSocket, FactFilter, FactSubscription, CompiledFilter, SyncChange, SyncOp } from "./sync";
+export { applyFacts, isApplying } from "./applying";
 export { createProgramAPI, listPrograms, loadProgramSource, program, registerProgram, removeProgram } from "./programs";
 export type { ProgramAPI, ProgramRunner } from "./programs";
 export {
