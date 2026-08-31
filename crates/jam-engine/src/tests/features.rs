@@ -10,7 +10,7 @@ use crate::query::{Clause, QueryId};
 use crate::spec::{AggOp, Aggregate, Op, Operand, Predicate, Sort, Spec, is_var, var_of};
 use crate::store::ROOT_OWNER;
 use crate::term::{NONE, Term, TermId, VAR_BASE, WILD};
-use crate::wire::{FACT_EVENTS_NONE, OP_CLEAR};
+use crate::wire::{FACT_EVENTS_NONE, OP_ASSERT, OP_CLEAR};
 
 /// Builds a spec on top of the harness's `$name` variables; `out` names an aggregate's value.
 struct Q<'h> {
@@ -475,6 +475,28 @@ fn sums_and_extremes_track_updates() {
         list(&[&["4"]])
     );
     assert_eq!(h.q(&[&["issue", "$id", "points", "$n"]]).max("$n", "$most", &[]).query(), list(&[&["3"]]));
+}
+
+#[test]
+fn extremes_tell_apart_terms_that_compare_equal() {
+    let mut h = Harness::new();
+    let max = h.q(&[&["reading", "$id", "value", "$v"]]).max("$v", "$most", &[]).register();
+    let quiet = h.e.interner.intern_num(f64::NAN);
+    let payload = h.e.interner.intern_num(f64::from_bits(0x7ff8_0000_0000_0001));
+    assert_ne!(quiet, payload, "NaNs with different payloads are different terms");
+    h.assert(ROOT_OWNER, &["reading", "a", "value", "#5"]);
+    for (id, nan) in [("b", quiet), ("c", payload)] {
+        let ops = [OP_ASSERT, ROOT_OWNER, NONE, 4, h.lit("reading"), h.lit(id), h.lit("value"), nan];
+        h.e.apply(&ops).unwrap();
+    }
+    h.e.drain();
+    assert_eq!(h.rows_str(max), set(&[&["NaN"]]));
+    h.drop(&["reading", "b", "_", "_"]);
+    h.e.drain();
+    assert_eq!(h.rows_str(max), set(&[&["NaN"]]), "the other NaN is still there");
+    h.drop(&["reading", "c", "_", "_"]);
+    h.e.drain();
+    assert_eq!(h.rows_str(max), set(&[&["5"]]));
 }
 
 #[test]

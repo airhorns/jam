@@ -146,21 +146,28 @@ impl AggState {
                     }
                 }
                 (AggOp::Min | AggOp::Max, Some(value)) => {
-                    let at = group
-                        .values
-                        .partition_point(|&(t, _)| compare_terms(interner, t, value) == Ordering::Less);
-                    match group.values.get_mut(at) {
+                    let values = &mut group.values;
+                    let mut at = values.partition_point(|&(t, _)| compare_terms(interner, t, value) == Ordering::Less);
+                    // Distinct terms can compare equal (NaN payloads), so look through that run for this one.
+                    while at < values.len()
+                        && values[at].0 != value
+                        && compare_terms(interner, values[at].0, value) == Ordering::Equal
+                    {
+                        at += 1;
+                    }
+                    match values.get_mut(at) {
                         Some(entry) if entry.0 == value => {
                             if *visible {
                                 entry.1 += 1;
                             } else {
                                 entry.1 -= 1;
                                 if entry.1 == 0 {
-                                    group.values.remove(at);
+                                    values.remove(at);
                                 }
                             }
                         }
-                        _ => group.values.insert(at, (value, 1)),
+                        _ if *visible => values.insert(at, (value, 1)),
+                        _ => {}
                     }
                 }
                 _ => {}
