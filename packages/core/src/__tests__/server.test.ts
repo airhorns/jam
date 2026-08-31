@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { memoryStorage } from "@jam/engine/storage";
-import { createSyncServer, parseChanges, parseFilter, sqliteStorage, type ServerMessage, type SyncChange, type SyncSocket } from "../server";
+import { createSyncServer, parseChanges, parseFilter, sqliteStorage, type ServerMessage, type SyncChange, type SyncCommit, type SyncSocket } from "../server";
 import { _ } from "../db";
 import { compileFilter } from "../filter";
 
@@ -262,5 +262,67 @@ describe("createSyncServer", () => {
     expect(socket.sent[3]).toEqual({ type: "denied", id: "p1", error: expect.stringContaining("p1") });
     await server.apply([{ op: "upsert", terms: ["n", 3], scope: "p1" }]);
     expect(socket.sent).toHaveLength(4);
+  });
+
+  it("reports every committed transaction to observers with its effective changes and the pusher's context", async () => {
+    const server = await createSyncServer({ storage: memoryStorage() });
+    const commits: SyncCommit[] = [];
+    const stop = server.observe((commit) => commits.push(commit));
+    const socket = fakeSocket();
+    server.handle(socket, { user: "alice" });
+
+    socket.receive({
+      type: "push",
+      id: 1,
+      changes: [
+        { op: "upsert", terms: ["todo", 1, "title", "A"], scope: "p1" },
+        { op: "upsert", terms: ["todo", 1, "title", "A"], scope: "p1" },
+      ],
+    });
+    await tick();
+    expect(socket.sent[1]).toEqual({ type: "ack", id: 1, seq: 1 });
+    expect(commits).toEqual([{ seq: 1, changes: [{ op: "upsert", terms: ["todo", 1, "title", "A"], scope: "p1" }], context: { user: "alice" } }]);
+
+    socket.receive({ type: "push", id: 2, changes: [{ op: "upsert", terms: ["todo", 1, "title", "A"], scope: "p1" }] });
+    await tick();
+    expect(socket.sent[2]).toEqual({ type: "ack", id: 2, seq: 1 });
+    expect(commits).toHaveLength(1);
+
+    expect(await server.apply([{ op: "replace", terms: ["todo", 1, "title", "B"], scope: "p1" }])).toBe(3);
+    expect(commits[1]).toEqual({
+      seq: 3,
+      changes: [
+        { op: "delete", terms: ["todo", 1, "title", "A"], scope: "p1" },
+        { op: "upsert", terms: ["todo", 1, "title", "B"], scope: "p1" },
+      ],
+      context: undefined,
+    });
+    expect(commits[1]).toHaveProperty("context");
+
+    stop();
+    await server.apply([{ op: "upsert", terms: ["todo", 2, "title", "C"], scope: "p1" }]);
+    expect(commits).toHaveLength(2);
+  });
+
+  it("keeps committing when an observer throws", async () => {
+    const server = await createSyncServer({ storage: memoryStorage() });
+    const seen: number[] = [];
+    const errors: unknown[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => void errors.push(args[1]));
+    server.observe(() => {
+      throw new Error("boom");
+    });
+    server.observe((commit) => seen.push(commit.seq));
+    const socket = fakeSocket();
+    server.handle(socket);
+
+    socket.receive({ type: "push", id: 1, changes: [{ op: "upsert", terms: ["n", 1], scope: "" }] });
+    await tick();
+    expect(socket.sent[1]).toEqual({ type: "ack", id: 1, seq: 1 });
+    expect(await server.apply([{ op: "upsert", terms: ["n", 2], scope: "" }])).toBe(2);
+    expect(seen).toEqual([1, 2]);
+    expect(errors.map((e) => (e as Error).message)).toEqual(["boom", "boom"]);
+    expect(server.facts().map((f) => f.terms)).toEqual([["n", 1], ["n", 2]]);
+    spy.mockRestore();
   });
 });
