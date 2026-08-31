@@ -3,6 +3,7 @@
 **/node_modules/
 **/dist
 **/benchmark-results/
+**/coverage/
 scratch/
 package-lock.json
 **/.build
