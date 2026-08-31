@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   AGG_COUNT,
@@ -309,10 +309,139 @@ describe("Engine", () => {
     const sorted = ["b", 2, true, "a", Number.NaN, false, 1, "ä", "\u{1F600}", "�"].sort(compareTerms);
     expect(sorted).toEqual([false, true, 1, 2, Number.NaN, "a", "b", "ä", "�", "\u{1F600}"]);
     expect(compareTerms(Number.NaN, Number.NaN)).toBe(0);
+    expect(compareTerms(2, 1)).toBe(1);
+    expect(compareTerms(1, 2)).toBe(-1);
+    expect(compareTerms(1, Number.NaN)).toBe(-1);
+    expect(compareTerms(Number.NaN, 1)).toBe(1);
+    expect(compareTerms(true, false)).toBe(1);
+    expect(compareTerms(false, true)).toBe(-1);
     expect(compareTerms("ab", "a")).toBeGreaterThan(0);
     expect(compareTerms("\u{1F600}", "�")).toBeGreaterThan(0);
     expect(compareTerms("�", "\u{1F600}")).toBeLessThan(0);
     expect(compareTerms("\u{1F600}", "\u{1F601}")).toBeLessThan(0);
+  });
+
+  it("breaks order-key ties between rows by their values", () => {
+    const cmp = compareRows(2);
+    const row = (a: number, b: number, hi: number, lo: number) => Uint32Array.of(a, b, hi, lo);
+    expect(cmp(row(1, 1, 0, 5), row(9, 9, 1, 0))).toBeLessThan(0);
+    expect(cmp(row(1, 1, 0, 5), row(9, 9, 0, 4))).toBeGreaterThan(0);
+    expect(cmp(row(1, 2, 0, 0), row(1, 3, 0, 0))).toBe(-1);
+    expect(cmp(row(2, 0, 0, 0), row(1, 9, 0, 0))).toBe(1);
+    expect(cmp(row(1, 2, 0, 0), row(1, 2, 0, 0))).toBe(0);
+  });
+
+  it("resolves terms interned directly on the wasm instance", () => {
+    const e = new Engine();
+    const str = e.raw.intern_str("direct");
+    const num = e.raw.intern_num(6.5);
+    expect(e.term(str)).toBe("direct");
+    expect(e.term(num)).toBe(6.5);
+    expect(e.id("direct")).toBe(str);
+    expect(e.id(6.5)).toBe(num);
+  });
+
+  it("checks owners exist and refuses to nest under a missing one", () => {
+    const e = new Engine();
+    const owner = e.createOwner();
+    expect(e.ownerExists(ROOT_OWNER)).toBe(true);
+    expect(e.ownerExists(owner)).toBe(true);
+    expect(() => e.createOwner(owner + 1000)).toThrow(/does not exist/);
+    e.revoke(owner);
+    e.flush();
+    expect(e.ownerExists(owner)).toBe(false);
+  });
+
+  it("rejects an oversized fact and stays usable afterwards", () => {
+    const e = new Engine();
+    e.assert(ROOT_OWNER, NONE, Array.from({ length: 9000 }, (_t, i) => `t${i}`));
+    expect(() => e.flush()).toThrow(/bad fact length 9000/);
+    e.assert(ROOT_OWNER, NONE, ["k", "v"]);
+    e.flush();
+    expect(e.stats().facts).toBe(1);
+  });
+
+  it("keeps dispatching fact events when a listener throws, until it is unsubscribed", () => {
+    const e = new Engine();
+    e.setFactEvents(FACT_EVENTS_ALL);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const seen: string[] = [];
+    const stopThrowing = e.onFact(() => {
+      throw new Error("boom");
+    });
+    const stopSeeing = e.onFact((event) => seen.push(event.type));
+    e.assert(ROOT_OWNER, NONE, ["k", "v"]);
+    e.flush();
+    expect(seen).toEqual(["add"]);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith("[jam] fact listener threw", expect.any(Error));
+    stopThrowing();
+    stopThrowing();
+    e.assert(ROOT_OWNER, NONE, ["k", "w"]);
+    e.flush();
+    expect(seen).toEqual(["add", "add"]);
+    expect(error).toHaveBeenCalledTimes(1);
+    stopSeeing();
+    e.assert(ROOT_OWNER, NONE, ["k", "x"]);
+    e.flush();
+    expect(seen).toEqual(["add", "add"]);
+    error.mockRestore();
+  });
+
+  it("seeds a late registration with existing rows and streams later changes to row listeners", () => {
+    const e = new Engine();
+    e.assert(ROOT_OWNER, NONE, ["k", "a"]);
+    e.assert(ROOT_OWNER, NONE, ["k", "b"]);
+    e.flush();
+    const q = e.register([[e.id("k"), v(0)]]);
+    expect(decodeRows(e, q)).toEqual([["a"], ["b"]]);
+
+    const seen: string[] = [];
+    const stop = q.onRow((row, added) => seen.push(`${added ? "+" : "-"}${e.term(row[0])}`));
+    e.assert(ROOT_OWNER, NONE, ["k", "c"]);
+    e.drop(["k", "a"]);
+    e.flush();
+    expect(seen.sort()).toEqual(["+c", "-a"]);
+    stop();
+    stop();
+    e.drop(["k", "b"]);
+    e.flush();
+    expect(seen).toHaveLength(2);
+  });
+
+  it("moves facts between scopes and reports no scope for unknown facts", () => {
+    const e = new Engine();
+    e.assert(ROOT_OWNER, NONE, ["k", "v"]);
+    expect(e.scopeOf(["k", "v"])).toBe("");
+    expect(e.scopeOf(["k", "missing"])).toBeUndefined();
+    e.setScope(e.id("project:p1"), ["k", "v"]);
+    expect(e.scopeOf(["k", "v"])).toBe("project:p1");
+    e.free();
+    expect(() => e.stats()).toThrow();
+  });
+
+  it("sorts equal-valued columns by the next one, then by insertion", () => {
+    const e = new Engine();
+    const q = e.register([[e.id("row"), v(0), v(1), v(2)]]);
+    e.assert(ROOT_OWNER, NONE, ["row", "a", 1, "z"]);
+    e.assert(ROOT_OWNER, NONE, ["row", "b", 1, "y"]);
+    e.assert(ROOT_OWNER, NONE, ["row", "c", 1, "y"]);
+    e.flush();
+    const order = (...columns: number[]) => columns.map((column) => ({ column, descending: false }));
+    expect(decodeRows(e, q, order(1, 2)).map((row) => row[0])).toEqual(["b", "c", "a"]);
+    expect(decodeRows(e, q, [{ column: 2, descending: true }]).map((row) => row[0])).toEqual(["a", "b", "c"]);
+  });
+
+  it("ignores repeated releases and stale row removals", () => {
+    const e = new Engine();
+    const q = e.register([[e.id("k"), v(0)]]);
+    q.applyRow(12345, null);
+    expect(q.rows.size).toBe(0);
+    q.release();
+    expect(q.released).toBe(true);
+    q.release();
+    e.releaseHandle(q);
+    expect(e.stats().queries).toBe(0);
   });
 
   it("forgets freed terms so reused ids resolve to their new value", () => {
