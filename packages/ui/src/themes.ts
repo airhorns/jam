@@ -98,14 +98,17 @@ export function getResolvedThemeValues(name: string): Record<string, string> {
 
 // ---- Active theme ----
 
+/** The library's own entity for the active theme, so an app's `"ui"` facts can be forgotten wholesale without losing it. */
+const THEME_ENTITY = "jam-ui";
+
 /** Set the root theme by name. Writes the theme class onto the configured root element. */
 export function setTheme(name: string): void {
-  replace("ui", "theme", name);
+  replace(THEME_ENTITY, "theme", name);
   applyRootThemeClass(name);
 }
 
 export function getActiveThemeName(): string | undefined {
-  const results = when(["ui", "theme", $.name]);
+  const results = when([THEME_ENTITY, "theme", $.name]);
   return results.length > 0 ? (results[0].name as string) : undefined;
 }
 

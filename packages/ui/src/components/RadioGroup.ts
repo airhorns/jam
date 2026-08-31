@@ -80,7 +80,7 @@ export const RadioGroupItemFrame = styled("button", {
     unstyled: {
       true: {
         borderWidth: 0,
-        outlineWidth: 0,
+        outlineStyle: "none",
         backgroundColor: "transparent",
         padding: 0,
       },

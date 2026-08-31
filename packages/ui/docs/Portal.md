@@ -38,7 +38,11 @@ import { Portal, YStack } from "@jam/ui";
   portalled content does **not** reach `onClick` handlers on the component
   that rendered the portal. Overlays use `useDismissableLayer` with
   `data-layer`/`data-layer-trigger` attributes to decide what counts as
-  "inside".
+  "inside". Those attributes are the supported way for app code to ask the
+  same question — an app-level "click outside closes my menus" handler should
+  treat `event.target.closest("[data-layer], [data-layer-trigger]")` as
+  inside, since checking `element.contains(target)` on the component that
+  rendered the overlay never matches its portalled content.
 
 ## Layering
 

@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
 import { styled } from "../styled";
-import type { StyledComponent } from "../styled";
+import type { StyledComponent, StyledProps } from "../styled";
 import { getFontSized } from "../variants";
 
 const ellipsisStyle = {
@@ -35,6 +35,7 @@ export const Text = styled("span", {
               WebkitBoxOrient: "vertical",
               display: "-webkit-box",
               overflow: "hidden",
+              whiteSpace: "normal",
             }
           : null,
     },
@@ -154,3 +155,20 @@ export const H3 = styled(Heading, { name: "H3", tag: "h3", defaultProps: { role:
 export const H4 = styled(Heading, { name: "H4", tag: "h4", defaultProps: { role: undefined, size: "$7" } });
 export const H5 = styled(Heading, { name: "H5", tag: "h5", defaultProps: { role: undefined, size: "$6" } });
 export const H6 = styled(Heading, { name: "H6", tag: "h6", defaultProps: { role: undefined, size: "$5" } });
+
+export type AnchorProps = StyledProps & {
+  size?: string | number;
+  unstyled?: boolean;
+  href?: string;
+  target?: string;
+  rel?: string;
+};
+
+/**
+ * Anchor: `SizableText` rendered as an `<a>`. Keeps the browser's underline
+ * unless styled otherwise, as tamagui's does; the theme colour still applies.
+ */
+export const Anchor = styled<AnchorProps>(SizableText, {
+  name: "Anchor",
+  tag: "a",
+});

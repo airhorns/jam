@@ -1,5 +1,6 @@
 // Transient UI state lives in facts too: which menu is open, whether the
-// new-issue modal is showing. This program closes them on click-away / Escape.
+// new-issue modal is showing. Escape and click-away are handled by the @jam/ui
+// overlays themselves, which report back through onOpenChange.
 
 import { $, _, forget, replace, when, whenever } from "@jam/core";
 import { parseRoute } from "./router";
@@ -33,33 +34,10 @@ export function isModalOpen(name: string): boolean {
   return when(["ui", "modal", name, true]).length > 0;
 }
 
-function anyMenuOpen(): boolean {
-  return when(["ui", "menu", "open", $.id]).length > 0;
-}
-
+/** Confirmations and the search box text belong to the page they were opened on. */
 export function startUi(): () => void {
-  const onClick = (event: MouseEvent) => {
-    const target = event.target as Element | null;
-    if (target?.closest?.("[data-menu]")) return;
-    if (anyMenuOpen()) closeMenus();
-  };
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== "Escape") return;
-    if (anyMenuOpen()) closeMenus();
-    else forget("ui", "modal", _, _);
-  };
-  document.addEventListener("click", onClick);
-  document.addEventListener("keydown", onKeyDown);
-
-  // Confirmations and the search box text belong to the page they were opened on.
-  const stopRoute = whenever([["route", "url", $.url]], ([match]) => {
+  return whenever([["route", "url", $.url]], ([match]) => {
     forget("ui", "confirm", _, _);
     if (match && parseRoute(String(match.url)).page !== "search") forget("ui", "search", _, _);
   });
-
-  return () => {
-    stopRoute();
-    document.removeEventListener("click", onClick);
-    document.removeEventListener("keydown", onKeyDown);
-  };
 }

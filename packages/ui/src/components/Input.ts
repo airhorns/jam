@@ -12,7 +12,7 @@ const inputDefaults = {
   borderWidth: 1,
   borderStyle: "solid",
   borderColor: "$borderColor",
-  outlineWidth: 0,
+  outlineStyle: "none",
   display: "flex",
   // Keeps a flex child from overflowing its container.
   minWidth: 0,
@@ -36,7 +36,7 @@ const inputDefaults = {
 };
 
 const unstyledReset = {
-  outlineWidth: 0,
+  outlineStyle: "none",
   borderWidth: 0,
   backgroundColor: "transparent",
 };
@@ -140,6 +140,11 @@ InputComponent.displayName = "Input";
 
 /** TextArea: a multi-line Input. `rows` sets the minimum height. */
 function TextAreaComponent(props: InputProps & { rows?: number }): VNode {
+  // A textarea's default value is its text content, not a `value` attribute.
+  if (props.defaultValue !== undefined && props.children === undefined) {
+    const { defaultValue, ...rest } = props;
+    return withChangeText(TextAreaFrame, { ...rest, children: defaultValue });
+  }
   return withChangeText(TextAreaFrame, props);
 }
 TextAreaComponent.displayName = "TextArea";

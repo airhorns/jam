@@ -6,7 +6,8 @@ export { ScrollView } from "./ScrollView";
 export { Group, XGroup, YGroup } from "./Group";
 
 // Typography
-export { Text, SizableText, Paragraph, Heading, H1, H2, H3, H4, H5, H6 } from "./Text";
+export { Text, SizableText, Paragraph, Heading, H1, H2, H3, H4, H5, H6, Anchor } from "./Text";
+export type { AnchorProps } from "./Text";
 
 // Shapes
 export { Square, Circle } from "./Shapes";
@@ -30,6 +31,8 @@ export { Dialog } from "./Dialog";
 export { Sheet } from "./Sheet";
 export { AlertDialog } from "./AlertDialog";
 export { Popover } from "./Popover";
+export { Menu } from "./Menu";
+export type { MenuCheckedState } from "./Menu";
 
 // Content
 export { Card } from "./Card";

@@ -24,8 +24,8 @@ export type LayerOptions = {
   modal?: boolean;
   /** Move focus into the content when it opens (default: modal). */
   autoFocus?: boolean;
-  /** Selector for the element to focus on open when nothing inside carries `autofocus` (default: first focusable). */
-  initialFocus?: string;
+  /** Selector for, or function returning, the element to focus on open when nothing inside carries `autofocus` (default: first focusable). */
+  initialFocus?: string | ((content: HTMLElement) => HTMLElement | null | undefined);
   /** Return focus to the previously focused element on close (default: modal). */
   restoreFocus?: boolean;
   /** Keep this layer's floating position up to date (see floating.ts). */
@@ -185,7 +185,8 @@ function startLayer(layer: Layer): void {
     if ((layer.autoFocus ?? layer.modal) && !layer.focused) {
       layer.focused = true;
       if (!content.contains(document.activeElement)) {
-        const preferred = layer.initialFocus ? content.querySelector<HTMLElement>(layer.initialFocus) : null;
+        const preferred =
+          typeof layer.initialFocus === "function" ? layer.initialFocus(content) : layer.initialFocus ? content.querySelector<HTMLElement>(layer.initialFocus) : null;
         const target = content.querySelector<HTMLElement>("[autofocus]") ?? preferred ?? focusableElements(content)[0] ?? content;
         target.focus();
       }
@@ -201,7 +202,9 @@ function finishLayer(layer: Layer): void {
     queueMicrotask(() => {
       if (!previous.isConnected) return;
       const active = document.activeElement;
-      if (active == null || active === document.body || !active.isConnected) previous.focus();
+      // Content that stays mounted but hidden still holds focus until the browser's focus fixup runs.
+      const stranded = active == null || active === document.body || !active.isConnected || contentElement(layer.id)?.contains(active) === true;
+      if (stranded) previous.focus();
     });
   }
 }

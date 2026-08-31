@@ -34,6 +34,8 @@ export type ProgressProps = StyledProps & {
   /** Progress so far; leave unset for an indeterminate bar. */
   value?: number | null;
   max?: number;
+  /** Builds `aria-valuetext`; the default is the percentage of `max`. */
+  getValueLabel?: (value: number, max: number) => string;
   size?: string | number;
   unstyled?: boolean;
 };
@@ -90,11 +92,15 @@ function ProgressIndicator(props: StyledProps): VNode {
   const position = value == null ? { width: "40%", x: "75%" } : { x: `${-100 + ratio * 50}%` };
   return h(ProgressIndicatorFrame, {
     "data-state": progressState(value, max),
+    ...(value == null ? null : { "data-value": value }),
+    "data-max": max,
     ...position,
     ...(props as Record<string, unknown>),
   });
 }
 ProgressIndicator.displayName = "ProgressIndicator";
+
+const percentValueLabel = (value: number, max: number): string => `${Math.round((value / max) * 100)}%`;
 
 const toArray = (children: VChild | VChild[] | undefined): VChild[] =>
   children == null ? [] : Array.isArray(children) ? children : [children];
@@ -104,7 +110,9 @@ const toArray = (children: VChild | VChild[] | undefined): VChild[] =>
  * `max`. With no `value` the indicator sweeps to show indeterminate progress.
  */
 function ProgressComponent(props: ProgressProps): VNode {
-  const { value, max = 100, children, ...rest } = props;
+  const { value, max: maxProp, getValueLabel = percentValueLabel, children, ...rest } = props;
+  // Only a positive number is a usable maximum; anything else falls back to 100.
+  const max = typeof maxProp === "number" && !Number.isNaN(maxProp) && maxProp > 0 ? maxProp : 100;
   const current = typeof value === "number" && !Number.isNaN(value) ? Math.min(max, Math.max(0, value)) : null;
 
   const aria: Record<string, unknown> = {
@@ -116,7 +124,7 @@ function ProgressComponent(props: ProgressProps): VNode {
   };
   if (current !== null) {
     aria["aria-valuenow"] = current;
-    aria["aria-valuetext"] = `${Math.round((current / max) * 100)}%`;
+    aria["aria-valuetext"] = getValueLabel(current, max);
     aria["data-value"] = current;
   }
 

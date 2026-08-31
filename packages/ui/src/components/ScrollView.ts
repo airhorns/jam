@@ -11,7 +11,8 @@ export type ScrollViewProps = StyledProps & {
 
 /**
  * ScrollView: a scrolling viewport. Vertical by default; `horizontal` scrolls
- * along the other axis and lays children out in a row.
+ * along the other axis and lays children out in a row. Unlike other views it
+ * shrinks to fit its container, which is what lets its content scroll.
  */
 export const ScrollView = styled<ScrollViewProps>(Stack, {
   name: "ScrollView",
@@ -19,6 +20,7 @@ export const ScrollView = styled<ScrollViewProps>(Stack, {
     unstyled: {
       false: {
         flexDirection: "column",
+        flexShrink: 1,
         overflowX: "hidden",
         overflowY: "auto",
       },

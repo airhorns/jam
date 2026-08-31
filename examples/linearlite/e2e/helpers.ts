@@ -88,5 +88,5 @@ export const byTitle = (a: IssueRecord, b: IssueRecord) => compare(a.title ?? ""
 export const newestFirst = (a: IssueRecord, b: IssueRecord) => compare(b.created ?? "", a.created ?? "") || a.id.localeCompare(b.id);
 
 export async function expectCount(page: Page, shown: number, total: number) {
-  await expect(page.locator(".issue-count")).toHaveText(`${shown} of ${total} issues`);
+  await expect(page.getByTestId("issue-count")).toHaveText(`${shown} of ${total} issues`);
 }

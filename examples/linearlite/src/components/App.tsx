@@ -1,4 +1,5 @@
 import { h } from "@jam/core/jsx";
+import { Paragraph, XStack, YStack } from "@jam/ui";
 import { currentRoute, type Route } from "../programs/router";
 import { Board } from "./Board";
 import { IssueList } from "./IssueList";
@@ -7,29 +8,39 @@ import { LeftMenu } from "./LeftMenu";
 import { NewIssueModal } from "./NewIssueModal";
 import { TopFilter } from "./TopFilter";
 
+function Page({ children }: { children?: unknown }) {
+  return (
+    <YStack flex={1} minHeight={0} data-testid="page">
+      {children as never}
+    </YStack>
+  );
+}
+
 function ListPage({ route }: { route: Route }) {
   return (
-    <div class="page list-page">
+    <Page>
       <TopFilter route={route} />
       <IssueList route={route} />
-    </div>
+    </Page>
   );
 }
 
 function BoardPage({ route }: { route: Route }) {
   return (
-    <div class="page board-page">
+    <Page>
       <TopFilter route={route} />
       <Board />
-    </div>
+    </Page>
   );
 }
 
 function HomePage() {
   return (
-    <div class="page home-page">
-      <div class="empty-state">Loading projects…</div>
-    </div>
+    <Page>
+      <Paragraph paddingVertical="$10" textAlign="center" color="$color10" data-testid="empty-state">
+        Loading projects…
+      </Paragraph>
+    </Page>
   );
 }
 
@@ -50,10 +61,12 @@ function page(route: Route) {
 export function App() {
   const route = currentRoute();
   return (
-    <div class="app">
+    <XStack height="100%" overflow="hidden" backgroundColor="$background" fontFamily="$body" data-testid="app">
       <LeftMenu route={route} />
-      <div class="main">{page(route)}</div>
+      <YStack flex={1} minWidth={0} data-testid="main">
+        {page(route)}
+      </YStack>
       <NewIssueModal route={route} />
-    </div>
+    </XStack>
   );
 }

@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { h } from "@jam/core/jsx";
 import { render, css, setupDefaultUI } from "../../testing";
-import { Text, SizableText, Paragraph, Heading, H1, H2, H3, H4, H5, H6 } from "../Text";
+import { Anchor, Text, SizableText, Paragraph, Heading, H1, H2, H3, H4, H5, H6 } from "../Text";
 
 beforeEach(() => {
   setupDefaultUI();
@@ -25,7 +25,7 @@ describe("Text", () => {
     const one = render(h(Text, { numberOfLines: 1 }, "x"));
     expect(css(one.root)).toMatchObject({ "text-overflow": "ellipsis", "white-space": "nowrap", overflow: "hidden" });
     const three = render(h(Text, { numberOfLines: 3 }, "x"));
-    expect(css(three.root)).toMatchObject({ "-webkit-line-clamp": "3", "-webkit-box-orient": "vertical", overflow: "hidden" });
+    expect(css(three.root)).toMatchObject({ "-webkit-line-clamp": "3", "-webkit-box-orient": "vertical", overflow: "hidden", "white-space": "normal" });
     const ellipsis = render(h(Text, { ellipsis: true }, "x"));
     expect(css(ellipsis.root)["text-overflow"]).toBe("ellipsis");
   });
@@ -100,5 +100,22 @@ describe("Paragraph and headings", () => {
   it("headings accept size overrides and theme colours", () => {
     const r = render(h(H1, { size: "$5", color: "$color10" }, "h"));
     expect(css(r.root)).toMatchObject({ "font-size": "16px", color: "var(--color10)" });
+  });
+});
+
+describe("Anchor", () => {
+  it("renders a sized link that keeps the browser underline", () => {
+    const r = render(h(Anchor, { href: "/docs", target: "_blank", rel: "noreferrer" }, "Docs"));
+    expect(r.root.tagName).toBe("A");
+    expect(r.root.getAttribute("href")).toBe("/docs");
+    expect(r.root.getAttribute("target")).toBe("_blank");
+    expect(r.root.getAttribute("rel")).toBe("noreferrer");
+    expect(r.root.classList.contains("is_Anchor")).toBe(true);
+    expect(css(r.root)).toMatchObject({ "font-size": "15px", color: "var(--color)" });
+    expect(css(r.root)["text-decoration-line"]).toBeUndefined();
+  });
+
+  it("can drop the underline like any text", () => {
+    expect(css(render(h(Anchor, { href: "#", textDecorationLine: "none" }, "x")).root)["text-decoration-line"]).toBe("none");
   });
 });

@@ -208,7 +208,7 @@ export const ToastViewportFrame = styled(YStack, {
         overflow: "hidden",
         pointerEvents: "none",
         zIndex: 100_001,
-        outlineWidth: 0,
+        outlineStyle: "none",
       },
     },
     placement: placementStyles,

@@ -1,72 +1,99 @@
 import { h } from "@jam/core/jsx";
 import type { PriorityValue, StatusValue } from "../types";
 
-interface IconProps {
-  class?: string;
+// The icons stay hand-written SVG. They inherit `currentColor`, and the colours
+// below are theme CSS variables (`@jam/ui` renders every theme as `--<key>`),
+// so they follow a light/dark switch without re-rendering.
+const STATUS_COLOR: Record<string, string> = {
+  backlog: "var(--color10)",
+  todo: "var(--color10)",
+  in_progress: "var(--yellow10)",
+  done: "var(--blue10)",
+  canceled: "var(--color9)",
+};
+
+const PRIORITY_COLOR: Record<string, string> = {
+  urgent: "var(--orange10)",
+};
+
+interface SvgProps {
+  color?: string;
+  children?: unknown;
 }
 
-function Svg({ class: cls, children }: IconProps & { children?: unknown }) {
+function Svg({ color, children, ...rest }: SvgProps & Record<string, unknown>) {
   return (
-    <svg class={`icon ${cls ?? ""}`.trim()} viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+    <svg
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      style={`flex: none; color: ${color ?? "inherit"}`}
+      {...rest}
+    >
       {children}
     </svg>
   );
 }
 
-export function StatusIcon({ status, class: cls }: { status?: StatusValue | string; class?: string }) {
-  const classes = `status-icon status-${status ?? "unknown"} ${cls ?? ""}`;
+export function StatusIcon({ status }: { status?: StatusValue | string }) {
+  const marks = { "data-testid": "status-icon", "data-status": status ?? "unknown", color: STATUS_COLOR[String(status)] ?? "var(--color10)" };
   switch (status) {
     case "todo":
       return (
-        <Svg class={classes}>
+        <Svg {...marks}>
           <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5" />
         </Svg>
       );
     case "in_progress":
       return (
-        <Svg class={classes}>
+        <Svg {...marks}>
           <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5" />
           <path d="M8 4a4 4 0 0 1 0 8z" fill="currentColor" />
         </Svg>
       );
     case "done":
       return (
-        <Svg class={classes}>
+        <Svg {...marks}>
           <circle cx="8" cy="8" r="7" fill="currentColor" />
-          <path d="M5 8.2l2 2 4-4.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--background)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
         </Svg>
       );
     case "canceled":
       return (
-        <Svg class={classes}>
+        <Svg {...marks}>
           <circle cx="8" cy="8" r="7" fill="currentColor" />
-          <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" />
+          <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" fill="none" stroke="var(--background)" stroke-width="1.6" stroke-linecap="round" />
         </Svg>
       );
     default:
       return (
-        <Svg class={classes}>
+        <Svg {...marks}>
           <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2" />
         </Svg>
       );
   }
 }
 
-export function PriorityIcon({ priority, class: cls }: { priority?: PriorityValue | string; class?: string }) {
-  const classes = `priority-icon priority-${priority ?? "none"} ${cls ?? ""}`;
+export function PriorityIcon({ priority }: { priority?: PriorityValue | string }) {
+  const marks = {
+    "data-testid": "priority-icon",
+    "data-priority": priority ?? "none",
+    color: PRIORITY_COLOR[String(priority)] ?? "var(--color10)",
+  };
   const bars = priority === "low" ? 1 : priority === "medium" ? 2 : priority === "high" ? 3 : 0;
   if (priority === "urgent") {
     return (
-      <Svg class={classes}>
+      <Svg {...marks}>
         <rect x="1" y="1" width="14" height="14" rx="3" fill="currentColor" />
-        <path d="M8 4v5" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />
-        <circle cx="8" cy="11.6" r="1" fill="#fff" />
+        <path d="M8 4v5" stroke="var(--background)" stroke-width="1.8" stroke-linecap="round" />
+        <circle cx="8" cy="11.6" r="1" fill="var(--background)" />
       </Svg>
     );
   }
   if (bars === 0) {
     return (
-      <Svg class={classes}>
+      <Svg {...marks}>
         <circle cx="3.5" cy="8" r="1.2" fill="currentColor" />
         <circle cx="8" cy="8" r="1.2" fill="currentColor" />
         <circle cx="12.5" cy="8" r="1.2" fill="currentColor" />
@@ -74,7 +101,7 @@ export function PriorityIcon({ priority, class: cls }: { priority?: PriorityValu
     );
   }
   return (
-    <Svg class={classes}>
+    <Svg {...marks}>
       <rect x="2" y="9" width="3" height="5" rx="1" fill="currentColor" opacity={bars >= 1 ? "1" : "0.3"} />
       <rect x="6.5" y="6" width="3" height="8" rx="1" fill="currentColor" opacity={bars >= 2 ? "1" : "0.3"} />
       <rect x="11" y="2" width="3" height="12" rx="1" fill="currentColor" opacity={bars >= 3 ? "1" : "0.3"} />
@@ -149,17 +176,9 @@ export function BackIcon() {
   );
 }
 
-export function CheckIcon() {
-  return (
-    <Svg>
-      <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-    </Svg>
-  );
-}
-
 export function ChevronIcon() {
   return (
-    <Svg class="chevron-icon">
+    <Svg>
       <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
     </Svg>
   );

@@ -110,6 +110,7 @@ const DemoBody = styled("div", {
   name: "DemoBody",
   defaultProps: {
     display: "flex",
+    flexDirection: "column",
     padding: 24,
     minHeight: 80,
     alignItems: "flex-start",

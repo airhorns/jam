@@ -4,6 +4,12 @@ A scrolling viewport. Vertical by default: content overflows downward and
 scrolls, while the cross axis is clipped so a wide child can never produce a
 second scrollbar. `horizontal` swaps both, and lays children out in a row.
 
+Unlike every other view it shrinks to fit its container (`flex-shrink: 1`),
+because a scroller that grew to its content would never have anything to
+scroll. Its children keep the normal view default and do not shrink, so a
+list of rows stays at its natural height and scrolls rather than being
+squeezed to fit.
+
 ## Usage
 
 ```tsx
@@ -43,8 +49,8 @@ apply directly to its children.
 
 ## Variants
 
-- `unstyled` — the styled default is `flex-direction: column` with
-  `overflow-y: auto` and `overflow-x: hidden`.
+- `unstyled` — the styled default is `flex-direction: column`,
+  `flex-shrink: 1`, `overflow-y: auto` and `overflow-x: hidden`.
 - `horizontal` — `flex-direction: row`, `overflow-x: auto`,
   `overflow-y: hidden`.
 - `showsScrollIndicator` — only the `false` case emits anything.

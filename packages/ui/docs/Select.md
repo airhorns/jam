@@ -46,12 +46,13 @@ Any element as the trigger:
 </Select.Trigger>
 ```
 
-Items must appear in the `Select`'s own children tree (nested in arrays,
-fragments, `Select.Group` or `Select.Viewport` is fine). The root reads each
-item's `value`, `label` and text at render time so `Select.Value` can show the
-selected label and typeahead can work while the list is closed; items
-produced by another component's render are invisible to it. Give an item an
-explicit `label` when its content is not plain text.
+Items can live anywhere under `Select.Content`, including inside your own
+components: the list stays in the DOM (hidden) while closed, and every item
+reports its `value`, `label` and text as it renders, so `Select.Value` shows
+the selected label and typeahead works while the list is closed. Items written
+directly into the tree are known on the first render; ones produced by another
+component are picked up right after it. Give an item an explicit `label` when
+its content is not plain text.
 
 ## Props
 
@@ -84,9 +85,9 @@ explicit `label` when its content is not plain text.
   option's label, else `placeholder` (in `$placeholderColor`, with
   `data-placeholder`). Left-aligned, truncating with an ellipsis, `flex: 1`
   so it fills the trigger.
-- `Select.Content` — the list, rendered in a portal only while open:
-  `role="listbox"`, `aria-labelledby` the trigger, `tabIndex={-1}`,
-  `data-placement`. Fixed-positioned 4px from the trigger with `min-width`
+- `Select.Content` — the list, rendered in a portal and hidden (`hidden`,
+  `display: none`) while closed: `role="listbox"`, `aria-labelledby` the
+  trigger, `tabIndex={-1}`, `data-state`, `data-placement`. Fixed-positioned 4px from the trigger with `min-width`
   equal to the trigger's width. `$background`, 1px `$borderColor`, `$4`
   radius, elevation, `overflow: hidden`; fades in from the trigger's side
   with `animation="quick"`. Variants: `elevate`, `elevation`, `bordered`,

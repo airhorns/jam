@@ -16,6 +16,7 @@ import { FormDemos } from "./demos/Form";
 import { DialogDemos } from "./demos/Dialog";
 import { AlertDialogDemos } from "./demos/AlertDialog";
 import { PopoverDemos } from "./demos/Popover";
+import { MenuDemos } from "./demos/Menu";
 import { SheetDemos } from "./demos/Sheet";
 import { TooltipDemos } from "./demos/Tooltip";
 import { ToastDemos } from "./demos/Toast";
@@ -67,6 +68,7 @@ export const registry: ComponentDemos[] = [
   DialogDemos,
   AlertDialogDemos,
   PopoverDemos,
+  MenuDemos,
   SheetDemos,
   TooltipDemos,
   ToastDemos,

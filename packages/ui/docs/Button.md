@@ -85,10 +85,22 @@ theme. Without an explicit theme the base `light_Button`/`dark_Button`
 gives the neutral filled look. `variant="outlined"` and `ghost` keep the
 theme's `$color` and `$borderColor` on a transparent background.
 
+Colour themes are pale surfaces by design, so a primary call-to-action is
+the `accent` theme, which inverts the palette: `<Button theme="accent">` is
+dark-on-light in light mode and light-on-dark in dark mode. For a coloured
+fill use the compound name, `<Button theme="blue_accent">Save</Button>`,
+which resolves to `light_blue_accent`: a solid blue with white text. Nesting
+`<Theme name="blue"><Button theme="accent">` reaches the same theme.
+
 ## Accessibility
 
 - Renders a real `<button type="button">`, so Space/Enter activate it and it
   participates in forms only when `type="submit"`.
+- `tag="a"` with an `href` makes a link that looks like a button: the `type`
+  attribute is dropped, the frame keeps its `flex` display and pointer
+  cursor, and the browser underline is suppressed. Do not add a click handler
+  that only navigates — let the anchor do it so middle-click and "open in new
+  tab" keep working.
 - `circular` icon-only buttons need an `aria-label`.
 - Focus is shown only for keyboard focus (`:focus-visible`), so pointer
   clicks don't leave a ring behind.

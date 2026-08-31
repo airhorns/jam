@@ -4,16 +4,17 @@ The typography primitives. `Text` is a bare inline `<span>` with text
 wrapping behaviour; `SizableText` adds a `size` token that pulls font size,
 line height, weight and letter spacing from the active font; `Paragraph` is
 body copy in a `<p>`; `Heading` and `H1`–`H6` use the heading font at
-descending sizes.
+descending sizes; `Anchor` is `SizableText` rendered as an `<a>`.
 
 ## Usage
 
 ```tsx
-import { Paragraph, SizableText, H2, Text, YStack } from "@jam/ui";
+import { Anchor, Paragraph, SizableText, H2, Text, YStack } from "@jam/ui";
 
 <YStack gap="$3">
   <H2>Release notes</H2>
   <Paragraph>Body copy at the default size, wrapping normally.</Paragraph>
+  <Anchor href="/changelog" size="$3">Read the full changelog</Anchor>
   <SizableText size="$2" color="$color10">Small secondary text.</SizableText>
   <SizableText size="$6" fontFamily="$heading" fontWeight="700">Custom heading-ish text</SizableText>
   <Text ellipsis maxWidth={200}>A very long single line that truncates with an ellipsis…</Text>
@@ -30,6 +31,7 @@ import { Paragraph, SizableText, H2, Text, YStack } from "@jam/ui";
 | `Paragraph` | `p` | `$body` | `$true` | `white-space: normal`, `user-select: auto`, `$color`. |
 | `Heading` | `span` (`role="heading"`) | `$heading` | `$8` (26px) | Base for the numbered headings; use it when the semantic level is set elsewhere. |
 | `H1` … `H6` | `h1` … `h6` | `$heading` | `$10`, `$9`, `$8`, `$7`, `$6`, `$5` | Real heading elements with zero margin. |
+| `Anchor` | `a` | `$body` | `$true` | `SizableText` as a link: takes `href`, `target` and `rel`, keeps the browser underline (set `textDecorationLine="none"` to drop it) and the theme's `$color` rather than the browser link blue. |
 
 ## Props
 
@@ -75,3 +77,7 @@ for text.
   heading without a level.
 - `Paragraph` renders a `<p>` so screen readers treat it as a block of copy;
   `Text` and `SizableText` are inline and semantically neutral.
+- `Anchor` is a real `<a>`, so it needs an `href` to be focusable and to
+  announce as a link. Its underline is the only colour-independent cue that
+  the text is a link; if you remove it, make sure the surrounding context
+  makes that clear.

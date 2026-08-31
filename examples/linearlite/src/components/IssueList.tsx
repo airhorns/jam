@@ -1,5 +1,6 @@
 import { h } from "@jam/core/jsx";
 import { replace } from "@jam/core";
+import { ListItem, Paragraph, ScrollView, SizableText, Stack, YStack } from "@jam/ui";
 import { formatDate, queryMeta, queryRows, readEntity, readValue } from "../facts";
 import { updateIssue } from "../mutations";
 import { projectPath } from "../projects";
@@ -21,15 +22,39 @@ function IssueRow({ issueId: id }: { issueId: string }) {
   if (!issue?.project) return null;
   const href = projectPath(issue.project, `/issue/${id}`);
   return (
-    <div class="issue-row" data-issue-id={id}>
+    <ListItem.Frame
+      size="$2"
+      height={ROW_HEIGHT}
+      minHeight={ROW_HEIGHT}
+      paddingVertical={0}
+      paddingHorizontal="$4"
+      gap="$2"
+      justifyContent="flex-start"
+      borderBottomWidth={1}
+      borderColor="$borderColor"
+      data-testid="issue-row"
+      data-issue-id={id}
+    >
       <PriorityMenu menu={`row-priority:${id}`} value={issue.priority} onChange={(priority) => updateIssue(id, { priority })} />
       <StatusMenu menu={`row-status:${id}`} value={issue.status} onChange={(status) => updateIssue(id, { status })} />
-      <a class="issue-row-title" href={href} onClick={link(href)}>
+      <ListItem.Title
+        tag="a"
+        href={href}
+        onClick={link(href)}
+        fontWeight="500"
+        cursor="pointer"
+        textDecorationLine="none"
+        minWidth={48}
+        hoverStyle={{ color: "$blue10" }}
+        data-testid="issue-row-title"
+      >
         {issue.title}
-      </a>
-      <span class="issue-row-date">{formatDate(issue.created)}</span>
+      </ListItem.Title>
+      <SizableText size="$2" width={56} textAlign="right" color="$color10" whiteSpace="nowrap" flexShrink={0} $max-sm={{ display: "none" }}>
+        {formatDate(issue.created)}
+      </SizableText>
       <Avatar name={issue.username} />
-    </div>
+    </ListItem.Frame>
   );
 }
 
@@ -40,19 +65,19 @@ export function IssueList({ route }: { route: Route }) {
   const above = meta.offset * ROW_HEIGHT;
   const below = Math.max(0, meta.total - meta.offset - ids.length) * ROW_HEIGHT;
   return (
-    <div class="issue-list">
-      <div class="issue-list-scroll" key={route.url} onScroll={onScroll}>
-        <div class="issue-list-spacer" key="above" style={`height: ${above}px`} />
+    <ScrollView flex={1} key={route.url} onScroll={onScroll} data-testid="issue-list-scroll">
+      <YStack role="list" aria-label="Issues">
+        <Stack key="above" height={above} aria-hidden="true" />
         {ids.map((id) => (
           <IssueRow key={id} issueId={id} />
         ))}
-        <div class="issue-list-spacer" key="below" style={`height: ${below}px`} />
-        {meta.ready && ids.length === 0 && (
-          <div class="empty-state" key="empty">
-            No issues match this view.
-          </div>
-        )}
-      </div>
-    </div>
+        <Stack key="below" height={below} aria-hidden="true" />
+      </YStack>
+      {meta.ready && ids.length === 0 && (
+        <Paragraph key="empty" paddingVertical="$10" textAlign="center" color="$color10" data-testid="empty-state">
+          No issues match this view.
+        </Paragraph>
+      )}
+    </ScrollView>
   );
 }

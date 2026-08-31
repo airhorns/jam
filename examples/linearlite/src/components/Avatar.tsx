@@ -1,4 +1,5 @@
 import { h } from "@jam/core/jsx";
+import { Avatar as UIAvatar, SizableText } from "@jam/ui";
 
 function hue(name: string): number {
   let hash = 0;
@@ -6,7 +7,7 @@ function hue(name: string): number {
   return hash % 360;
 }
 
-export function Avatar({ name }: { name?: unknown }) {
+export function Avatar({ name, size = 22 }: { name?: unknown; size?: number }) {
   const label = typeof name === "string" && name ? name : "?";
   const initials = label
     .split(/[\s._-]+/)
@@ -16,8 +17,12 @@ export function Avatar({ name }: { name?: unknown }) {
     .slice(0, 2)
     .toUpperCase();
   return (
-    <span class="avatar" title={label} style={`background: hsl(${hue(label)} 55% 48%)`}>
-      {initials}
-    </span>
+    <UIAvatar size={size} circular title={label} aria-label={label} data-testid="avatar" data-user={label}>
+      <UIAvatar.Fallback backgroundColor={`hsl(${hue(label)} 55% 48%)`}>
+        <SizableText size="$1" fontSize={Math.round(size * 0.42)} fontWeight="700" color="#fff">
+          {initials}
+        </SizableText>
+      </UIAvatar.Fallback>
+    </UIAvatar>
   );
 }

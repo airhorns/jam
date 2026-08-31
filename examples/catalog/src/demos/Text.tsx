@@ -1,5 +1,5 @@
 import { h } from "@jam/core/jsx";
-import { YStack, XStack, Text, SizableText, Paragraph, Heading, H1, H2, H3, H4, H5, H6 } from "@jam/ui";
+import { YStack, XStack, Text, SizableText, Paragraph, Heading, H1, H2, H3, H4, H5, H6, Anchor } from "@jam/ui";
 import type { ComponentDemos } from "../types";
 
 export const TextDemos: ComponentDemos = {
@@ -61,6 +61,18 @@ export const TextDemos: ComponentDemos = {
           <Text fontFamily="$mono">Monospace</Text>
           <Text textTransform="uppercase" letterSpacing={1}>Uppercase</Text>
           <Text numberOfLines={1} width={120}>Truncated to one line with ellipsis</Text>
+        </XStack>
+      ),
+    },
+    {
+      title: "Anchor",
+      description: "SizableText rendered as a link: the theme colour with the browser underline, unless styled away.",
+      render: () => (
+        <XStack gap="$space.4" flexWrap="wrap" alignItems="baseline">
+          <Anchor href="#anchor">Default link</Anchor>
+          <Anchor href="#anchor" size="$2" color="$color10">Small, muted</Anchor>
+          <Anchor href="#anchor" textDecorationLine="none" color="$blue10" fontWeight="600">No underline</Anchor>
+          <Anchor href="https://example.com" target="_blank" rel="noreferrer">Opens in a new tab ↗</Anchor>
         </XStack>
       ),
     },

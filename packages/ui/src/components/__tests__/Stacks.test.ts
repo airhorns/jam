@@ -18,6 +18,8 @@ describe("Stack", () => {
       "flex-direction": "column",
       "align-items": "stretch",
       "box-sizing": "border-box",
+      "flex-basis": "auto",
+      "flex-shrink": "0",
       "min-width": "0",
       "min-height": "0",
     });

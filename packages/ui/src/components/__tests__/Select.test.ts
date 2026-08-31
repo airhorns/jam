@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { h } from "@jam/core/jsx";
+import { $, _, claim, forget, replace, when } from "@jam/core";
 import { render, css, setupDefaultUI, click, keydown, tick } from "../../testing";
 import { Select } from "../Select";
 import { Button } from "../Button";
@@ -59,7 +60,7 @@ function Example(props: ExampleProps) {
 
 describe("Select", () => {
   it("renders a combobox trigger showing the placeholder until a value is chosen", () => {
-    const { get, query } = render(h(Example, { defaultValue: undefined }));
+    const { get } = render(h(Example, { defaultValue: undefined }));
     const trigger = get("[data-testid=trigger]");
     expect(trigger.tagName).toBe("BUTTON");
     expect(trigger.getAttribute("role")).toBe("combobox");
@@ -71,7 +72,7 @@ describe("Select", () => {
     expect(value.textContent).toBe("Pick a fruit");
     expect(value.hasAttribute("data-placeholder")).toBe(true);
     expect(css(value)).toMatchObject({ color: "var(--placeholderColor)", "text-overflow": "ellipsis", "text-align": "left" });
-    expect(query("[data-testid=content]")).toBeNull();
+    expect(get("[data-testid=content]").hidden).toBe(true);
   });
 
   it("opens a listbox from the trigger sized to it and selects on click", async () => {
@@ -108,7 +109,7 @@ describe("Select", () => {
 
     click(get("[data-testid=item-cherry]"));
     expect(onValueChange).toHaveBeenCalledWith("cherry");
-    expect(query("[data-testid=content]")).toBeNull();
+    expect(get("[data-testid=content]").hidden).toBe(true);
     expect(get("[data-testid=value]").textContent).toBe("Cherry");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     await tick();
@@ -154,7 +155,7 @@ describe("Select", () => {
   });
 
   it("opens from the keyboard and moves focus through enabled options", async () => {
-    const { get, query } = render(h(Example, { disabledItems: ["blueberry"] }));
+    const { get } = render(h(Example, { disabledItems: ["blueberry"] }));
     const trigger = get("[data-testid=trigger]");
     trigger.focus();
     expect(keydown(trigger, "ArrowDown").defaultPrevented).toBe(true);
@@ -182,7 +183,7 @@ describe("Select", () => {
     expect(css(blueberry)).toMatchObject({ opacity: "0.5", "pointer-events": "none", cursor: "not-allowed" });
 
     keydown(document.activeElement!, "Enter");
-    expect(query("[data-testid=content]")).toBeNull();
+    expect(get("[data-testid=content]").hidden).toBe(true);
     expect(get("[data-testid=value]").textContent).toBe("Banana");
     await tick();
     expect(document.activeElement).toBe(trigger);
@@ -191,7 +192,7 @@ describe("Select", () => {
     await tick();
     expect(document.activeElement).toBe(get("[data-testid=item-banana]"));
     keydown(document.activeElement!, "Escape");
-    expect(query("[data-testid=content]")).toBeNull();
+    expect(get("[data-testid=content]").hidden).toBe(true);
     expect(get("[data-testid=value]").textContent).toBe("Banana");
   });
 
@@ -229,20 +230,20 @@ describe("Select", () => {
   });
 
   it("closes on Tab and on outside press without changing the value", () => {
-    const { get, query } = render(h("div", null, h(Example, { defaultValue: "apple" }), h("button", { "data-testid": "outside" }, "Outside")));
+    const { get } = render(h("div", null, h(Example, { defaultValue: "apple" }), h("button", { "data-testid": "outside" }, "Outside")));
     const trigger = get("[data-testid=trigger]");
     click(trigger);
     keydown(get("[data-testid=content]"), "Tab");
-    expect(query("[data-testid=content]")).toBeNull();
+    expect(get("[data-testid=content]").hidden).toBe(true);
     click(trigger);
-    expect(query("[data-testid=content]")).not.toBeNull();
+    expect(get("[data-testid=content]").hidden).toBe(false);
     click(get("[data-testid=outside]"));
-    expect(query("[data-testid=content]")).toBeNull();
+    expect(get("[data-testid=content]").hidden).toBe(true);
     expect(get("[data-testid=value]").textContent).toBe("Apple");
   });
 
   it("submits its value through a hidden input and respects disabled", () => {
-    const { get, query, container } = render(h(Example, { name: "fruit", defaultValue: "cherry", disabled: true }));
+    const { get, container } = render(h(Example, { name: "fruit", defaultValue: "cherry", disabled: true }));
     const input = container.querySelector<HTMLInputElement>("input[name=fruit]")!;
     expect(input.type).toBe("hidden");
     expect(input.value).toBe("cherry");
@@ -250,19 +251,19 @@ describe("Select", () => {
     expect(trigger.hasAttribute("disabled")).toBe(true);
     click(trigger);
     keydown(trigger, "ArrowDown");
-    expect(query("[data-testid=content]")).toBeNull();
+    expect(get("[data-testid=content]").hidden).toBe(true);
   });
 
   it("supports controlled value and open state", () => {
     const onValueChange = vi.fn();
     const onOpenChange = vi.fn();
-    const { get, query } = render(h(Example, { value: "apple", open: true, onValueChange, onOpenChange }));
+    const { get } = render(h(Example, { value: "apple", open: true, onValueChange, onOpenChange }));
     expect(get("[data-testid=value]").textContent).toBe("Apple");
     click(get("[data-testid=item-cherry]"));
     expect(onValueChange).toHaveBeenCalledWith("cherry");
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(get("[data-testid=value]").textContent).toBe("Apple");
-    expect(query("[data-testid=content]")).not.toBeNull();
+    expect(get("[data-testid=content]").hidden).toBe(false);
   });
 
   it("uses explicit item labels and custom Value children", () => {
@@ -280,6 +281,43 @@ describe("Select", () => {
     keydown(trigger, "c");
     click(trigger);
     expect(get("[data-testid=item]").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("discovers items rendered by other components and follows them as they change", async () => {
+    function FruitItem(props: { value: string; label: string }) {
+      return h(Select.Item, { value: props.value, "data-testid": `item-${props.value}` }, h(Select.ItemText, null, props.label));
+    }
+    function Fruits() {
+      return when(["fruits", "name", $.name]).map((row) => h(FruitItem, { key: row.name as string, value: (row.name as string).toLowerCase(), label: row.name as string }));
+    }
+    replace("fruits", "name", "Banana");
+    const onValueChange = vi.fn();
+    const { get, all, unmount } = render(
+      h(
+        Select,
+        { defaultValue: "banana", onValueChange },
+        h(Select.Trigger, { "data-testid": "trigger" }, h(Select.Value, { placeholder: "Pick", "data-testid": "value" })),
+        h(Select.Content, { "data-testid": "content" }, h(Fruits, null)),
+      ),
+    );
+    await tick();
+    expect(get("[data-testid=value]").textContent).toBe("Banana");
+    expect(get("[data-testid=content]").hidden).toBe(true);
+
+    claim("fruits", "name", "Cherry");
+    await tick();
+    const trigger = get("[data-testid=trigger]");
+    keydown(trigger, "c");
+    expect(onValueChange).toHaveBeenLastCalledWith("cherry");
+    expect(get("[data-testid=value]").textContent).toBe("Cherry");
+
+    keydown(trigger, "Enter");
+    await tick();
+    expect(all("[role=option]").map((el) => el.textContent)).toEqual(["Banana", "Cherry"]);
+    expect(document.activeElement).toBe(get("[data-testid=item-cherry]"));
+    unmount();
+    expect(when([$.id, "options", $.json])).toEqual([]);
+    forget("fruits", _, _);
   });
 
   it("merges the trigger onto a custom element with asChild", () => {

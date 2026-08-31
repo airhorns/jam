@@ -111,6 +111,24 @@ describe("mount: html", () => {
     expect(checkbox.disabled).toBe(true);
   });
 
+  it("removes attributes it set once their props go away, but leaves attributes set outside the renderer alone", () => {
+    replace("row", "busy", true);
+    const Row = () => {
+      const [{ busy }] = when(["row", "busy", $.busy]);
+      return h("div", busy ? { "aria-busy": "true", title: "Working" } : { title: "Idle" });
+    };
+    unmount = mount(h(Row, null), container);
+    const div = container.firstElementChild as HTMLElement;
+    div.setAttribute("data-dragging", "");
+    div.style.transform = "translateX(4px)";
+
+    replace("row", "busy", false);
+    expect(div.hasAttribute("aria-busy")).toBe(false);
+    expect(div.getAttribute("title")).toBe("Idle");
+    expect(div.hasAttribute("data-dragging")).toBe(true);
+    expect(div.style.transform).toBe("translateX(4px)");
+  });
+
   it("re-renders a nested component in the DOM when its when() dependency changes", () => {
     replace("counter", "n", 1);
     const Count = () => h("b", null, String(when(["counter", "n", $.n])[0].n));

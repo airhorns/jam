@@ -215,7 +215,7 @@ export const DialogContentFrame = styled(YStack, {
         maxWidth: "min(90vw, 560px)",
         maxHeight: "85vh",
         overflow: "auto",
-        outlineWidth: 0,
+        outlineStyle: "none",
         enterStyle: { opacity: 0, scale: 0.96, y: 10 },
       },
     },

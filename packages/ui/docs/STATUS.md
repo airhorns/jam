@@ -157,11 +157,6 @@ round, and the examples now wrap or scroll horizontally at phone widths.
 
 **Known constraints.**
 
-- Attributes and inline styles set imperatively by event handlers are removed
-  on the next reconcile; components must drive the DOM through facts.
-- `Select` discovers its options by walking its own VNode children, so items
-  must be direct descendants (arrays/fragments/`Group` are fine), not rendered
-  by another component.
 - `$backgroundActive` equals `$background` and `$borderColor` in the base
   light theme equals the `Button` background, as in tamagui's v4 templates.
 - Plain `Card` and `Avatar` fallbacks share the page background in the
@@ -237,3 +232,75 @@ selection" (reported as `""`), a `data-handles-escape` marker so Escape on a foc
 longer also closes the dialog under it, `aria-labelledby` on `Select.Group`
 only when it has a `Select.Label`, and scrollbar-width compensation in the
 body scroll lock so opening a modal doesn't shift the page.
+
+## After the real-app round
+
+Two example applications were ported wholesale onto the library —
+`examples/obsidian-clone` and `examples/linearlite` — with their hand-written
+CSS deleted, and every rough edge the ports hit was fixed in the library or
+core rather than worked around in the app.
+
+**Menu.** `Menu` is a new primitive (Trigger, Content, Item, CheckboxItem,
+RadioGroup/RadioItem, ItemIndicator, Group, Label, Separator, Arrow) following
+the APG menu button pattern and Radix `DropdownMenu`'s keyboard, typeahead and
+pointer behaviour, with a 29-test conformance suite. The examples' hand-rolled
+`role="menu"` popovers are gone.
+
+**Style system.** Defaulted variants apply before the ones a caller sets, so
+`pressTheme` on a `ListItem` beats the `unstyled: false` defaults declared
+after it (tamagui applies explicit variants in definition order, which the
+port hit as a row that took `pressTheme` but kept `cursor: default`). Every
+component suppresses Chrome's focus ring with `outline-style: none` rather
+than `outline-width: 0`, which Chrome ignores for its `outline-style: auto`
+ring. A `numberOfLines` clamp sets `white-space: normal` so a clamped
+subtitle wraps instead of truncating on its first line.
+
+**Components.** `ListItem.Frame` rendered as a `button` or `a` keeps its
+native role instead of `role="listitem"`. `Select` no longer needs its items
+to be direct VNode descendants: the content stays mounted (hidden) while
+closed and items register themselves as they render, publishing the option
+list as a fact after the pass when it differs from the first-render guess, so
+`Select.Value` and typeahead see items produced by any component. The theme
+fact moved from the `ui` entity to `jam-ui` so it cannot collide with an
+application's own `ui` facts.
+
+**Core.** The renderer remembers which attributes it set on each element and
+sweeps only those, so an attribute or inline style an event handler sets
+imperatively (`data-dragging`, a transform during a drag) survives the next
+reconcile.
+
+**Conformance.** Suites now also cover `Form`, `Input`/`TextArea`, `Label`,
+`Avatar`, `Progress` and `ScrollView`, which fixed `TextArea` dropping its
+`defaultValue`, `Progress` emitting `NaN%` for a non-positive `max`, and added
+`getValueLabel` plus indicator `data-value`/`data-max`.
+
+**QA.** Cheap agents then worked both apps as a user would — every route in
+both schemes and at 390/768/1024/1280 px, keyboard-only, and with the fact
+log open. Their findings split three ways. *Library:* `<Button tag="a">`
+rendered with `type="button"` and a browser underline, so link-buttons and
+`ListItem` link rows carried `textDecorationLine="none"` everywhere; both
+now suppress it (tamagui's `reset.css` does the same), the `type` is dropped
+for non-button tags, and `ListItem` rows rendered as `button`/`a` get the
+pointer cursor. Stacks shrank below their content like ordinary `div`s, so
+every fixed-width sidebar, list row and card in the apps carried
+`flexShrink={0}`; `Stack` now has React Native's `flex-shrink: 0` /
+`flex-basis: auto` and only `ScrollView` shrinks (`flex-shrink: 1`), which
+also un-squashed the catalog's Sheet and Tab-bar lists. `Anchor` exists.
+`Button.md` documents `theme="blue_accent"` as the coloured CTA, `Slot.md`
+that an `asChild` child which is your own component must spread the props it
+receives, `Portal.md` that click-away logic should test
+`closest("[data-layer], [data-layer-trigger]")` rather than `contains`.
+*App bugs worth recording:* linearlite duplicated the overlays' Escape and
+click-away handling in its own document listeners, so Escape in a menu inside
+the new-issue dialog closed both — the app handlers are gone and the overlays
+report through `onOpenChange`; the obsidian seed notes were stamped with
+`Date.now()` so a fresh vault said "edited just now". *Deliberately left:*
+sidebar collapse on phones, a roving-focus note list and pglite's two
+`ErrnoError` page errors on boot.
+
+**Core observation.** A keystroke in the obsidian editor re-expands the whole
+tree, ~30 ms with two notes and ~84 ms with forty-two, because any fact
+change reruns the single `expandTree` reaction. Nothing in the apps is slow
+enough to block on it yet, but it is the ceiling on how large a `@jam/ui` app
+can get before renders need to be scoped to the components whose facts
+changed.

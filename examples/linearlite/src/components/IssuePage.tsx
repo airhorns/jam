@@ -1,5 +1,7 @@
 import { h } from "@jam/core/jsx";
+import type { VChild } from "@jam/core/jsx";
 import { _, forget, replace, when } from "@jam/core";
+import { AlertDialog, Button, Card, Form, H3, Input, Paragraph, ScrollView, Separator, SizableText, TextArea, XStack, YStack } from "@jam/ui";
 import { formatDate, queryMeta, queryRows, readEntity } from "../facts";
 import { addComment, deleteIssue, updateIssue } from "../mutations";
 import { forgetRecent } from "../programs/recent";
@@ -15,22 +17,27 @@ function CommentItem({ commentId: id }: { commentId: string }) {
   const comment = readEntity<Comment>("comment", id);
   if (!comment) return null;
   return (
-    <div class="comment" data-comment-id={id}>
+    <XStack gap="$2.5" data-testid="comment" data-comment-id={id}>
       <Avatar name={comment.username} />
-      <div class="comment-body">
-        <div class="comment-meta">
-          <span class="comment-author">{comment.username}</span>
-          <span class="comment-date">{formatDate(comment.created)}</span>
-        </div>
-        <div class="comment-text">{comment.body}</div>
-      </div>
-    </div>
+      <Card flex={1} size="$3" bordered padded gap="$1" backgroundColor="$color2">
+        <XStack alignItems="center" gap="$2">
+          <SizableText size="$1" fontWeight="500" data-testid="comment-author">
+            {comment.username}
+          </SizableText>
+          <SizableText size="$1" color="$color10">
+            {formatDate(comment.created)}
+          </SizableText>
+        </XStack>
+        <Paragraph size="$2" margin={0} whiteSpace="pre-wrap" data-testid="comment-text">
+          {comment.body}
+        </Paragraph>
+      </Card>
+    </XStack>
   );
 }
 
 function submitComment(issueId: string) {
   return (event: Event) => {
-    event.preventDefault();
     const input = (event.currentTarget as HTMLFormElement).querySelector("textarea");
     const body = input?.value.trim();
     if (!input || !body) return;
@@ -42,53 +49,87 @@ function submitComment(issueId: string) {
 function Comments({ issueId }: { issueId: string }) {
   const ids = queryRows("comments");
   return (
-    <section class="comments">
-      <h3 class="comments-heading">
-        Comments <span class="comments-count">{ids.length}</span>
-      </h3>
-      <div class="comment-list">
+    <YStack tag="section" marginTop="$7" paddingTop="$5" gap="$3" borderTopWidth={1} borderColor="$borderColor">
+      <H3 size="$3" margin={0} data-testid="comments-heading">
+        Comments{" "}
+        <SizableText size="$3" color="$color10" fontWeight="400">
+          {ids.length}
+        </SizableText>
+      </H3>
+      <YStack gap="$3">
         {ids.map((id) => (
           <CommentItem key={id} commentId={id} />
         ))}
-      </div>
-      <form class="comment-form" onSubmit={submitComment(issueId)}>
-        <textarea class="comment-input" placeholder="Leave a comment…" rows="3" />
-        <button type="submit" class="button primary">
-          Comment
-        </button>
-      </form>
-    </section>
+      </YStack>
+      <Form onSubmit={submitComment(issueId)} alignItems="flex-end" gap="$2" marginTop="$3">
+        <TextArea
+          size="$3"
+          rows={3}
+          width="100%"
+          placeholder="Leave a comment…"
+          aria-label="Comment"
+          data-testid="comment-input"
+        />
+        <Form.Trigger asChild>
+          <Button size="$3" theme="blue_accent" data-testid="comment-submit">
+            Comment
+          </Button>
+        </Form.Trigger>
+      </Form>
+    </YStack>
   );
 }
 
 function DeleteControls({ issueId: id, backHref }: { issueId: string; backHref: string }) {
   const confirming = when(["ui", "confirm", "delete", id]).length > 0;
-  if (!confirming) {
-    return (
-      <button type="button" class="button subtle delete-button" onClick={() => replace("ui", "confirm", "delete", id)}>
-        Delete
-      </button>
-    );
-  }
   return (
-    <span class="delete-confirm">
-      <span>Delete this issue?</span>
-      <button
-        type="button"
-        class="button danger confirm-delete-button"
-        onClick={() => {
-          forget("ui", "confirm", "delete", _);
-          forgetRecent(id);
-          deleteIssue(id);
-          navigate(backHref);
-        }}
-      >
-        Delete
-      </button>
-      <button type="button" class="button subtle" onClick={() => forget("ui", "confirm", "delete", _)}>
-        Cancel
-      </button>
-    </span>
+    <AlertDialog
+      open={confirming}
+      onOpenChange={(open) => (open ? replace("ui", "confirm", "delete", id) : forget("ui", "confirm", "delete", _))}
+    >
+      <AlertDialog.Trigger asChild>
+        <Button size="$2" chromeless color="$color11" data-testid="delete-button">
+          Delete
+        </Button>
+      </AlertDialog.Trigger>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay />
+        <AlertDialog.Content width={420} data-testid="delete-confirm">
+          <AlertDialog.Title size="$5">Delete this issue?</AlertDialog.Title>
+          <AlertDialog.Description>Its comments go with it, and the change syncs to everyone on the project.</AlertDialog.Description>
+          <XStack gap="$3" justifyContent="flex-end">
+            <AlertDialog.Cancel size="$3" data-testid="cancel-delete-button">
+              Cancel
+            </AlertDialog.Cancel>
+            <AlertDialog.Action
+              size="$3"
+              theme="red"
+              data-testid="confirm-delete-button"
+              onClick={() => {
+                forgetRecent(id);
+                deleteIssue(id);
+                navigate(backHref);
+              }}
+            >
+              Delete
+            </AlertDialog.Action>
+          </XStack>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog>
+  );
+}
+
+function Property({ label, children }: { label: string; children?: VChild }) {
+  return (
+    <XStack alignItems="center" gap="$2" minHeight={28}>
+      <SizableText size="$2" width={72} flexShrink={0} color="$color10">
+        {label}
+      </SizableText>
+      <XStack alignItems="center" gap="$2" flexGrow={1} minWidth={0}>
+        {children}
+      </XStack>
+    </XStack>
   );
 }
 
@@ -99,65 +140,97 @@ export function IssuePage({ route }: { route: Route }) {
   const meta = queryMeta("detail");
   if (!issue || issue.project !== route.projectId) {
     return (
-      <div class="issue-page">
-        <div class="issue-missing">{meta.ready ? "This issue doesn't exist." : "Loading…"}</div>
-      </div>
+      <YStack flex={1} padding="$10" alignItems="center">
+        <Paragraph color="$color10" data-testid="issue-missing">
+          {meta.ready ? "This issue doesn't exist." : "Loading…"}
+        </Paragraph>
+      </YStack>
     );
   }
   return (
-    <div class="issue-page">
-      <header class="issue-header">
-        <a class="button subtle back-link" href={backHref} onClick={link(backHref)}>
-          <BackIcon />
+    <YStack flex={1} minHeight={0} data-testid="issue-page">
+      <XStack tag="header" alignItems="center" gap="$2.5" height={48} paddingHorizontal="$4" borderBottomWidth={1} borderColor="$borderColor">
+        <Button
+          tag="a"
+          href={backHref}
+          onClick={link(backHref)}
+          size="$2"
+          chromeless
+          icon={<BackIcon />}
+          color="$color11"
+          data-testid="back-link"
+        >
           Back
-        </a>
-        <span class="issue-header-title">Issue</span>
-        <span class="issue-header-spacer" />
+        </Button>
+        <SizableText size="$3" fontWeight="600">
+          Issue
+        </SizableText>
+        <XStack flexGrow={1} />
         <DeleteControls issueId={id} backHref={backHref} />
-      </header>
-      <div class="issue-body">
-        <main class="issue-main">
-          <input
-            class="issue-title"
+      </XStack>
+      <XStack flex={1} minHeight={0}>
+        <ScrollView tag="main" flex={1} minWidth={0} paddingVertical="$6" paddingHorizontal="$7" gap="$3">
+          <Input
+            size="$4"
+            height="auto"
+            flexShrink={0}
+            paddingVertical="$2"
+            fontSize={20}
+            fontWeight="600"
+            backgroundColor="transparent"
+            borderColor="transparent"
             value={issue.title ?? ""}
             placeholder="Issue title"
-            onInput={(event: Event) => updateIssue(id, { title: (event.target as HTMLInputElement).value })}
+            aria-label="Issue title"
+            data-testid="issue-title"
+            hoverStyle={{ borderColor: "$borderColor" }}
+            onChangeText={(text) => updateIssue(id, { title: text })}
           />
-          <textarea
-            class="issue-description"
+          <TextArea
+            size="$3"
+            rows={10}
+            flexShrink={0}
+            backgroundColor="transparent"
+            borderColor="transparent"
             value={issue.description ?? ""}
             placeholder="Add a description…"
-            rows="10"
-            onInput={(event: Event) => updateIssue(id, { description: (event.target as HTMLTextAreaElement).value })}
+            aria-label="Description"
+            data-testid="issue-description"
+            hoverStyle={{ borderColor: "$borderColor" }}
+            onChangeText={(text) => updateIssue(id, { description: text })}
           />
           <Comments issueId={id} />
-        </main>
-        <aside class="issue-sidebar">
-          <div class="issue-property">
-            <span class="issue-property-label">Status</span>
+        </ScrollView>
+        <YStack
+          tag="aside"
+          width={260}
+          $max-md={{ display: "none" }}
+          paddingVertical="$6"
+          paddingHorizontal="$5"
+          gap="$3.5"
+          borderLeftWidth={1}
+          borderColor="$borderColor"
+          data-testid="issue-sidebar"
+        >
+          <Property label="Status">
             <StatusMenu menu="detail-status" value={issue.status} showLabel onChange={(status) => updateIssue(id, { status })} />
-          </div>
-          <div class="issue-property">
-            <span class="issue-property-label">Priority</span>
+          </Property>
+          <Property label="Priority">
             <PriorityMenu menu="detail-priority" value={issue.priority} showLabel onChange={(priority) => updateIssue(id, { priority })} />
-          </div>
-          <div class="issue-property">
-            <span class="issue-property-label">Assignee</span>
-            <span class="issue-property-value">
-              <Avatar name={issue.username} />
-              {issue.username}
-            </span>
-          </div>
-          <div class="issue-property">
-            <span class="issue-property-label">Created</span>
-            <span class="issue-property-value">{formatDate(issue.created)}</span>
-          </div>
-          <div class="issue-property">
-            <span class="issue-property-label">Updated</span>
-            <span class="issue-property-value">{formatDate(issue.modified)}</span>
-          </div>
-        </aside>
-      </div>
-    </div>
+          </Property>
+          <Separator />
+          <Property label="Assignee">
+            <Avatar name={issue.username} />
+            <SizableText size="$2">{issue.username}</SizableText>
+          </Property>
+          <Property label="Created">
+            <SizableText size="$2">{formatDate(issue.created)}</SizableText>
+          </Property>
+          <Property label="Updated">
+            <SizableText size="$2">{formatDate(issue.modified)}</SizableText>
+          </Property>
+        </YStack>
+      </XStack>
+    </YStack>
   );
 }

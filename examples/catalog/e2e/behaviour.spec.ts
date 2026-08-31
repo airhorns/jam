@@ -198,14 +198,14 @@ test.describe("keyboard interaction", () => {
     await page.keyboard.type("pe");
     await expect(page.locator("[role=option]:focus")).toHaveText("Peach");
     await page.keyboard.press("Enter");
-    await expect(listbox).toHaveCount(0);
+    await expect(listbox).toBeHidden();
     await expect(page.getByTestId("fruit-value")).toHaveText("Selected: peach");
     await expect(trigger).toBeFocused();
 
     await trigger.press("ArrowDown");
     await expect(listbox).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(listbox).toHaveCount(0);
+    await expect(listbox).toBeHidden();
     await expect(page.getByTestId("fruit-value")).toHaveText("Selected: peach");
   });
 

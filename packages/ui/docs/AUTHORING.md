@@ -58,7 +58,14 @@ Read `STYLE-SYSTEM.md` first.
   `borderRadius: 100000` for circles.
 - Pseudo states use `hoverStyle`/`pressStyle`/`focusVisibleStyle`/
   `disabledStyle`; disabled elements get the real `disabled` attribute.
+- Suppress a focus ring with `outlineStyle: "none"`, never `outlineWidth: 0`
+  (Chrome paints its `outline-style: auto` ring regardless of the width).
 - Transitions via `animation="quick"` etc., not literal `transition` strings.
+- Rendering runs inside a tracked MobX derivation, so never write facts from
+  a component body. Work that must happen after the DOM is committed (focus,
+  measuring, publishing what children registered) goes in a `queueMicrotask`
+  scheduled from render, guarded by a check that the component is still
+  mounted; `layers.ts` and `Select`'s option registry are the pattern.
 
 ## Per-component checklist
 
