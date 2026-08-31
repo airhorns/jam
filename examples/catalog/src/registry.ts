@@ -1,4 +1,6 @@
-import type { ComponentDemos, DemoGroup } from "./types";
+import { DOC_GROUPS, groupDocs, type DocGroup } from "@jam/ui/docs";
+import type { CatalogEntry, ComponentDemos, DemoGroup, ExampleDemos } from "./types";
+import { componentDocs } from "./docs";
 import { StacksDemos } from "./demos/Stacks";
 import { GroupDemos } from "./demos/Group";
 import { SeparatorDemos, SpacerDemos, ScrollViewDemos, ShapesDemos, VisuallyHiddenDemos } from "./demos/Misc";
@@ -28,6 +30,8 @@ import { ProgressDemos } from "./demos/Progress";
 import { SpinnerDemos } from "./demos/Spinner";
 import { AccordionDemos } from "./demos/Accordion";
 import { TabsDemos } from "./demos/Tabs";
+import { PortalDemos } from "./demos/Portal";
+import { SlotDemos } from "./demos/Slot";
 import { SignInExample } from "./demos/examples/SignIn";
 import { InputsExample } from "./demos/examples/Inputs";
 import { CheckboxCardsExample } from "./demos/examples/CheckboxCards";
@@ -47,7 +51,8 @@ import { StoreExample } from "./demos/examples/Store";
 import { OnboardingExample } from "./demos/examples/Onboarding";
 import { MicrointeractionsExample } from "./demos/examples/Microinteractions";
 
-export const registry: ComponentDemos[] = [
+/** Demos per documented component, in the order they appear within their group. */
+const componentDemos: ComponentDemos[] = [
   StacksDemos,
   GroupDemos,
   SeparatorDemos,
@@ -80,7 +85,12 @@ export const registry: ComponentDemos[] = [
   SpinnerDemos,
   AccordionDemos,
   TabsDemos,
+  PortalDemos,
+  SlotDemos,
   VisuallyHiddenDemos,
+];
+
+const examples: ExampleDemos[] = [
   SignInExample,
   InputsExample,
   CheckboxCardsExample,
@@ -101,18 +111,28 @@ export const registry: ComponentDemos[] = [
   MicrointeractionsExample,
 ];
 
-export const groupOrder: DemoGroup[] = [
-  "Layout",
-  "Typography",
-  "Forms",
-  "Overlays",
-  "Content",
-  "Feedback",
-  "Navigation",
-  "Utilities",
-  "Examples",
+type DocumentedEntry = CatalogEntry & { group: DocGroup };
+
+function documentedEntries(): DocumentedEntry[] {
+  const entries = componentDemos.map((demos): DocumentedEntry => {
+    const doc = componentDocs.find((d) => d.name === demos.name);
+    if (!doc) throw new Error(`Demos for "${demos.name}" have no doc in .agents/skills/jam-ui/components/${demos.name}.md`);
+    return { name: doc.name, group: doc.group, description: doc.description, demos: demos.demos, doc };
+  });
+  const undemonstrated = componentDocs.filter((doc) => !componentDemos.some((demos) => demos.name === doc.name));
+  if (undemonstrated.length > 0) {
+    throw new Error(`Docs without demos in examples/catalog/src/demos: ${undemonstrated.map((doc) => doc.name).join(", ")}`);
+  }
+  return [...groupDocs(entries).values()].flat();
+}
+
+export const registry: CatalogEntry[] = [
+  ...documentedEntries(),
+  ...examples.map((example): CatalogEntry => ({ ...example, group: "Examples" })),
 ];
 
-export function findComponent(name: string): ComponentDemos | undefined {
+export const groupOrder: DemoGroup[] = [...DOC_GROUPS, "Examples"];
+
+export function findComponent(name: string): CatalogEntry | undefined {
   return registry.find((c) => c.name.toLowerCase() === name.toLowerCase());
 }

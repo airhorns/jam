@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import type { VChild, VNode } from "@jam/core/jsx";
 import { XStack, YStack, H4, H5, Paragraph, SizableText, Button, Card, ScrollView, Tabs, Square, styled } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { PhoneFrame } from "./shared";
 import { BellIcon, HeartIcon, HomeIcon, InboxIcon, SearchIcon, UserIcon, ChevronRightIcon, ClockIcon, StarIcon, ZapIcon } from "./icons";
@@ -369,9 +369,8 @@ function SwipeableTabsScreen() {
   );
 }
 
-export const TabBarExample: ComponentDemos = {
+export const TabBarExample: ExampleDemos = {
   name: "Tab bar",
-  group: "Examples",
   description: "Mobile tab navigation: a classic bottom bar, a floating pill with a sliding indicator, and top tabs driving a swipeable pager.",
   demos: [
     {

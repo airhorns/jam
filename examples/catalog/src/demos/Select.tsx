@@ -23,8 +23,6 @@ function fruitItems(disabled: string[] = []) {
 
 export const SelectDemos: ComponentDemos = {
   name: "Select",
-  group: "Forms",
-  description: "A single-choice dropdown: combobox trigger, floating listbox sized to it, keyboard navigation and typeahead.",
   demos: [
     {
       title: "Controlled",

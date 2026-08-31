@@ -11,8 +11,6 @@ const panels = [
 
 export const TabsDemos: ComponentDemos = {
   name: "Tabs",
-  group: "Navigation",
-  description: "One panel at a time, chosen from a row or column of tabs.",
   demos: [
     {
       title: "Controlled",

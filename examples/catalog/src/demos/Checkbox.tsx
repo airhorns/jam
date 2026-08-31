@@ -13,8 +13,6 @@ const checkboxStates: Array<{ label: string; checked: boolean | "indeterminate";
 
 export const CheckboxDemos: ComponentDemos = {
   name: "Checkbox",
-  group: "Forms",
-  description: "A role=checkbox button with checked, unchecked and mixed states.",
   demos: [
     {
       title: "Sizes",

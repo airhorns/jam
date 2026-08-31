@@ -4,8 +4,6 @@ import type { ComponentDemos } from "../types";
 
 export const SpinnerDemos: ComponentDemos = {
   name: "Spinner",
-  group: "Feedback",
-  description: "An indeterminate loading ring. `size` takes \"small\", \"large\" or a size token; `color` tints the leading arc.",
   demos: [
     {
       title: "Sizes",

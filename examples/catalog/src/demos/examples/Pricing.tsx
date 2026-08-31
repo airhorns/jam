@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
 import { XStack, YStack, H2, H3, H4, Paragraph, SizableText, Text, Button, Card, Separator, ToggleGroup, Accordion, ScrollView } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { Page } from "./shared";
 import { CheckIcon, MinusIcon, ChevronDownIcon, ZapIcon } from "./icons";
@@ -294,9 +294,8 @@ function Faq() {
   );
 }
 
-export const PricingExample: ComponentDemos = {
+export const PricingExample: ExampleDemos = {
   name: "Pricing",
-  group: "Examples",
   description: "A pricing page: a monthly/yearly toggle driving three plan cards, a feature comparison grid and an FAQ accordion.",
   demos: [
     {

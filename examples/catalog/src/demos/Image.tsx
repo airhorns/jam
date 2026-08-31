@@ -10,8 +10,6 @@ const landscape =
 
 export const ImageDemos: ComponentDemos = {
   name: "Image",
-  group: "Content",
-  description: "A styled `img`: every style prop works, plus `object-fit` under its CSS name and the React-Native `resizeMode` spelling.",
   demos: [
     {
       title: "Sized",

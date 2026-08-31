@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
 import { XStack, YStack, Card, Button, Slider, Switch, Label, Separator, SizableText, Paragraph, H4, Circle, Avatar, Text, useStableId } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { PlusIcon, MinusIcon, Trash2Icon, CheckIcon, ZapIcon, ShieldIcon, LayersIcon, BellIcon } from "./icons";
 
@@ -396,9 +396,8 @@ function SkeletonLoading() {
   );
 }
 
-export const MicrointeractionsExample: ComponentDemos = {
+export const MicrointeractionsExample: ExampleDemos = {
   name: "Microinteractions",
-  group: "Examples",
   description: "Small motion details built from animation, enterStyle, hoverStyle and pressStyle: an animated number readout, rows that slide in, cards that lift, a settings block that reveals, and skeleton rows that pulse while loading.",
   demos: [
     {

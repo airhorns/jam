@@ -4,8 +4,6 @@ import type { ComponentDemos } from "../types";
 
 export const GroupDemos: ComponentDemos = {
   name: "Group",
-  group: "Layout",
-  description: "XGroup and YGroup join children into one control, squaring off the interior corners and collapsing adjacent borders. Wrap each child in Group.Item.",
   demos: [
     {
       title: "XGroup of buttons",

@@ -5,8 +5,6 @@ import { useDemoState } from "./state";
 
 export const InputDemos: ComponentDemos = {
   name: "Input",
-  group: "Forms",
-  description: "Single-line Input and multi-line TextArea. One `size` sets height, radius, padding and font size together.",
   demos: [
     {
       title: "Sizes",

@@ -38,7 +38,10 @@ The server listens on port 5175 (`pnpm --dir examples/catalog dev -- --port N`
 to move it; the shots/e2e commands read `CATALOG_PORT`). URL parameters select
 what is shown: `?c=Button&theme=dark&demo=1&chrome=0`
 (`chrome=0` hides the sidebar). In the page, `window.__catalog.show(name, theme,
-demoIndex)` switches views without a reload.
+demoIndex)` switches views without a reload. Each component page ends with its
+reference doc rendered from `.agents/skills/jam-ui/components/<Name>.md`, so
+what the demo shows can be checked against what the doc promises; the same
+file is what the `jam-ui` skill points agents at.
 
 ```bash
 pnpm exec agent-browser open "http://127.0.0.1:5175/?c=Button"

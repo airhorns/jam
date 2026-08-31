@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import { XStack, YStack, SizableText, Button, styled, createStyledContext, getFontSized, tokenValue } from "@jam/ui";
 import type { StyledProps } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { XIcon, StarIcon, ZapIcon, HeartIcon, MapPinIcon, ClockIcon, CalendarIcon, GlobeIcon, CheckIcon } from "./icons";
 
@@ -268,9 +268,8 @@ function FilterChips() {
   );
 }
 
-export const ChipsExample: ComponentDemos = {
+export const ChipsExample: ExampleDemos = {
   name: "Chips",
-  group: "Examples",
   description: "Compact labelled tokens built from a styled XStack: coloured by theme, sized, pill-shaped, dismissible and toggleable.",
   demos: [
     {

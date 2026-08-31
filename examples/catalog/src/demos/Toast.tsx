@@ -5,8 +5,6 @@ import { useDemoState } from "./state";
 
 export const ToastDemos: ComponentDemos = {
   name: "Toast",
-  group: "Feedback",
-  description: "Brief auto-dismissing notifications; imperative toasts stack in a viewport, declarative ones float at the same corner.",
   demos: [
     {
       title: "Declarative",
