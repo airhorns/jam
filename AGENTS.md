@@ -93,7 +93,7 @@ All application state — including the VDOM — lives in a shared **fact databa
   - `sync.ts` — `sync()`: every durable fact is mirrored into a `FactStorage` with its `scope`; subscriptions by scope/pattern (or `follow()` driven by other facts) decide which facts are in memory, local-only or streamed from a sync server over WebSockets with the storage log as the outbox; browser tabs sharing a storage elect one leader that holds the connection
   - `tabs.ts` — `TabCoordinator`: BroadcastChannel + Web Locks between the tabs of one origin (`browserTabs`), or none (`soloTabs`)
   - `filter.ts` — `FactFilter` compilation and the wire protocol types shared by client and server
-  - `server.ts` (`@jam/core/server`) — `createSyncServer`: the Node side, an engine over any `FactStorage` (`sqliteStorage`, `memoryStorage`) with per-connection filters, snapshot/replay, `allow` authorization
+  - `server.ts` (`@jam/core/server`) — `createSyncServer`: the Node side, an engine over any `FactStorage` (`sqliteStorage`, `memoryStorage`) with per-connection filters, snapshot/replay, `allow`/`allowRead` authorization
   - `persist.ts` — mirrors device-local facts into their own storage and restores them on load
   - `__bench__/sync.bench.ts` — sync throughput against an in-process `createSyncServer`: initial load, remote-change latency, write round-trips (vitest bench mode skips suite hooks, so fixtures use tinybench `setup`/`teardown`)
 
