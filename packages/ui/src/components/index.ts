@@ -30,6 +30,8 @@ export { Dialog } from "./Dialog";
 export { Sheet } from "./Sheet";
 export { AlertDialog } from "./AlertDialog";
 export { Popover } from "./Popover";
+export { Menu } from "./Menu";
+export type { MenuCheckedState } from "./Menu";
 
 // Content
 export { Card } from "./Card";
