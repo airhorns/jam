@@ -520,6 +520,16 @@ impl Store {
         self.indexes.len()
     }
 
+    /// Fact slots allocated so far, live or free.
+    pub fn slot_count(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// Distinct prefixes in the primary table plus the buckets of every index.
+    pub fn bucket_count(&self) -> usize {
+        self.primary.len() + self.indexes.iter().map(|index| index.buckets.len()).sum::<usize>()
+    }
+
     pub fn clear(&mut self) {
         self.slots.clear();
         self.free.clear();

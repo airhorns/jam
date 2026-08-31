@@ -377,11 +377,44 @@ describe("FactDB", () => {
       db.replace("k", "new");
       db.drop("nothing", 1);
       expect(() => db.engine.term(old)).toThrow(/unknown term id/);
-      expect(db.engine.termCount).toBe(3 + ["k", "new", "nothing", 1].length);
+      expect(db.engine.stats().terms).toBe(3 + ["k", "new", "nothing", 1].length);
       db.insert("k2", "other");
       expect(db.engine.id("k2")).toBe(old);
       expect(db.query(["k", $.v])).toEqual([{ v: "new" }]);
       expect(db.query(["k2", $.v])).toEqual([{ v: "other" }]);
+    });
+  });
+
+  describe("stats", () => {
+    it("adds this layer's bookkeeping to the engine's counts", () => {
+      db.insert("todo", 1, "title", "a");
+      db.insert("todo", 2, "title", "b");
+      const idx = db.index(["todo", $.id, "title", $.title]);
+      const stopIndex = autorun(() => idx.get());
+      const watch = db.watch([[["todo", $.id, "title", $.title]]], () => {});
+      const unobserve = db.observe(() => {});
+      db.setRef("handler", () => {});
+      const owner = db.createChildOwner(db.getCurrentOwnerId(), "child");
+
+      expect(db.stats()).toMatchObject({
+        facts: 2,
+        owners: 2,
+        namedOwners: 2,
+        queries: 1,
+        resultRows: 2,
+        maintainedIndexes: 1,
+        watches: 1,
+        listeners: 1,
+        refs: 1,
+      });
+      expect(db.stats().wasmMemoryBytes).toBeGreaterThan(0);
+
+      stopIndex();
+      watch.dispose();
+      unobserve();
+      db.deleteRef("handler");
+      db.revokeOwner(owner);
+      expect(db.stats()).toMatchObject({ facts: 2, owners: 1, namedOwners: 1, watches: 0, listeners: 0, refs: 0 });
     });
   });
 

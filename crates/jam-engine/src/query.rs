@@ -645,6 +645,16 @@ impl Queries {
     pub fn is_empty(&self) -> bool {
         self.by_pattern.is_empty()
     }
+
+    /// Live result rows across every registered query.
+    pub fn result_rows(&self) -> usize {
+        self.slots.iter().flatten().map(|query| query.results.len()).sum()
+    }
+
+    /// Clauses a changed fact may be checked against, over every route key.
+    pub fn route_count(&self) -> usize {
+        self.routes.values().map(Vec::len).sum()
+    }
 }
 
 /// Build a query object without registering it, for one-off evaluation.

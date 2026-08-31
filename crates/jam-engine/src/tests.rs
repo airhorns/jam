@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use pretty_assertions::assert_eq;
 
-use crate::engine::Engine;
+use crate::engine::{Engine, Stats};
 use crate::query::{Clause, QueryId};
 use crate::store::{OwnerId, ROOT_OWNER};
 use crate::term::{EMPTY, FALSE, Interner, NONE, TRUE, Term, TermId, VAR_BASE, WILD};
@@ -1267,4 +1267,59 @@ fn churning_values_do_not_grow_the_term_table() {
         e.interner.capacity()
     );
     assert_eq!(e.rows(0)[1], 1);
+}
+
+#[test]
+fn stats_follow_the_engine_and_pack_by_position() {
+    let mut h = Harness::new();
+    let empty = h.e.stats();
+    assert_eq!(
+        empty,
+        Stats {
+            terms: Interner::new().len(),
+            term_slots: Interner::new().len(),
+            owners: 1,
+            ..Stats::default()
+        }
+    );
+
+    let owner = h.e.create_owner(ROOT_OWNER).unwrap();
+    h.assert(ROOT_OWNER, &["issue", "1", "title", "a"]);
+    h.assert(owner, &["issue", "2", "title", "b"]);
+    h.assert(ROOT_OWNER, &["issue", "1", "status", "open"]);
+    let q = h.register(&[&["issue", "$id", "title", "$t"], &["issue", "$id", "status", "$s"]]);
+    let stats = h.e.stats();
+    assert_eq!(stats.facts, 3);
+    assert_eq!(stats.fact_slots, 3);
+    assert_eq!(stats.owners, 2);
+    assert_eq!(stats.terms, empty.terms + 8);
+    assert_eq!(stats.queries, 1);
+    assert_eq!(stats.result_rows, 1);
+    assert_eq!(stats.routes, 2);
+    assert!(stats.indexes >= 1, "the join clause needs an index on (t0, t2)");
+    assert!(stats.index_buckets >= 3, "three distinct prefixes plus the index's buckets");
+    assert!(stats.pending_events > 0, "fact events wait for the drain");
+    h.e.drain();
+    assert_eq!(h.e.stats().pending_events, 0);
+
+    h.revoke(owner);
+    h.drop(&["issue", "1", "status", "_"]);
+    assert!(h.e.release(q));
+    let after = h.e.stats();
+    assert_eq!((after.facts, after.fact_slots, after.owners), (1, 3, 1));
+    assert_eq!((after.queries, after.result_rows, after.routes), (0, 0, 0));
+
+    let packed = stats.pack();
+    assert_eq!(packed.len(), STAT_LEN);
+    assert_eq!(packed[STAT_FACTS] as usize, stats.facts);
+    assert_eq!(packed[STAT_FACT_SLOTS] as usize, stats.fact_slots);
+    assert_eq!(packed[STAT_TERMS] as usize, stats.terms);
+    assert_eq!(packed[STAT_TERM_SLOTS] as usize, stats.term_slots);
+    assert_eq!(packed[STAT_OWNERS] as usize, stats.owners);
+    assert_eq!(packed[STAT_INDEXES] as usize, stats.indexes);
+    assert_eq!(packed[STAT_INDEX_BUCKETS] as usize, stats.index_buckets);
+    assert_eq!(packed[STAT_QUERIES] as usize, stats.queries);
+    assert_eq!(packed[STAT_RESULT_ROWS] as usize, stats.result_rows);
+    assert_eq!(packed[STAT_ROUTES] as usize, stats.routes);
+    assert_eq!(packed[STAT_PENDING_EVENTS] as usize, stats.pending_events);
 }

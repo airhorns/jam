@@ -8,6 +8,7 @@ const wasmUrl = new URL("../pkg/jam_engine_wasm_bg.wasm", import.meta.url);
 const nodeProcess = (globalThis as { process?: { versions?: { node?: string } } }).process;
 const isNode = typeof nodeProcess?.versions?.node === "string";
 
+let exports: Awaited<ReturnType<typeof init>>;
 if (isNode) {
   const fsModule = "node:fs/promises";
   const urlModule = "node:url";
@@ -15,9 +16,12 @@ if (isNode) {
   const { fileURLToPath } = (await import(/* @vite-ignore */ urlModule)) as { fileURLToPath(url: URL): string };
   // Vitest's DOM environments serve modules from `http://localhost/@fs/<absolute path>`.
   const path = wasmUrl.protocol === "file:" ? fileURLToPath(wasmUrl) : decodeURIComponent(wasmUrl.pathname.replace(/^\/@fs/, ""));
-  await init({ module_or_path: await readFile(path) });
+  exports = await init({ module_or_path: await readFile(path) });
 } else {
-  await init({ module_or_path: wasmUrl });
+  exports = await init({ module_or_path: wasmUrl });
 }
+
+/** The linear memory every `JamEngine` in this module shares. */
+export const wasmMemory: WebAssembly.Memory = exports.memory;
 
 export { JamEngine };

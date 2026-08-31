@@ -11,6 +11,10 @@ fn v(i: u32) -> u32 {
     VAR_BASE + i
 }
 
+fn stat(e: &JamEngine, position: usize) -> u32 {
+    e.stats()[position]
+}
+
 #[test]
 fn unpacks_clause_lists() {
     assert_eq!(unpack_clauses(&[0]), Ok(vec![]));
@@ -23,11 +27,11 @@ fn unpacks_clause_lists() {
 #[test]
 fn terms_round_trip_through_the_interner() {
     let mut e = JamEngine::default();
-    let base = e.term_count();
+    let base = stat(&e, STAT_TERMS);
     let s = e.intern_str("todo");
     let n = e.intern_num(2.5);
     assert_eq!(e.intern_str("todo"), s);
-    assert_eq!((e.term_count(), e.term_capacity()), (base + 2, base + 2));
+    assert_eq!((stat(&e, STAT_TERMS), stat(&e, STAT_TERM_SLOTS)), (base + 2, base + 2));
     assert_eq!((e.term_kind(s), e.term_kind(n)), (0, 1));
     assert_eq!(e.term_kind(1), 2, "the true term is preinterned");
     assert_eq!(e.term_kind(u32::MAX - 5), 3);
@@ -39,7 +43,7 @@ fn terms_round_trip_through_the_interner() {
     assert!(e.term_num(s).is_nan());
     assert_eq!(e.drain(), vec![]);
     assert_eq!(e.drain(), vec![EV_FREE, 2, s, n], "unused terms are freed by the second drain");
-    assert_eq!((e.term_count(), e.term_capacity()), (base, base + 2));
+    assert_eq!((stat(&e, STAT_TERMS), stat(&e, STAT_TERM_SLOTS)), (base, base + 2));
     assert_eq!(e.term_kind(s), 3);
 }
 
@@ -69,12 +73,14 @@ fn transactions_queries_and_views_pass_through() {
     assert!(!e.has_fact(&[todo, one, title, eggs]));
     assert_eq!(e.scope_of(&[todo, one, title, milk]), 2, "the default scope is the empty string");
     assert_eq!(e.scope_of(&[todo, one, title, eggs]), NONE);
-    assert_eq!((e.fact_count(), e.query_count()), (2, 1));
-    assert!(e.index_count() > 0);
+    let stats = e.stats();
+    assert_eq!(stats.len(), STAT_LEN);
+    assert_eq!((stats[STAT_FACTS], stats[STAT_QUERIES], stats[STAT_RESULT_ROWS]), (2, 1, 2));
+    assert!(stats[STAT_INDEXES] > 0);
 
     e.apply(&[OP_REVOKE, owner]).unwrap();
     assert!(!e.owner_exists(owner));
-    assert_eq!(e.fact_count(), 1);
+    assert_eq!(stat(&e, STAT_FACTS), 1);
     assert!(e.release(q));
-    assert_eq!(e.query_count(), 0);
+    assert_eq!(stat(&e, STAT_QUERIES), 0);
 }

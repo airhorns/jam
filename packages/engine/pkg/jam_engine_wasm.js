@@ -54,13 +54,6 @@ export class JamEngine {
         }
     }
     /**
-     * @returns {number}
-     */
-    fact_count() {
-        const ret = wasm.jamengine_fact_count(this.__wbg_ptr);
-        return ret >>> 0;
-    }
-    /**
      * @param {number} scope
      * @param {Uint32Array} pattern
      * @returns {Uint32Array}
@@ -89,13 +82,6 @@ export class JamEngine {
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.jamengine_has_fact(this.__wbg_ptr, ptr0, len0);
         return ret !== 0;
-    }
-    /**
-     * @returns {number}
-     */
-    index_count() {
-        const ret = wasm.jamengine_index_count(this.__wbg_ptr);
-        return ret >>> 0;
     }
     /**
      * @param {number} n
@@ -152,13 +138,6 @@ export class JamEngine {
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
         }
-    }
-    /**
-     * @returns {number}
-     */
-    query_count() {
-        const ret = wasm.jamengine_query_count(this.__wbg_ptr);
-        return ret >>> 0;
     }
     /**
      * @param {Uint32Array} clauses
@@ -223,20 +202,21 @@ export class JamEngine {
         wasm.jamengine_set_fact_events(this.__wbg_ptr, level);
     }
     /**
-     * Ids handed out so far, including freed ones awaiting reuse.
-     * @returns {number}
+     * `Engine::stats()` packed by the `STAT_*` positions.
+     * @returns {Uint32Array}
      */
-    term_capacity() {
-        const ret = wasm.jamengine_term_capacity(this.__wbg_ptr);
-        return ret >>> 0;
-    }
-    /**
-     * Live terms.
-     * @returns {number}
-     */
-    term_count() {
-        const ret = wasm.jamengine_term_count(this.__wbg_ptr);
-        return ret >>> 0;
+    stats() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.jamengine_stats(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export2(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * 0 string, 1 number, 2 boolean, 3 unknown id.

@@ -1,5 +1,5 @@
 import { h } from "@jam/core/jsx";
-import { $, _, db, describeUI, drive, indexedDBStorage, mount, outlineUI, persist, press } from "@jam/core";
+import { $, _, db, describeUI, drive, indexedDBStorage, mount, outlineUI, persist, press, publishStats } from "@jam/core";
 import { createJamUI, defaultConfig } from "@jam/ui";
 import { App } from "./components/App";
 import { seedCountFromLocation, syncUrlFromLocation } from "./config";
@@ -26,6 +26,7 @@ async function start() {
   startRecent();
   startQueries();
   startSubscriptions(sync);
+  publishStats();
 
   mount(<App />, document.getElementById("app")!);
 

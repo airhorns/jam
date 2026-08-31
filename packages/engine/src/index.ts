@@ -8,7 +8,7 @@
 // to a stale value. Interned ids should therefore be consumed right away, not
 // cached across flushes.
 
-import { JamEngine } from "./wasm";
+import { JamEngine, wasmMemory } from "./wasm";
 import {
   EV_FACT,
   EV_FREE,
@@ -26,6 +26,17 @@ import {
   OP_REVOKE,
   OP_SET_SCOPE,
   ROOT_OWNER,
+  STAT_FACT_SLOTS,
+  STAT_FACTS,
+  STAT_INDEX_BUCKETS,
+  STAT_INDEXES,
+  STAT_OWNERS,
+  STAT_PENDING_EVENTS,
+  STAT_QUERIES,
+  STAT_RESULT_ROWS,
+  STAT_ROUTES,
+  STAT_TERM_SLOTS,
+  STAT_TERMS,
   VAR_BASE,
   WILD,
 } from "./wire";
@@ -139,6 +150,33 @@ export interface QueryResult {
 export interface StoredFact {
   terms: Fact;
   scope: string;
+}
+
+export interface EngineStats {
+  /** Live facts. */
+  facts: number;
+  /** Fact slots allocated so far, live or free. */
+  factSlots: number;
+  /** Terms some fact or query uses, plus any interned since the last two flushes. */
+  terms: number;
+  /** Term ids handed out so far, including freed ones awaiting reuse. */
+  termSlots: number;
+  /** Live owners, the root included. */
+  owners: number;
+  /** Secondary indexes built for query clauses. */
+  indexes: number;
+  /** Distinct fact prefixes plus the buckets of every index. */
+  indexBuckets: number;
+  /** Registered queries. */
+  queries: number;
+  /** Live result rows across every registered query. */
+  resultRows: number;
+  /** Clauses a changed fact may be checked against. */
+  routes: number;
+  /** Event words waiting for the next flush. */
+  pendingEvents: number;
+  /** Linear memory of the wasm module, shared by every engine in this process. */
+  wasmMemoryBytes: number;
 }
 
 export class Engine {
@@ -475,27 +513,24 @@ export class Engine {
     return id === NONE ? undefined : (this.term(id) as string);
   }
 
-  get factCount(): number {
+  /** The engine's size right now, pending ops applied first. */
+  stats(): EngineStats {
     this.applyPending();
-    return this.raw.fact_count();
-  }
-
-  /** Terms some fact or query uses, plus any interned since the last two flushes. */
-  get termCount(): number {
-    return this.raw.term_count();
-  }
-
-  /** Term ids handed out so far, including freed ones awaiting reuse. */
-  get termCapacity(): number {
-    return this.raw.term_capacity();
-  }
-
-  get indexCount(): number {
-    return this.raw.index_count();
-  }
-
-  get queryCount(): number {
-    return this.raw.query_count();
+    const s = this.raw.stats();
+    return {
+      facts: s[STAT_FACTS],
+      factSlots: s[STAT_FACT_SLOTS],
+      terms: s[STAT_TERMS],
+      termSlots: s[STAT_TERM_SLOTS],
+      owners: s[STAT_OWNERS],
+      indexes: s[STAT_INDEXES],
+      indexBuckets: s[STAT_INDEX_BUCKETS],
+      queries: s[STAT_QUERIES],
+      resultRows: s[STAT_RESULT_ROWS],
+      routes: s[STAT_ROUTES],
+      pendingEvents: s[STAT_PENDING_EVENTS],
+      wasmMemoryBytes: wasmMemory.buffer.byteLength,
+    };
   }
 }
 

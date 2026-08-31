@@ -36,6 +36,20 @@ pub const FACT_EVENTS_NONE: u32 = 0;
 pub const FACT_EVENTS_DURABLE: u32 = 1;
 pub const FACT_EVENTS_ALL: u32 = 2;
 
+/// Word positions of `Engine::stats()` when packed as one array.
+pub const STAT_FACTS: usize = 0;
+pub const STAT_FACT_SLOTS: usize = 1;
+pub const STAT_TERMS: usize = 2;
+pub const STAT_TERM_SLOTS: usize = 3;
+pub const STAT_OWNERS: usize = 4;
+pub const STAT_INDEXES: usize = 5;
+pub const STAT_INDEX_BUCKETS: usize = 6;
+pub const STAT_QUERIES: usize = 7;
+pub const STAT_RESULT_ROWS: usize = 8;
+pub const STAT_ROUTES: usize = 9;
+pub const STAT_PENDING_EVENTS: usize = 10;
+pub const STAT_LEN: usize = 11;
+
 pub struct Reader<'a> {
     data: &'a [u32],
     pos: usize,

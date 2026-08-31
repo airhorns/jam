@@ -15,6 +15,52 @@ struct EntityScope {
     count: u32,
 }
 
+/// The engine's size at one moment, for devtools and tests.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Stats {
+    /// Live facts.
+    pub facts: usize,
+    /// Fact slots allocated so far, live or free.
+    pub fact_slots: usize,
+    /// Terms some fact or query uses, plus any interned since the last two drains.
+    pub terms: usize,
+    /// Term ids handed out so far, including freed ones awaiting reuse.
+    pub term_slots: usize,
+    /// Live owners, the root included.
+    pub owners: usize,
+    /// Secondary indexes built for query clauses.
+    pub indexes: usize,
+    /// Distinct prefixes in the primary table plus the buckets of every index.
+    pub index_buckets: usize,
+    /// Registered queries.
+    pub queries: usize,
+    /// Live result rows across every registered query.
+    pub result_rows: usize,
+    /// Clauses a changed fact may be checked against, over every route key.
+    pub routes: usize,
+    /// Event words waiting for the next drain.
+    pub pending_events: usize,
+}
+
+impl Stats {
+    /// The stats as one array, laid out by the `STAT_*` positions.
+    pub fn pack(&self) -> [u32; STAT_LEN] {
+        let mut words = [0; STAT_LEN];
+        words[STAT_FACTS] = self.facts as u32;
+        words[STAT_FACT_SLOTS] = self.fact_slots as u32;
+        words[STAT_TERMS] = self.terms as u32;
+        words[STAT_TERM_SLOTS] = self.term_slots as u32;
+        words[STAT_OWNERS] = self.owners as u32;
+        words[STAT_INDEXES] = self.indexes as u32;
+        words[STAT_INDEX_BUCKETS] = self.index_buckets as u32;
+        words[STAT_QUERIES] = self.queries as u32;
+        words[STAT_RESULT_ROWS] = self.result_rows as u32;
+        words[STAT_ROUTES] = self.routes as u32;
+        words[STAT_PENDING_EVENTS] = self.pending_events as u32;
+        words
+    }
+}
+
 pub struct Engine {
     pub interner: Interner,
     store: Store,
@@ -59,6 +105,22 @@ impl Engine {
 
     pub fn query_count(&self) -> usize {
         self.queries.len()
+    }
+
+    pub fn stats(&self) -> Stats {
+        Stats {
+            facts: self.store.len(),
+            fact_slots: self.store.slot_count(),
+            terms: self.interner.len(),
+            term_slots: self.interner.capacity(),
+            owners: self.owners.len(),
+            indexes: self.store.index_count(),
+            index_buckets: self.store.bucket_count(),
+            queries: self.queries.len(),
+            result_rows: self.queries.result_rows(),
+            routes: self.queries.route_count(),
+            pending_events: self.events.len(),
+        }
     }
 
     pub fn create_owner(&mut self, parent: OwnerId) -> Option<OwnerId> {

@@ -309,6 +309,16 @@ Owner creation (`create_owner(parent) → id`), query registration
 (`rows(qid)`, `query(clauses)` for one-off evaluation, `facts_matching(filter)`)
 are direct calls.
 
+`stats()` reports the engine's size as one array laid out by the `STAT_*`
+positions: live facts and fact slots, live terms and term slots, owners,
+indexes and their buckets (primary prefixes included), registered queries,
+their result rows and routes, and the event words awaiting a drain.
+`@jam/engine` decodes it into `EngineStats` and adds the module's linear
+memory size; `db.stats()` adds the core layer's owners, maintained indexes,
+watches, listeners and refs, and `publishStats()` republishes those numbers as
+`["engine", name, value]` facts on an interval so programs and UI can watch
+them.
+
 ### 4.8 Filters (`filter.rs`)
 
 A sync filter is `{ scope?: TermId, pattern?: Clause }` (pattern literals only;

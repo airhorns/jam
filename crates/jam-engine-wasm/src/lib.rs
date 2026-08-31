@@ -82,14 +82,9 @@ impl JamEngine {
         }
     }
 
-    /// Live terms.
-    pub fn term_count(&self) -> u32 {
-        self.inner.interner.len() as u32
-    }
-
-    /// Ids handed out so far, including freed ones awaiting reuse.
-    pub fn term_capacity(&self) -> u32 {
-        self.inner.interner.capacity() as u32
+    /// `Engine::stats()` packed by the `STAT_*` positions.
+    pub fn stats(&self) -> Vec<u32> {
+        self.inner.stats().pack().to_vec()
     }
 
     // --- transactions ---
@@ -142,18 +137,6 @@ impl JamEngine {
 
     pub fn has_fact(&self, terms: &[u32]) -> bool {
         self.inner.has_fact(terms)
-    }
-
-    pub fn fact_count(&self) -> u32 {
-        self.inner.fact_count() as u32
-    }
-
-    pub fn index_count(&self) -> u32 {
-        self.inner.index_count() as u32
-    }
-
-    pub fn query_count(&self) -> u32 {
-        self.inner.query_count() as u32
     }
 }
 

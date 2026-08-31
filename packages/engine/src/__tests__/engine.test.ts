@@ -46,7 +46,7 @@ describe("Engine", () => {
     expect(q.rows.size).toBe(0);
     q.release();
     expect(q.released).toBe(true);
-    expect(e.queryCount).toBe(0);
+    expect(e.stats().queries).toBe(0);
   });
 
   it("orders rows by the first clause's assertion order", () => {
@@ -136,14 +136,14 @@ describe("Engine", () => {
     e.clear();
     expect(e.flush()).toEqual([q]);
     expect(q.rows.size).toBe(0);
-    expect(e.factCount).toBe(0);
+    expect(e.stats().facts).toBe(0);
   });
 
   it("grows the op buffer", () => {
     const e = new Engine();
     for (let i = 0; i < 5000; i++) e.assert(ROOT_OWNER, NONE, ["n", i, "v", i * 2]);
     e.flush();
-    expect(e.factCount).toBe(5000);
+    expect(e.stats().facts).toBe(5000);
     expect(e.query([[e.id("n"), v(0), e.id("v"), v(1)]]).count).toBe(5000);
   });
 
@@ -156,7 +156,7 @@ describe("Engine", () => {
   it("forgets freed terms so reused ids resolve to their new value", () => {
     const e = new Engine();
     e.setFactEvents(FACT_EVENTS_ALL);
-    const base = e.termCount;
+    const base = e.stats().terms;
     e.assert(ROOT_OWNER, NONE, ["k", "old"]);
     e.flush();
     const old = e.id("old");
@@ -167,12 +167,12 @@ describe("Engine", () => {
     expect(seen).toEqual(["delete:old", "add:new"]);
     expect(e.term(old)).toBe("old");
     e.flush();
-    expect(e.termCount).toBe(base + 2);
+    expect(e.stats().terms).toBe(base + 2);
     expect(() => e.term(old)).toThrow(/unknown term id/);
     expect(e.id("other")).toBe(old);
     expect(e.term(old)).toBe("other");
     expect(e.id("old")).not.toBe(old);
-    expect(e.termCapacity).toBe(base + 4);
+    expect(e.stats().termSlots).toBe(base + 4);
   });
 
   it("keeps the term table flat under value churn", () => {
@@ -182,10 +182,10 @@ describe("Engine", () => {
     for (let i = 0; i < 2000; i++) {
       e.replace(ROOT_OWNER, NONE, ["pos", "y", i * 0.5]);
       e.flush();
-      peak = Math.max(peak, e.termCount);
+      peak = Math.max(peak, e.stats().terms);
     }
-    expect(peak).toBeLessThanOrEqual(e.termCount + 3);
-    expect(e.termCapacity).toBeLessThan(20);
+    expect(peak).toBeLessThanOrEqual(e.stats().terms + 3);
+    expect(e.stats().termSlots).toBeLessThan(20);
     expect(decodeRows(e, q)).toEqual([[1999 * 0.5]]);
   });
 
@@ -221,5 +221,36 @@ describe("Engine", () => {
     e.flush();
     e.flush();
     expect(() => e.term(id)).toThrow(/unknown term id/);
+  });
+
+  it("reports its size, applying queued writes first", () => {
+    const e = new Engine();
+    const empty = e.stats();
+    expect(empty).toMatchObject({ facts: 0, factSlots: 0, owners: 1, indexes: 0, queries: 0, resultRows: 0, routes: 0, pendingEvents: 0 });
+    expect(empty.terms).toBe(empty.termSlots);
+    expect(empty.wasmMemoryBytes).toBeGreaterThan(0);
+
+    const owner = e.createOwner();
+    const q = e.register([
+      [e.id("issue"), v(0), e.id("title"), v(1)],
+      [e.id("issue"), v(0), e.id("status"), v(2)],
+    ]);
+    e.assert(ROOT_OWNER, NONE, ["issue", "i1", "title", "a"]);
+    e.assert(owner, NONE, ["issue", "i2", "title", "b"]);
+    e.assert(ROOT_OWNER, NONE, ["issue", "i1", "status", "open"]);
+    expect(e.hasPending).toBe(true);
+    const stats = e.stats();
+    expect(e.hasPending).toBe(false);
+    expect(stats).toMatchObject({ facts: 3, factSlots: 3, owners: 2, queries: 1, resultRows: 1, routes: 2 });
+    expect(stats.terms).toBe(empty.terms + 8);
+    expect(stats.indexes).toBeGreaterThanOrEqual(1);
+    expect(stats.indexBuckets).toBeGreaterThanOrEqual(3);
+    expect(stats.pendingEvents).toBeGreaterThan(0);
+    e.flush();
+    expect(e.stats().pendingEvents).toBe(0);
+
+    e.revoke(owner);
+    q.release();
+    expect(e.stats()).toMatchObject({ facts: 2, factSlots: 3, owners: 1, queries: 0, resultRows: 0, routes: 0 });
   });
 });

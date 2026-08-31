@@ -3,13 +3,38 @@
 // terms, names owners, keeps the side-channel refs, and wires query handles
 // into the reactive scheduler.
 
-import { Engine, NONE, ROOT_OWNER, VAR_BASE, WILD, _, compareRows, factKey, type Clause, type QueryHandle } from "@jam/engine";
+import {
+  Engine,
+  NONE,
+  ROOT_OWNER,
+  VAR_BASE,
+  WILD,
+  _,
+  compareRows,
+  factKey,
+  type Clause,
+  type EngineStats,
+  type QueryHandle,
+} from "@jam/engine";
 import { isTracking, markDirty, onWrite, recordRead, registerDrainer, type Dependency, type Effect } from "./reactive";
 
 export type Term = string | number | boolean;
 export type Fact = Term[];
 export { _, factKey, GLOBAL_SCOPE } from "@jam/engine";
-export type { Wildcard } from "@jam/engine";
+export type { EngineStats, Wildcard } from "@jam/engine";
+
+export interface DBStats extends EngineStats {
+  /** Named owners, the root included. */
+  namedOwners: number;
+  /** Maintained `index()` queries. */
+  maintainedIndexes: number;
+  /** Live `watch()` subscriptions. */
+  watches: number;
+  /** Fact listeners registered through `observe()`. */
+  listeners: number;
+  /** Values held in `refs`. */
+  refs: number;
+}
 
 export type FactChange = "add" | "delete";
 export interface FactChangeInfo {
@@ -328,6 +353,18 @@ export class FactDB {
 
   has(...terms: Term[]): boolean {
     return this.engine.has(terms);
+  }
+
+  /** The engine's size plus this layer's bookkeeping; never tracked. */
+  stats(): DBStats {
+    return {
+      ...this.engine.stats(),
+      namedOwners: this.ownerIds.size,
+      maintainedIndexes: this.indexes.size,
+      watches: this.dependencies.size,
+      listeners: this.listeners.length,
+      refs: this.refs.size,
+    };
   }
 
   /** Point-in-time query, never tracked. */

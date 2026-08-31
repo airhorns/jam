@@ -7,7 +7,7 @@ pub mod store;
 pub mod term;
 pub mod wire;
 
-pub use engine::Engine;
+pub use engine::{Engine, Stats};
 pub use query::{Clause, QueryId, RowId};
 pub use store::{FactId, OwnerId, ROOT_OWNER};
 pub use term::{EMPTY, FALSE, Interner, NONE, TRUE, Term, TermId, VAR_BASE, WILD};

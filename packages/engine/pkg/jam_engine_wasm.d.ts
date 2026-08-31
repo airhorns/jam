@@ -7,29 +7,22 @@ export class JamEngine {
     apply(ops: Uint32Array): void;
     create_owner(parent: number): number;
     drain(): Uint32Array;
-    fact_count(): number;
     facts(scope: number, pattern: Uint32Array): Uint32Array;
     has_fact(terms: Uint32Array): boolean;
-    index_count(): number;
     intern_num(n: number): number;
     intern_str(s: string): number;
     constructor();
     owner_exists(owner: number): boolean;
     query(clauses: Uint32Array): Uint32Array;
-    query_count(): number;
     register(clauses: Uint32Array): number;
     release(id: number): boolean;
     rows(id: number): Uint32Array;
     scope_of(terms: Uint32Array): number;
     set_fact_events(level: number): void;
     /**
-     * Ids handed out so far, including freed ones awaiting reuse.
+     * `Engine::stats()` packed by the `STAT_*` positions.
      */
-    term_capacity(): number;
-    /**
-     * Live terms.
-     */
-    term_count(): number;
+    stats(): Uint32Array;
     /**
      * 0 string, 1 number, 2 boolean, 3 unknown id.
      */
@@ -46,23 +39,19 @@ export interface InitOutput {
     readonly jamengine_apply: (a: number, b: number, c: number, d: number) => void;
     readonly jamengine_create_owner: (a: number, b: number) => number;
     readonly jamengine_drain: (a: number, b: number) => void;
-    readonly jamengine_fact_count: (a: number) => number;
     readonly jamengine_facts: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly jamengine_has_fact: (a: number, b: number, c: number) => number;
-    readonly jamengine_index_count: (a: number) => number;
     readonly jamengine_intern_num: (a: number, b: number) => number;
     readonly jamengine_intern_str: (a: number, b: number, c: number) => number;
     readonly jamengine_new: () => number;
     readonly jamengine_owner_exists: (a: number, b: number) => number;
     readonly jamengine_query: (a: number, b: number, c: number, d: number) => void;
-    readonly jamengine_query_count: (a: number) => number;
     readonly jamengine_register: (a: number, b: number, c: number, d: number) => void;
     readonly jamengine_release: (a: number, b: number) => number;
     readonly jamengine_rows: (a: number, b: number, c: number) => void;
     readonly jamengine_scope_of: (a: number, b: number, c: number) => number;
     readonly jamengine_set_fact_events: (a: number, b: number) => void;
-    readonly jamengine_term_capacity: (a: number) => number;
-    readonly jamengine_term_count: (a: number) => number;
+    readonly jamengine_stats: (a: number, b: number) => void;
     readonly jamengine_term_kind: (a: number, b: number) => number;
     readonly jamengine_term_num: (a: number, b: number) => number;
     readonly jamengine_term_str: (a: number, b: number, c: number) => void;
