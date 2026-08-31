@@ -23,6 +23,8 @@ export type VNode = {
   tag: string | Function;
   props: Record<string, unknown>;
   children: VChild[];
+  /** Id of the component whose render created this node, when one was rendering. */
+  owner?: string;
 };
 
 export type ElementRef<T extends Element = HTMLElement> = (element: T | null) => void;
@@ -40,12 +42,14 @@ export function h(
   props: Record<string, unknown> | null,
   ...children: VChild[]
 ): VNode {
-  return {
+  const node: VNode = {
     __vnode: true,
     tag,
     props: props ?? {},
     children: children.flat(10) as VChild[],
   };
+  if (currentComponentId != null) node.owner = currentComponentId;
+  return node;
 }
 
 export function Fragment(props: Record<string, unknown> | null, ...children: VChild[]): VNode {
@@ -136,6 +140,21 @@ export function useComponentId(): string {
 export type Cleanup = () => void;
 
 let currentCleanups: Map<string, Cleanup[]> | null = null;
+
+// ---- Component tree ----
+
+export type ComponentInfo = {
+  /** The component function's name, for describing the tree. */
+  name: string;
+  /** Id of the component that rendered this one, or null at the root. */
+  parent: string | null;
+};
+
+/** Which component each element and component belongs to, recorded during the current `expandTree`. */
+let currentStructure: { components: Map<string, ComponentInfo>; owners: Map<string, string> } | null = null;
+
+/** The component whose returned output is being expanded; owns nodes that were not created inside a render. */
+let expandingComponent: string | null = null;
 
 /**
  * Run `fn` when the currently-executing component leaves the tree (or the
@@ -316,6 +335,14 @@ export function expandVdom(
       ? { ...vnode.props, children: vnode.children.length === 1 ? vnode.children[0] : vnode.children }
       : vnode.props;
     const componentId = computeEntityId(parentId, childIndex, { key: vnode.props.key }, inheritId);
+    if (currentStructure) {
+      const name = (tag as { displayName?: string }).displayName ?? tag.name ?? "Anonymous";
+      const parent = vnode.owner ?? expandingComponent;
+      // A component whose whole output is another component shares its id with it; record both names under that id.
+      const shared = parent === componentId ? currentStructure.components.get(componentId) : undefined;
+      if (shared) shared.name = `${shared.name}/${name}`;
+      else currentStructure.components.set(componentId, { name, parent });
+    }
     const prevComponentId = currentComponentId;
     currentComponentId = componentId;
     let result: VChild;
@@ -325,12 +352,20 @@ export function expandVdom(
       currentComponentId = prevComponentId;
     }
     if (result != null) {
-      expandVdom(out, result, parentId, childIndex, componentId);
+      const prevExpanding = expandingComponent;
+      expandingComponent = componentId;
+      try {
+        expandVdom(out, result, parentId, childIndex, componentId);
+      } finally {
+        expandingComponent = prevExpanding;
+      }
     }
     return;
   }
 
   const elId = computeEntityId(parentId, childIndex, vnode.props, inheritId);
+  const owner = vnode.owner ?? expandingComponent;
+  if (owner != null) currentStructure?.owners.set(elId, owner);
   const children: ExpandedNode[] = [];
   const flat = flattenChildren(vnode.children);
   for (let i = 0; i < flat.length; i++) {
@@ -343,26 +378,37 @@ export type Expansion = {
   nodes: ExpandedNode[];
   /** Cleanups registered with `useCleanup`, by component id. */
   cleanups: Map<string, Cleanup[]>;
+  /** Every component instance in the tree, by id. */
+  components: Map<string, ComponentInfo>;
+  /** The component that rendered each element, by element id. */
+  owners: Map<string, string>;
 };
 
 /**
  * Expand a complete tree from the root, collecting the cleanups its
- * components registered. Resets per-render counters so portal ordering is
- * deterministic.
+ * components registered and which component produced each element. Resets
+ * per-render counters so portal ordering is deterministic.
  */
 export function expandTree(node: VChild, rootId = "dom"): Expansion {
   portalCounter = 0;
   contextStack = [];
   const nodes: ExpandedNode[] = [];
   const cleanups = new Map<string, Cleanup[]>();
+  const structure = { components: new Map<string, ComponentInfo>(), owners: new Map<string, string>() };
   const prevCleanups = currentCleanups;
+  const prevStructure = currentStructure;
+  const prevExpanding = expandingComponent;
   currentCleanups = cleanups;
+  currentStructure = structure;
+  expandingComponent = null;
   try {
     expandVdom(nodes, node, rootId, 0);
   } finally {
     currentCleanups = prevCleanups;
+    currentStructure = prevStructure;
+    expandingComponent = prevExpanding;
   }
-  return { nodes, cleanups };
+  return { nodes, cleanups, ...structure };
 }
 
 /** `expandTree` without the cleanups, for callers that only need the nodes. */

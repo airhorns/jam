@@ -123,6 +123,8 @@ export interface VdomIndex {
   tags: Map<string, string>;
   classes: Map<string, Set<string>>;
   props: Map<string, Map<string, Term>>;
+  texts: Map<string, string>; // text node → content
+  handlers: Map<string, Set<string>>; // element → event names with handlers
   children: Map<string, string[]>; // parent → ordered child IDs
   parents: Map<string, string>; // child → parent
 }
@@ -131,6 +133,8 @@ export function buildVdomIndex(): VdomIndex {
   const tags = new Map<string, string>();
   const classes = new Map<string, Set<string>>();
   const props = new Map<string, Map<string, Term>>();
+  const texts = new Map<string, string>();
+  const handlers = new Map<string, Set<string>>();
   const childEntries = new Map<string, [number, string][]>();
   const parents = new Map<string, string>();
 
@@ -146,6 +150,11 @@ export function buildVdomIndex(): VdomIndex {
     } else if (attr === "prop") {
       if (!props.has(entity)) props.set(entity, new Map());
       props.get(entity)!.set(String(fact[2]), fact[3]);
+    } else if (attr === "text") {
+      texts.set(entity, String(fact[2]));
+    } else if (attr === "handler") {
+      if (!handlers.has(entity)) handlers.set(entity, new Set());
+      handlers.get(entity)!.add(String(fact[2]));
     } else if (attr === "child") {
       const parent = entity;
       const index = fact[2] as number;
@@ -166,7 +175,7 @@ export function buildVdomIndex(): VdomIndex {
     );
   }
 
-  return { tags, classes, props, children, parents };
+  return { tags, classes, props, texts, handlers, children, parents };
 }
 
 // --- Matcher ---

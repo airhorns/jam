@@ -7,6 +7,11 @@ export type { VNode, VChild, Context, Cleanup, ElementRef, ImperativeHostProps }
 export { mount } from "./renderer";
 export { select } from "./select";
 export type { VdomElement } from "./select";
+export { describeUI, outlineUI } from "./describe";
+export type { UINode, DescribeOptions } from "./describe";
+export { drive, press, useDriver } from "./drive";
+export type { Driver } from "./drive";
+export { nodeFor } from "./mounts";
 export { persist, defaultExclude } from "./persist";
 export type { PersistOptions, PersistHandle } from "./persist";
 export { openDatabase } from "./pglite";
