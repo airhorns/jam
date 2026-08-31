@@ -1,0 +1,59 @@
+name: Pages
+
+# Publishes the @jam/ui catalog (examples/catalog) — interactive demos plus the
+# jam-ui skill's reference docs — as this repository's GitHub Pages site.
+# Pull requests only build it, so a broken production build fails the PR.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: corepack pnpm install --frozen-lockfile
+      - id: pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+      - run: corepack pnpm build:ui-catalog
+        env:
+          # /jam/ for the project site; configure-pages leaves base_path empty for a user site.
+          CATALOG_BASE: ${{ steps.pages.outputs.base_path || '' }}/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: examples/catalog/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -58,8 +58,9 @@ atomic classes at render time:
 
 ## Seeing components live
 
-`pnpm dev:ui` serves the catalog at http://localhost:5175 — one page per
-component with interactive demos followed by the same reference doc as below
+The catalog is published at https://harry.me/jam/ and served locally by
+`pnpm dev:ui` at http://localhost:5175 — one page per component with
+interactive demos followed by the same reference doc as below
 (`?c=Button&theme=dark`, `&chrome=0` hides the sidebar). The
 `jam-ui-visual-review` skill covers screenshots and browser inspection.
 
