@@ -178,7 +178,7 @@ export const PopoverContentFrame = styled(YStack, {
         borderColor: "$borderColor",
         elevate: true,
         zIndex: 100_000,
-        outlineWidth: 0,
+        outlineStyle: "none",
       },
     },
     size: {

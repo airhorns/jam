@@ -45,7 +45,7 @@ export const ButtonFrame = styled("button", {
   variants: {
     unstyled: {
       true: {
-        outlineWidth: 0,
+        outlineStyle: "none",
         borderWidth: 0,
         backgroundColor: "transparent",
       },

@@ -12,7 +12,7 @@ const inputDefaults = {
   borderWidth: 1,
   borderStyle: "solid",
   borderColor: "$borderColor",
-  outlineWidth: 0,
+  outlineStyle: "none",
   display: "flex",
   // Keeps a flex child from overflowing its container.
   minWidth: 0,
@@ -36,7 +36,7 @@ const inputDefaults = {
 };
 
 const unstyledReset = {
-  outlineWidth: 0,
+  outlineStyle: "none",
   borderWidth: 0,
   backgroundColor: "transparent",
 };

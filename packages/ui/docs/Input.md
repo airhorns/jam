@@ -59,7 +59,7 @@ wrapper. The exported components are thin function wrappers that add
 - `size` on `TextArea` — the same, but `height: auto` with a `min-height` of
   `rows × line-height`, and vertical padding from two space steps below the
   token. `rows={5}` at `$true` is a 115px minimum.
-- `unstyled` — `border-width: 0`, `outline-width: 0`,
+- `unstyled` — `border-width: 0`, `outline-style: none`,
   `background-color: transparent` and no sizing at all, for a field that
   inherits its container's look.
 

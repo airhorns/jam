@@ -170,7 +170,7 @@ export const SheetPositioner = styled(YStack, {
         bottom: 0,
         justifyContent: "flex-end",
         pointerEvents: "auto",
-        outlineWidth: 0,
+        outlineStyle: "none",
         enterStyle: { y: "100%" },
       },
     },
