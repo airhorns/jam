@@ -16,6 +16,7 @@ async function gotoApp(page: Page) {
       db.query(["connection", "status", "disconnected"]).length > 0
     );
   });
+  await expect(page.getByTestId("detail-title")).toBeVisible();
 }
 
 async function insertFacts(page: Page, facts: Fact[]) {
@@ -60,7 +61,10 @@ async function seedSession(page: Page, sessionId = "s1") {
     ["session", sessionId, "agent", "claude"],
     ["session", sessionId, "status", "active"],
   ]);
-  await replaceFacts(page, [["ui", "selectedSession", sessionId]]);
+  await replaceFacts(page, [
+    ["workspace", "default", "selectedSession", sessionId],
+    ["ui", "selectedSession", sessionId],
+  ]);
 }
 
 async function startBackendSession(page: Page) {
@@ -628,6 +632,7 @@ test.describe("Sandbox-agent server integration", () => {
     await expect(page.getByTestId("terminal-tabs")).toContainText("connected");
 
     const terminal = page.getByTestId("terminal-output");
+    await expect(terminal).toContainText(/\$/);
     await terminal.click();
     await page.keyboard.type("pwd");
     await page.keyboard.press("Enter");

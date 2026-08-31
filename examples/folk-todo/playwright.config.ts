@@ -6,7 +6,7 @@ const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: "./e2e",
-  // Every test boots PGlite (~1s locally, a few seconds on CI runners).
+  // Every test opens a fresh IndexedDB database (fast locally, a few seconds on CI runners).
   timeout: 30000,
   expect: { timeout: 10000 },
   workers: process.env.CI ? 1 : undefined,

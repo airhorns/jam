@@ -9,7 +9,7 @@ const sandboxAgentURL = `http://127.0.0.1:${sandboxAgentPort}`;
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30000,
-  // Every test boots PGlite (~1s locally, a few seconds on CI runners).
+  // Every test opens a fresh IndexedDB database (fast locally, a few seconds on CI runners).
   expect: { timeout: 10000 },
   workers: process.env.CI ? 1 : undefined,
   use: {

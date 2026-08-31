@@ -41,48 +41,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  linearlite-electric:
-    name: LinearLite on Electric
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: examples/linearlite
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: corepack pnpm install --frozen-lockfile
-        working-directory: .
-      - run: corepack pnpm exec playwright install --with-deps chromium
-      - name: Start Postgres and Electric
-        run: corepack pnpm backend:up
-        env:
-          ISSUES_TO_LOAD: "100"
-      - name: Start the sync server
-        run: |
-          corepack pnpm sync-server > sync-server.log 2>&1 &
-          for _ in $(seq 1 30); do curl -sf http://localhost:3001 > /dev/null && exit 0; sleep 1; done
-          cat sync-server.log; exit 1
-      - run: corepack pnpm test:e2e:electric
-      - name: Backend logs
-        if: failure()
-        run: |
-          cat sync-server.log
-          corepack pnpm backend:logs electric
-          corepack pnpm backend:logs postgres
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: linearlite-electric-test-results
-          path: examples/linearlite/test-results
-          if-no-files-found: ignore
-          retention-days: 7
-
   core-benchmarks:
     name: Core Benchmarks
     runs-on: ubuntu-latest

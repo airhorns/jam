@@ -13,8 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@jam/core": "workspace:*",
-    "mobx": "^6.13.0"
+    "@jam/core": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
