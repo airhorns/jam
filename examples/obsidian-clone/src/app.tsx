@@ -50,7 +50,8 @@ function ThemeToggle() {
           size="$3"
           variant="outlined"
           circular
-          aria-label="Toggle theme"
+          aria-label="Dark theme"
+          aria-pressed={dark ? "true" : "false"}
           data-testid="theme-toggle"
           onClick={() => setTheme(dark ? "light" : "dark")}
         >
@@ -210,7 +211,7 @@ function Editor({ note }: { note: ReturnType<typeof getSelectedNote> }) {
 
 function InspectorCard({ label, testId, children }: { label: string; testId: string; children?: VChild }) {
   return (
-    <Card bordered padding="$4" gap="$3" backgroundColor="$color1" data-testid={testId}>
+    <Card tag="section" aria-label={label} bordered padding="$4" gap="$3" backgroundColor="$color1" data-testid={testId}>
       <Eyebrow>{label}</Eyebrow>
       {children}
     </Card>
@@ -310,6 +311,7 @@ function Inspector({
                 pressTheme
                 borderRadius="$3"
                 paddingVertical="$2"
+                aria-label={backlink.title}
                 title={backlink.title}
                 subTitle={backlink.body}
                 data-testid="backlink-item"

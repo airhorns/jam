@@ -47,6 +47,11 @@ export function componentChain(id: string): string[] {
   return chain;
 }
 
+/** An id as `outlineUI()` prints it, with or without its `#` prefix. */
+export function entityId(id: string): string {
+  return id.startsWith("#") ? id.slice(1) : id;
+}
+
 /** The DOM node currently rendered for an entity id, if a mount manages one. */
 export function nodeFor(id: string): Element | Text | undefined {
   for (const mount of mounts) {

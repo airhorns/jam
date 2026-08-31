@@ -2,10 +2,9 @@
 // agent through the same paths a user's input takes: a component's registered
 // driver (which runs its onChange), or a real DOM event on its element.
 
-import { runInAction } from "mobx";
 import { db, type Term } from "./db";
 import { useCleanup, useComponentId } from "./jsx";
-import { componentChain, nodeFor } from "./mounts";
+import { componentChain, entityId, nodeFor } from "./mounts";
 
 export type Driver = {
   /** Apply a value as if the user had produced it; the component's `onChange` fires. */
@@ -74,17 +73,17 @@ export function clearDrivers(): void {
   drivers.clear();
 }
 
-// The intent is a fact only for the duration of the action, so a fact log
-// shows what drove a change; it is never durable, so it is never stored.
+// The intent is a fact only while its effects happen, so a fact log shows what
+// drove a change; it is never durable, so it is never stored. The effects run
+// outside any action so each handler's writes render before the next event,
+// as they do between the events of a user's own input.
 function recording<T>(fact: Term[], fn: () => T): T {
-  return runInAction(() => {
-    db.withOwnerScope("drive", () => db.assert(...fact));
-    try {
-      return fn();
-    } finally {
-      db.drop(...fact);
-    }
-  });
+  db.withOwnerScope("drive", () => db.assert(...fact));
+  try {
+    return fn();
+  } finally {
+    db.drop(...fact);
+  }
 }
 
 type FormNode = Element & { value?: string; checked?: boolean; type?: string; disabled?: boolean };
@@ -119,6 +118,7 @@ function driveNode(id: string, key: string, value: Term): boolean {
  * Throws when nothing around `id` drives `key`.
  */
 export function drive(id: string, key: string, value: Term): void {
+  id = entityId(id);
   recording(["drive", id, key, value], () => {
     const driver = resolveDriver(id, key);
     if (driver?.set) {
@@ -141,24 +141,30 @@ function clickHandler(id: string): ((event: unknown) => void) | undefined {
 }
 
 function pointerEvent(type: string): Event {
-  const init = { bubbles: true, cancelable: true, button: 0, buttons: type === "pointerdown" ? 1 : 0, pointerId: 1, pointerType: "mouse", isPrimary: true };
-  return typeof PointerEvent !== "undefined" ? new PointerEvent(type, init) : new MouseEvent(type, init);
+  const init = { bubbles: true, cancelable: true, button: 0, buttons: type.endsWith("down") ? 1 : 0, pointerId: 1, pointerType: "mouse", isPrimary: true };
+  if (type.startsWith("pointer") && typeof PointerEvent !== "undefined") return new PointerEvent(type, init);
+  return new MouseEvent(type, init);
 }
 
 /**
- * Press the element with entity id `id` as a primary pointer would: `pointerdown`,
- * `pointerup` and `click` on its DOM node when one is rendered (so triggers that
- * act on pointerdown open too), otherwise its `onClick` handler with a minimal event.
+ * Press the element with entity id `id` as a primary pointer would, in the
+ * browser's order: `pointerdown`, `mousedown`, focus, `pointerup`, `mouseup`,
+ * `click` on its DOM node when one is rendered (so triggers that act on
+ * pointerdown open, and tooltips that guard focus against a press stay
+ * closed), otherwise its `onClick` handler with a minimal event.
  */
 export function press(id: string): void {
+  id = entityId(id);
   recording(["drive", id, "press"], () => {
     const node = nodeFor(id);
     if (node && "click" in node) {
       const el = node as HTMLElement;
-      el.focus?.({ preventScroll: true });
       if (!(el as HTMLButtonElement).disabled) {
         el.dispatchEvent(pointerEvent("pointerdown"));
+        el.dispatchEvent(pointerEvent("mousedown"));
+        el.focus?.({ preventScroll: true });
         el.dispatchEvent(pointerEvent("pointerup"));
+        el.dispatchEvent(pointerEvent("mouseup"));
       }
       el.click();
       return;

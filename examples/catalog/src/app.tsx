@@ -142,7 +142,8 @@ function Sidebar() {
           variant="outlined"
           onClick={() => update({ theme: state.theme === "dark" ? "light" : "dark" })}
           data-testid="theme-toggle"
-          aria-label="Toggle theme"
+          aria-label="Dark theme"
+          aria-pressed={state.theme === "dark" ? "true" : "false"}
         >
           {state.theme === "dark" ? "☾" : "☀"}
         </Button>

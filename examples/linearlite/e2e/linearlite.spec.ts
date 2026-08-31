@@ -275,6 +275,22 @@ test.describe("LinearLite", () => {
     expect(await query(page, ["issue", id!, "status", "?status"])).toEqual([{ status: "todo" }]);
   });
 
+  test("board columns are named regions and a card moves between them from its status menu", async ({ page }) => {
+    await open(page, `/${WEB}/board`);
+    const columns = await findAll(page, { role: "region", component: "BoardColumn" });
+    expect(columns.map((column) => column.name)).toEqual(["Backlog", "To Do", "In Progress", "Done", "Canceled"]);
+    for (const column of columns) await find(page, { role: "heading", name: column.name!, within: column.id });
+
+    const backlog = columns[0]!;
+    const [card] = flatten(await describe(page, { root: backlog.id, interactive: true })).filter((node) => node.component === "IssueCard");
+    const title = (await find(page, { role: "link", within: card!.id })).name!;
+    await pressNode(page, { role: "button", name: "status: Backlog", within: card!.id });
+    await pressNode(page, { role: "menuitemradio", name: "Done" });
+    await find(page, { role: "link", name: title, within: columns[3]!.id });
+    expect(await findAll(page, { role: "link", name: title, within: backlog.id })).toEqual([]);
+    expect(await findAll(page, { role: "menu" })).toEqual([]);
+  });
+
   test("a write straight into jam_facts shows up in the UI", async ({ page }) => {
     await open(page);
     const row = page.getByTestId("issue-row").first();

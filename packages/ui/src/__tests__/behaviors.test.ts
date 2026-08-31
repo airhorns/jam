@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { db, h, Portal, replace, when } from "@jam/core";
+import { $, db, h, Portal, replace, when } from "@jam/core";
 import { render, resetUI, click, keydown, tick } from "../testing";
 import { useControllableState, useControllableList, useStableId } from "../state";
 import { useDismissableLayer, isTopmostLayer } from "../layers";
@@ -95,6 +95,28 @@ describe("useControllableState", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
     expect(db.facts.size).toBeLessThan(before);
     replace("ui", "show", true);
+    expect(get("button").dataset.open).toBe("false");
+  });
+
+  it("still reports a controlled change whose own effect re-keyed the component", () => {
+    replace("ui", "column", "a");
+    replace("ui", "open", true);
+    function Picker() {
+      const open = when(["ui", "open", $.v])[0]?.v === true;
+      const [, setOpen] = useControllableState<boolean>("open", { value: open, onChange: (next) => replace("ui", "open", next) });
+      const select = () => {
+        replace("ui", "column", "b");
+        setOpen(false);
+      };
+      return h("button", { "data-open": String(open), onClick: select }, "pick");
+    }
+    function Host() {
+      const column = when(["ui", "column", $.v])[0]?.v as string;
+      return h("div", null, h(Picker, { key: column }));
+    }
+    const { get } = render(h(Host, {}));
+    click(get("button"));
+    expect(when(["ui", "open", $.v])[0]?.v).toBe(false);
     expect(get("button").dataset.open).toBe("false");
   });
 

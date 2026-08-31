@@ -116,7 +116,7 @@ export function createDriveTool(): MetaAgentTool<DriveInput> {
 export function createPressTool(): MetaAgentTool<PressInput> {
   return {
     name: "press",
-    description: "Press the element with entity `id` from describeUI (pointerdown, pointerup and click on its DOM node).",
+    description: "Press the element with entity `id` from describeUI, as a primary pointer would (pointerdown, focus, pointerup, click on its DOM node).",
     run(input) {
       press(input.id);
       return summarizeResult("Pressed", { id: input.id });

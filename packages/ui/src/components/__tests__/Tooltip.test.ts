@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { h } from "@jam/core/jsx";
+import { describeUI, press, type UINode } from "@jam/core";
 import { render, css, setupDefaultUI, click, keydown, tick, pointerEnter, pointerLeave, focus, blur } from "../../testing";
 import { Tooltip } from "../Tooltip";
 import { Button } from "../Button";
@@ -9,6 +10,8 @@ import type { Placement } from "../../floating";
 beforeEach(() => {
   setupDefaultUI();
 });
+
+const flatten = (nodes: UINode[]): UINode[] => nodes.flatMap((node) => [node, ...flatten(node.children)]);
 
 function rect(el: Element, x: number, y: number, width: number, height: number) {
   el.getBoundingClientRect = () => ({ x, y, left: x, top: y, width, height, right: x + width, bottom: y + height, toJSON() {} }) as DOMRect;
@@ -162,6 +165,20 @@ describe("Tooltip", () => {
     trigger.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
     focus(trigger);
     expect(query("[data-testid=content]")).toBeNull();
+  });
+
+  it("stays closed when its trigger is pressed programmatically, as after a real click", () => {
+    const clicks: number[] = [];
+    const { query } = render(
+      h(Tooltip, { delay: 0 },
+        h(Tooltip.Trigger, { asChild: true }, h(Button, { "aria-label": "Toggle theme", onClick: () => clicks.push(1) }, "☀")),
+        h(Tooltip.Content, { "data-testid": "content" }, "Switch to dark")),
+    );
+    const button = flatten(describeUI()).find((node) => node.role === "button")!;
+    press(button.id!);
+    expect(clicks).toEqual([1]);
+    expect(query("[data-testid=content]")).toBeNull();
+    expect(button.drive?.keys).toEqual({ open: false });
   });
 
   it("a touch pointerenter does not open the tooltip", async () => {

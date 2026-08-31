@@ -17,7 +17,12 @@ function coerce<T extends Term>(value: Term, like: T | undefined): T {
   return value as T;
 }
 
-/** Ids of components currently in the tree; a setter invoked after unmount (a late blur, image error or timer) must not write. */
+/**
+ * Ids of components currently in the tree; a setter invoked after unmount (a
+ * late blur, image error or timer) must not store anything. A controlled
+ * owner is still told, since the change it is being told about may be what
+ * re-keyed the component (a menu whose selection moved its row).
+ */
 const mounted = new Set<string>();
 
 /**
@@ -49,7 +54,7 @@ export function useControllableState<T extends Term>(
   };
   // Compare against the live value so a setter kept from an earlier render (a timer, another component's close) still sees changes made since.
   const update = (next: T) => {
-    if (!mounted.has(id) || next === read()) return;
+    if (next === read() || (!mounted.has(id) && !controlled)) return;
     options.onChange?.(next);
     if (!controlled) replace(id, key, next);
   };

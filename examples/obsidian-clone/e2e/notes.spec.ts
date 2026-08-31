@@ -22,6 +22,15 @@ test.describe("Jam Notes smoke tests", () => {
     expect(notes.map((n) => [n.name, n.state.current ?? false])).toEqual([["Project ideas", true], ["Welcome", false]]);
     const unnamed = (await findAll(page, { role: "button" })).concat(await findAll(page, { role: "textbox" })).filter((n) => !n.name);
     expect(unnamed).toEqual([]);
+
+    const regions = await findAll(page, { role: "region", component: "InspectorCard" });
+    expect(regions.map((r) => r.name)).toEqual(["Metadata", "Outgoing links", "Backlinks", "Outline"]);
+
+    await find(page, { role: "button", name: "Dark theme", state: { pressed: true } });
+    await pressNode(page, { role: "button", name: "Dark theme" });
+    const toggle = await find(page, { role: "button", name: "Dark theme", state: { pressed: false } });
+    expect(toggle.drive?.keys, "the tooltip stays closed after a press").toEqual({ open: false });
+    await expect(page.locator("html")).toHaveClass(/t_light/);
   });
 
   test("creates and edits a note", async ({ page }) => {

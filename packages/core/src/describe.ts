@@ -6,7 +6,7 @@
 
 import type { Term } from "./db";
 import { buildVdomIndex, type VdomIndex } from "./select";
-import { componentChain, componentInfo, nodeFor } from "./mounts";
+import { componentChain, componentInfo, entityId, nodeFor } from "./mounts";
 import { drivenComponents, driversFor } from "./drive";
 
 export interface UINode {
@@ -30,7 +30,7 @@ export interface UINode {
 }
 
 export interface DescribeOptions {
-  /** Entity id to describe from; defaults to the whole mount. */
+  /** Entity id to describe from — an element, or a component whose elements are described; defaults to the whole mount. */
   root?: string;
   /** Keep only interactive and drivable nodes, headings and the structure around them. */
   interactive?: boolean;
@@ -43,12 +43,16 @@ const IMPLICIT_ROLES: Record<string, string> = {
   option: "option",
   h1: "heading", h2: "heading", h3: "heading", h4: "heading", h5: "heading", h6: "heading",
   ul: "list", ol: "list", li: "listitem",
-  nav: "navigation", main: "main", header: "banner", footer: "contentinfo", aside: "complementary",
+  nav: "navigation", main: "main", aside: "complementary",
   form: "form", article: "article", dialog: "dialog", fieldset: "group", details: "group", summary: "button",
   img: "img", table: "table", thead: "rowgroup", tbody: "rowgroup", tfoot: "rowgroup",
   tr: "row", th: "columnheader", td: "cell", hr: "separator",
   progress: "progressbar", output: "status", meter: "meter", menu: "list",
 };
+
+/** Sectioning content, inside which `header` and `footer` stop being page landmarks. */
+const SECTIONING_TAGS = new Set(["article", "aside", "main", "nav", "section"]);
+const SECTIONING_ROLES = new Set(["article", "complementary", "main", "navigation", "region"]);
 
 const INPUT_ROLES: Record<string, string> = {
   checkbox: "checkbox", radio: "radio", range: "slider", number: "spinbutton", search: "searchbox",
@@ -167,7 +171,17 @@ class Describer {
     if (tag === "section") return this.prop(el, "aria-label") !== undefined || this.prop(el, "aria-labelledby") !== undefined ? "region" : "generic";
     if (tag === "select") return isTruthyAttribute(this.prop(el, "multiple")) ? "listbox" : "combobox";
     if (tag === "svg") return this.prop(el, "aria-label") !== undefined ? "img" : "generic";
+    if (tag === "header") return this.inSectioningContent(el) ? "generic" : "banner";
+    if (tag === "footer") return this.inSectioningContent(el) ? "generic" : "contentinfo";
     return IMPLICIT_ROLES[tag] ?? "generic";
+  }
+
+  private inSectioningContent(el: string): boolean {
+    for (let parent = this.idx.parents.get(el); parent; parent = this.idx.parents.get(parent)) {
+      const role = this.prop(parent, "role");
+      if (role !== undefined ? SECTIONING_ROLES.has(String(role)) : SECTIONING_TAGS.has(this.idx.tags.get(parent) ?? "")) return true;
+    }
+    return false;
   }
 
   private name(el: string, role: string): string | undefined {
@@ -298,15 +312,54 @@ class Describer {
     return [node];
   }
 
+  /**
+   * Describe from an element, or from a component: the topmost elements it
+   * renders (portalled ones included), or its hidden node when it renders
+   * nothing. Components begun before the root count as seen, so the root is
+   * labelled as the full outline labels it.
+   */
+  describeFrom(root: string): UINode[] {
+    const tops = this.idx.tags.has(root) ? [root] : this.elementsOf(root);
+    if (tops.length === 0) {
+      const found = driversFor(root);
+      return found && found.id === root ? [this.hiddenNode(root, found.keys)] : [];
+    }
+    this.markSeenBefore(tops[0]!);
+    return tops.flatMap((el) => this.describe(el));
+  }
+
+  /** The elements rendered by `componentId` (or components inside it) that have no such element above them, in document order. */
+  private elementsOf(componentId: string): string[] {
+    const tops: string[] = [];
+    const visit = (el: string) => {
+      if (componentChain(el).includes(componentId)) tops.push(el);
+      else for (const child of this.idx.children.get(el) ?? []) visit(child);
+    };
+    for (const top of this.idx.children.get("dom") ?? []) visit(top);
+    return tops;
+  }
+
+  private markSeenBefore(root: string): void {
+    const visit = (el: string): boolean => {
+      if (el === root) return true;
+      for (const componentId of componentChain(el)) this.seenComponents.add(componentId);
+      return (this.idx.children.get(el) ?? []).some(visit);
+    };
+    (this.idx.children.get("dom") ?? []).some(visit);
+  }
+
+  private hiddenNode(componentId: string, keys: Record<string, Term | undefined>): UINode {
+    const component = componentInfo(componentId)?.name;
+    return { id: componentId, role: "hidden", component, state: {}, drive: { id: componentId, component, keys }, children: [] };
+  }
+
   /** Drivable components no described element belongs to, so their state stays readable and settable. */
   unseenDrivable(): UINode[] {
     const nodes: UINode[] = [];
     for (const componentId of drivenComponents()) {
       if (this.seenComponents.has(componentId)) continue;
       const found = driversFor(componentId);
-      if (!found || found.id !== componentId) continue;
-      const component = componentInfo(componentId)?.name;
-      nodes.push({ id: componentId, role: "hidden", component, state: {}, drive: { id: componentId, component, keys: found.keys }, children: [] });
+      if (found && found.id === componentId) nodes.push(this.hiddenNode(componentId, found.keys));
     }
     return nodes;
   }
@@ -349,9 +402,12 @@ function onlyInteractive(nodes: UINode[]): UINode[] {
 export function describeUI(options: DescribeOptions = {}): UINode[] {
   const idx = buildVdomIndex();
   const describer = new Describer(idx);
-  const roots = options.root ? [options.root] : (idx.children.get("dom") ?? []);
-  const nodes = roots.flatMap((root) => describer.describe(root));
-  if (!options.root) nodes.push(...describer.unseenDrivable());
+  let nodes: UINode[];
+  if (options.root !== undefined) nodes = describer.describeFrom(entityId(options.root));
+  else {
+    nodes = (idx.children.get("dom") ?? []).flatMap((root) => describer.describe(root));
+    nodes.push(...describer.unseenDrivable());
+  }
   return options.interactive ? onlyInteractive(nodes) : nodes;
 }
 

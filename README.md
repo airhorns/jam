@@ -235,6 +235,30 @@ import { h, injectVdom } from "@jam/core";
 injectVdom("session-s-1", 1000, h("span", { class: "badge" }, "3"));
 ```
 
+### Reading and driving the UI
+
+The rendered tree is already facts, so an agent, a test or a program can read it as an accessibility outline and operate it without selectors:
+
+```typescript
+import { describeUI, outlineUI, drive, press } from "@jam/core";
+
+console.log(outlineUI({ interactive: true }));
+//   button "Filter" #dom_0_1_k_filter-menu-trigger expanded=false haspopup="menu" (FilterMenu open=false)
+//   list "Issues" #dom:0:1:k:list:1:0
+//     listitem #dom:0:1:k:list:1:0:k:18451c1f <IssueRow/ListItemFrame>
+//       button "status: Backlog" #…_0_1-menu-trigger expanded=false haspopup="menu" (StatusMenu open=false)
+//       link "Suspendo ea suffragium…" #dom:0:1:k:list:1:0:k:18451c1f:0:2 href="/web/issue/18451c1f"
+//   hidden #dom:0:2 (NewIssueModal/Dialog/DialogPortal open=false)
+
+press("dom_0_1_k_filter-menu-trigger");          // pointerdown, focus, pointerup, click on the element
+drive("#dom:0:2", "open", true);                  // the Dialog's onOpenChange(true) runs; # is optional
+drive("dom_0_2-dialog-content:1:0", "value", "x"); // a textbox receives input/change events
+```
+
+`describeUI()` returns the same tree as data (`UINode`: role, name, description, state, component, drive keys, children). Each line is what a screen reader would be told — role, accessible name, ARIA state — plus the entity id to act on, the semantic component that starts there and, in parentheses, the state keys `drive()` can set with their current values. `describeUI({ root })` scopes the read to an element or to a component, whose elements (portalled ones included) are described. Nothing is written to make this work: it is read from the VDOM facts the renderer already emits and the component structure of the mount. `drive()` and `press()` assert a transient, non-durable `["drive", id, key, value]` fact while they run so a fact log shows what caused a change.
+
+Components opt into `drive()` with `useDriver(key, { set, get })` — `@jam/ui`'s stateful components already do — and styled wrappers marked `Component.presentational = true` are left out of the outline's component chains. `@jam/ui/playwright` wraps this for e2e tests (`find`, `pressNode`, `driveNode`), and `@jam/meta-agent` exposes it as `describeUI`/`drive`/`press` tools.
+
 ## Persistence and sync
 
 Jam stores durable state in [PGlite](https://pglite.dev) — Postgres compiled to WASM, running in a shared Web Worker and backed by IndexedDB. Tabs on the same database elect a leader that owns the files; the others proxy queries to it.

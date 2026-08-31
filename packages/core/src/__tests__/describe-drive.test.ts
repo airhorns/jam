@@ -142,10 +142,39 @@ describe("describeUI", () => {
     expect(outline).not.toMatch(/Welcome|Static/);
   });
 
-  it("can describe from a given root, attributing components to the first element seen", () => {
-    const App = () => h("div", null, h("button", null, "A"), h("section", { id: "side", "aria-label": "Side" }, h("button", null, "B")));
+  it("labels a scoped root as the full outline does, not with the components begun above it", () => {
+    const Side = () => h("section", { id: "side", "aria-label": "Side" }, h("button", null, "B"));
+    const App = () => h("div", null, h("button", null, "A"), h(Side, null), h("footer", null, "Foot"));
     dispose = mount(h(App, null), container);
-    expect(outlineUI({ root: "side" })).toBe(`region "Side" #side <App>\n  button "B" #side:0`);
+    expect(outlineUI({ root: "side" })).toBe(`region "Side" #side <Side>\n  button "B" #side:0`);
+    expect(outlineUI({ root: "#dom:0:2" })).toBe(`contentinfo #dom:0:2\n  text "Foot"`);
+  });
+
+  it("describes from a component id: its elements while it renders, its hidden node when it does not", () => {
+    function Sheet() {
+      const id = useComponentId();
+      const open = when([id, "open", $.open])[0]?.open === true;
+      useDriver("open", { set: (v: Term) => replace(id, "open", Boolean(v)), get: () => open });
+      useCleanup(() => db.drop(id, "open", _));
+      return open ? h(Portal, null, h("div", { role: "dialog", "aria-label": "Sheet" }, h("button", null, "Close"))) : null;
+    }
+    const App = () => h("main", null, h("h1", null, "Page"), h(Sheet, null));
+    dispose = mount(h(App, null), container);
+
+    expect(outlineUI({ root: "dom:0:1" })).toBe("hidden #dom:0:1 (Sheet open=false)");
+    drive("#dom:0:1", "open", true);
+    expect(outlineUI({ root: "dom:0:1" })).toBe(['dialog "Sheet" #dom:0:1:0 (Sheet open=true)', '  button "Close" #dom:0:1:0:0'].join("\n"));
+    expect(outlineUI({ root: "dom:0:1", interactive: true })).toBe(['dialog "Sheet" #dom:0:1:0 (Sheet open=true)', '  button "Close" #dom:0:1:0:0'].join("\n"));
+  });
+
+  it("treats header and footer as landmarks only outside sectioning content", () => {
+    const App = () =>
+      h("div", null,
+        h("header", null, h("h1", null, "Site")),
+        h("main", null, h("section", { "aria-label": "Column" }, h("header", null, h("h2", null, "Backlog")))),
+        h("div", { role: "region", "aria-label": "Aside" }, h("footer", null, "Note")));
+    dispose = mount(h(App, null), container);
+    expect(flatten(describeUI()).map((n) => n.role)).toEqual(["generic", "banner", "heading", "main", "region", "heading", "region", "text"]);
   });
 
   it("lists drivable components that render nothing visible as hidden nodes, so they can still be driven", () => {
@@ -282,18 +311,32 @@ describe("press", () => {
     expect(clicks).toEqual(["click", "submit"]);
   });
 
-  it("sends pointerdown and pointerup before the click, so pointer-driven triggers respond", () => {
+  it("sends the browser's press sequence and renders between events, so handlers see the state earlier ones wrote", () => {
     const events: string[] = [];
-    const log = (e: Event) => events.push(`${e.type}${(e as MouseEvent).button === 0 ? "" : "?"}`);
-    const App = () =>
-      h("div", null,
-        h("button", { onPointerDown: log, onPointerUp: log, onClick: log }, "Menu"),
-        h("button", { disabled: true, onPointerDown: log, onClick: log }, "Off"));
+    const log = (e: Event) => events.push(`${e.type}${e instanceof MouseEvent && e.button !== 0 ? "?" : ""}`);
+    const App = () => {
+      const down = when(["press", "down", true]).length > 0;
+      return h("div", null,
+        h("button", {
+          onPointerDown: (e: Event) => { log(e); replace("press", "down", true); },
+          onMouseDown: log, onFocus: log, onPointerUp: log, onMouseUp: log,
+          onClick: () => events.push(down ? "click" : "click:stale"),
+        }, "Menu"),
+        h("button", { disabled: true, onPointerDown: log, onFocus: log, onClick: log }, "Off"));
+    };
     dispose = mount(h(App, null), container);
     const tree = describeUI();
     press(find(tree, "button", "Menu")!.id!);
     press(find(tree, "button", "Off")!.id!);
-    expect(events).toEqual(["pointerdown", "pointerup", "click"]);
+    expect(events).toEqual(["pointerdown", "mousedown", "focus", "pointerup", "mouseup", "click"]);
+  });
+
+  it("accepts ids with the outline's # prefix", () => {
+    const clicks: string[] = [];
+    const App = () => h("button", { onClick: () => clicks.push("go") }, "Go");
+    dispose = mount(h(App, null), container);
+    press("#dom:0");
+    expect(clicks).toEqual(["go"]);
   });
 
   it("throws for an id with nothing to click", () => {
