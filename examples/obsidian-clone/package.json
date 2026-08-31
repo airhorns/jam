@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@jam/core": "workspace:*"
+    "@jam/core": "workspace:*",
+    "@jam/ui": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
