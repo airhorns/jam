@@ -353,9 +353,10 @@ const server = await createSyncServer({
 });
 new WebSocketServer({ port: 3001 }).on("connection", (socket, request) => server.handle(socket, authenticate(request)));
 await server.apply([{ op: "upsert", terms: ["project", "p1", "name", "Web"], scope: "" }]);   // seeds, admin tools
+const stop = server.observe(({ seq, changes, context }) => audit(seq, changes, context));   // every committed transaction
 ```
 
-`replace` on the server removes every other fact sharing all but the last term, so two clients replacing the same attribute converge on the last write. A push with a change `allow` refuses is rejected whole and surfaces on the client as `["sync", "error", message]`. A subscription `allowRead` refuses is denied: it becomes ready holding no facts and reports why as `["sync", "shape", id, "error", message]`.
+`replace` on the server removes every other fact sharing all but the last term, so two clients replacing the same attribute converge on the last write. A push with a change `allow` refuses is rejected whole and surfaces on the client as `["sync", "error", message]`. A subscription `allowRead` refuses is denied: it becomes ready holding no facts and reports why as `["sync", "shape", id, "error", message]`. `observe` runs after each commit with the changes that took effect (what subscribers were sent) and the pushing connection's context — `undefined` for `apply` — so a server can audit or mirror what clients write.
 
 The handle publishes its state as facts: `["sync", "status", "standalone" | "connecting" | "syncing" | "live" | "offline"]`, `["sync", "pending", n]` unpushed changes, `["sync", "shape", id, "ready", bool]` per subscription (`compileFilter(filter).id`) plus `["sync", "shape", id, "error", message]` when the server denied it, and `["sync", "error", message]` when the server rejects a batch. `handle.flush()` waits for every queued write to be acknowledged; `handle.dispose()` stops.
 
