@@ -1,12 +1,12 @@
 // Live mounts, so describe()/drive() can map an element id back to the
-// component that rendered it and to its DOM node without either being facts.
+// component it renders within and to its DOM node without either being facts.
 
 import type { ComponentInfo } from "./jsx";
 
 export type MountRecord = {
   /** Component instances in the latest render, by id. */
   components: Map<string, ComponentInfo>;
-  /** The component that rendered each element, by element id. */
+  /** The component within whose output each element renders, by element id. */
   owners: Map<string, string>;
   /** DOM nodes the patch phase manages, by entity id. */
   nodes: Map<string, Element | Text>;
@@ -27,7 +27,7 @@ export function componentInfo(componentId: string): ComponentInfo | undefined {
   return undefined;
 }
 
-/** The component that rendered the element, if any. */
+/** The innermost component the element renders within, if any. */
 export function ownerOf(elementId: string): string | undefined {
   for (const mount of mounts) {
     const owner = mount.owners.get(elementId);

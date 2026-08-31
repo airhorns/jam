@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { db } from "../db";
 import { $, _, when, replace } from "../primitives";
-import { h, Portal, useComponentId, useCleanup } from "../jsx";
+import { h, Portal, createContext, useContext, useComponentId, useCleanup } from "../jsx";
 import { mount } from "../renderer";
 import { describeUI, outlineUI, type UINode } from "../describe";
 import { drive, press, useDriver, clearDrivers } from "../drive";
@@ -165,6 +165,34 @@ describe("describeUI", () => {
     drive("#dom:0:1", "open", true);
     expect(outlineUI({ root: "dom:0:1" })).toBe(['dialog "Sheet" #dom:0:1:0 (Sheet open=true)', '  button "Close" #dom:0:1:0:0'].join("\n"));
     expect(outlineUI({ root: "dom:0:1", interactive: true })).toBe(['dialog "Sheet" #dom:0:1:0 (Sheet open=true)', '  button "Close" #dom:0:1:0:0'].join("\n"));
+  });
+
+  it("counts a compound's parts as its own even when a page wrote them, so its state attaches to the visible tree", () => {
+    const PopupContext = createContext<{ open: boolean; setOpen: (open: boolean) => void }>({ open: false, setOpen: () => {} });
+    function Popup(props: { children?: unknown }) {
+      const id = useComponentId();
+      const open = when([id, "open", $.open])[0]?.open === true;
+      const setOpen = (next: boolean) => replace(id, "open", next);
+      useDriver("open", { set: (v: Term) => setOpen(Boolean(v)), get: () => open });
+      useCleanup(() => db.drop(id, "open", _));
+      return h(PopupContext.Provider, { value: { open, setOpen } }, props.children as never);
+    }
+    function PopupTrigger(props: { children?: unknown }) {
+      const ctx = useContext(PopupContext);
+      return h("button", { "aria-expanded": String(ctx.open), onClick: () => ctx.setOpen(!ctx.open) }, props.children as never);
+    }
+    function PopupContent() {
+      const ctx = useContext(PopupContext);
+      return ctx.open ? h(Portal, null, h("div", { role: "dialog", "aria-label": "Popup" }, "body")) : null;
+    }
+    const App = () => h("main", null, h(Popup, null, h(PopupTrigger, null, "Open"), h(PopupContent, null)), h("p", null, "after"));
+    dispose = mount(h(App, null), container);
+
+    expect(outlineUI()).toBe(["main #dom:0 <App>", '  button "Open" #dom:0:0:0 expanded=false (Popup open=false)', '  text "after"'].join("\n"));
+    expect(outlineUI({ root: "dom:0:0" })).toBe('button "Open" #dom:0:0:0 expanded=false (Popup open=false)');
+    drive("dom:0:0:0", "open", true);
+    expect(outlineUI({ root: "dom:0:0" })).toBe(['button "Open" #dom:0:0:0 expanded=true (Popup open=true)', 'dialog "Popup" #dom:0:0:1:0 <PopupContent>', '  text "body"'].join("\n"));
+    expect(flatten(describeUI()).filter((n) => n.role === "hidden")).toEqual([]);
   });
 
   it("treats header and footer as landmarks only outside sectioning content", () => {

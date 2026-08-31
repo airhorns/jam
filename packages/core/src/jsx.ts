@@ -23,8 +23,6 @@ export type VNode = {
   tag: string | Function;
   props: Record<string, unknown>;
   children: VChild[];
-  /** Id of the component whose render created this node, when one was rendering. */
-  owner?: string;
 };
 
 export type ElementRef<T extends Element = HTMLElement> = (element: T | null) => void;
@@ -42,14 +40,12 @@ export function h(
   props: Record<string, unknown> | null,
   ...children: VChild[]
 ): VNode {
-  const node: VNode = {
+  return {
     __vnode: true,
     tag,
     props: props ?? {},
     children: children.flat(10) as VChild[],
   };
-  if (currentComponentId != null) node.owner = currentComponentId;
-  return node;
 }
 
 export function Fragment(props: Record<string, unknown> | null, ...children: VChild[]): VNode {
@@ -146,7 +142,7 @@ let currentCleanups: Map<string, Cleanup[]> | null = null;
 export type ComponentInfo = {
   /** The component function's name(s), for describing the tree; presentational names are left out when a semantic one shares the id. */
   name: string;
-  /** Id of the component that rendered this one, or null at the root. */
+  /** Id of the component within whose output this one renders (the one it was passed to, when it came from a page), or null at the root. */
   parent: string | null;
   /** True when every component under this id is a styling wrapper (`Component.presentational = true`), so `describeUI()` reports its element by role alone. */
   presentational: boolean;
@@ -155,7 +151,11 @@ export type ComponentInfo = {
 /** Which component each element and component belongs to, recorded during the current `expandTree`. */
 let currentStructure: { components: Map<string, ComponentInfo>; owners: Map<string, string> } | null = null;
 
-/** The component whose returned output is being expanded; owns nodes that were not created inside a render. */
+/**
+ * The component whose returned output is being expanded. It owns every node
+ * in that output, including ones a page wrote and passed in as children, so
+ * a compound's parts belong to the compound rather than to the page.
+ */
 let expandingComponent: string | null = null;
 
 /**
@@ -340,7 +340,7 @@ export function expandVdom(
     if (currentStructure) {
       const name = (tag as { displayName?: string }).displayName ?? tag.name ?? "Anonymous";
       const presentational = (tag as { presentational?: boolean }).presentational === true;
-      const parent = vnode.owner ?? expandingComponent;
+      const parent = expandingComponent;
       // A component whose whole output is another component shares its id with it; record both names under that id.
       const shared = parent === componentId ? currentStructure.components.get(componentId) : undefined;
       if (!shared) currentStructure.components.set(componentId, { name, parent, presentational });
@@ -370,8 +370,7 @@ export function expandVdom(
   }
 
   const elId = computeEntityId(parentId, childIndex, vnode.props, inheritId);
-  const owner = vnode.owner ?? expandingComponent;
-  if (owner != null) currentStructure?.owners.set(elId, owner);
+  if (expandingComponent != null) currentStructure?.owners.set(elId, expandingComponent);
   const children: ExpandedNode[] = [];
   const flat = flattenChildren(vnode.children);
   for (let i = 0; i < flat.length; i++) {
@@ -386,13 +385,13 @@ export type Expansion = {
   cleanups: Map<string, Cleanup[]>;
   /** Every component instance in the tree, by id. */
   components: Map<string, ComponentInfo>;
-  /** The component that rendered each element, by element id. */
+  /** The component within whose output each element renders, by element id. */
   owners: Map<string, string>;
 };
 
 /**
  * Expand a complete tree from the root, collecting the cleanups its
- * components registered and which component produced each element. Resets
+ * components registered and which component each element renders within. Resets
  * per-render counters so portal ordering is deterministic.
  */
 export function expandTree(node: VChild, rootId = "dom"): Expansion {

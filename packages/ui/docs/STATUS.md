@@ -323,11 +323,16 @@ containers collapse into their parents; `styled()` frames are
 (`<IssueRow/ListItemFrame>`, not `<IssueRow/ListItemFrame/ListItem/YStack>`);
 children of buttons, images and other children-presentational roles are
 dropped, though a misplaced control inside one still surfaces; hidden
-subtrees are omitted; portals appear at the root; a drivable component that
-renders nothing (a closed Sheet or Dialog) is listed as `hidden … (Dialog
-open=false)` so its state stays readable and settable. `outlineUI()` is the
-same tree as text, and a LinearLite list page comes out at ~60 lines in
-`interactive` mode.
+subtrees are omitted; portals appear at the root. A component's parts
+belong to it even when the page wrote them as its children, so a compound
+whose root renders no element of its own (Dialog, Menu, Tooltip, Popover)
+starts at its first part and its state appears there — `button "New issue"
+… (Dialog open=false)` on the trigger — and `describeUI({ root })` on its id
+covers the trigger and the portalled content alike. A drivable component
+that renders nothing at all (a Sheet or Toast opened by the program) is
+listed as `hidden … (Sheet open=false)` so its state stays readable and
+settable. `outlineUI()` is the same tree as text, and a LinearLite list page
+comes out at ~60 lines in `interactive` mode.
 
 **drive() / press().** `drive(id, key, value)` finds the nearest component
 around an entity id that registered a driver for `key` and calls it, so the
@@ -389,4 +394,10 @@ toggles were named "Toggle theme" with no state (now "Dark theme"
 "theme persisted but notes did not" — the notes app has no persistence and
 its default theme is dark; the agent had no before-measurement, so its first
 press did work. Screenshots the agents took after acting are in
-`scratch/qa/` (gitignored).
+`scratch/qa/` (gitignored). Review of the PR then caught that a component's
+parent was the component whose render *created* its vnode, so a
+`Dialog.Trigger` a page wrote parented to the page and skipped the `Dialog`:
+in an app the dialog's `open` sat on a stray `hidden` node instead of on its
+trigger, and `root` on its id found nothing — while the conformance suite,
+which writes the parts outside any component, saw the intended tree by
+accident. Parents and element owners now follow the tree being expanded.
