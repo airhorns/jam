@@ -34,6 +34,13 @@ describe("Button", () => {
     expect(css(label)["font-size"]).toBe("14px");
   });
 
+  it("rendered as a link it keeps the button look without an underline", () => {
+    const r = render(h(Button, { tag: "a", href: "/next" }, "Next"));
+    expect(r.root.tagName).toBe("A");
+    expect(r.root.hasAttribute("type")).toBe(false);
+    expect(css(r.root)).toMatchObject({ display: "flex", cursor: "pointer", "text-decoration-line": "none" });
+  });
+
   it("sizes the frame and label from the size token", () => {
     const r = render(h(Button, { size: "$2" }, "Small"));
     expect(css(r.root)).toMatchObject({ height: "28px", "border-radius": "5px", gap: "6px" });

@@ -48,6 +48,22 @@ With zero, several, or a text-only child there is nothing to merge onto, so
 `Slot` falls back to rendering a `<span>` around its children with the props
 applied.
 
+The child can also be one of your own components. It then receives the
+merged props as its own props and is responsible for spreading them onto the
+element it renders (the same contract as Radix's `asChild`):
+
+```tsx
+function IconButton({ icon, ...rest }) {
+  return <Button circular icon={icon} {...rest} />;
+}
+
+<Menu.Trigger asChild><IconButton icon={<Dots />} /></Menu.Trigger>
+```
+
+A component that reads only the props it knows about and drops the rest
+renders fine but does nothing when clicked — the trigger's handlers and
+`aria-*` attributes were in the props it discarded.
+
 ## What compound parts add
 
 Parts that support `asChild` (`Dialog.Trigger`/`Close`, `AlertDialog`

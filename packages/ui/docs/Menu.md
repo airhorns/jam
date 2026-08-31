@@ -70,7 +70,10 @@ Keep the menu open after a selection by preventing the select event:
   `aria-haspopup="menu"`, `aria-expanded`, `data-state` and, while open,
   `aria-controls`. Opens on primary-button pointerdown (the press is
   `preventDefault`ed so the menu can take focus) and on Enter, Space or
-  ArrowDown (focusing the first item) or ArrowUp (focusing the last).
+  ArrowDown (focusing the first item) or ArrowUp (focusing the last). With
+  `asChild` on one of your own components, that component must spread the
+  props it receives onto its element or the trigger does nothing (see
+  `Slot.md`).
 - `Menu.Content` — the list, rendered in a portal only while open:
   `role="menu"`, `aria-orientation="vertical"`, `aria-labelledby` the trigger,
   `tabIndex={-1}`, `data-placement`. A `YStack` with `$background`, a 1px

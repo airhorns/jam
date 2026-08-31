@@ -62,8 +62,11 @@ text node.
 
 ## Parts
 
-`ListItem.Frame` — the row itself (`role="listitem"` unless `tag` is
-`button` or `a`), with `justify-content: space-between` and `overflow: hidden`.
+`ListItem.Frame` — the row itself, with `justify-content: space-between`,
+`overflow: hidden` and no text decoration. It carries `role="listitem"`
+unless `tag` is `button` or `a`, in which case the row keeps its native role
+and gets `cursor: pointer`, so a row of links or buttons looks and reads like
+one without further props.
 
 `ListItem.Text` — the default wrapper for children: `$color`, grows and
 shrinks, `ellipsis`, `cursor: inherit`.
@@ -106,8 +109,9 @@ surface, its border and all of its text together.
 - A ListItem is not a button. For a tappable row, put a `Button` or an anchor
   inside it, or use `tag="button"` / `tag="a"` on the frame — a click handler
   on a bare `div` is not keyboard reachable. A button or anchor row keeps its
-  native role rather than `listitem`, so announce the container with an
-  `aria-label` instead of `role="list"` when every row is a button.
+  native role rather than `listitem` (and a pointer cursor), so announce the
+  container with an `aria-label` instead of `role="list"` when every row is a
+  button.
 - `active` is the pressed shade (`$backgroundPress`), which in the dark scheme
   is the same colour as a `$color1` panel. To mark the *selected* row in a
   list, use `backgroundColor="$color3"` or a colour theme

@@ -84,6 +84,13 @@ describe("ListItem", () => {
     expect(css(render(h(ListItem, { title: "Star", pressTheme: true })).root).cursor).toBe("pointer");
   });
 
+  it("a button or link row is a pointer target without an underline", () => {
+    const link = render(h(ListItem.Frame, { tag: "a", href: "#" }, "Star"));
+    expect(css(link.root)).toMatchObject({ cursor: "pointer", "text-decoration-line": "none" });
+    expect(css(render(h(ListItem, { tag: "button", title: "Star" })).root).cursor).toBe("pointer");
+    expect(css(render(h(ListItem.Frame, { tag: "a", href: "#", cursor: "default" }, "Star")).root).cursor).toBe("default");
+  });
+
   it("active and disabled states", () => {
     expect(css(render(h(ListItem, { active: true })).root)["background-color"]).toBe("var(--backgroundPress)");
     const disabled = render(h(ListItem, { disabled: true }));

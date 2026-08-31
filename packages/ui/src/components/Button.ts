@@ -56,12 +56,14 @@ export const ButtonFrame = styled("button", {
         alignItems: "center",
         flexWrap: "nowrap",
         flexDirection: "row",
+        flexShrink: 0,
         backgroundColor: "$background",
         borderWidth: 1,
         borderStyle: "solid",
         borderColor: "transparent",
         color: "$color",
         fontFamily: "$body",
+        textDecorationLine: "none",
         cursor: "pointer",
         userSelect: "none",
         hoverStyle: {
@@ -198,6 +200,7 @@ function ButtonComponent(props: ButtonProps): VNode {
   const { children, icon, iconAfter, noTextWrap, textProps, ...frameProps } = props;
   const size = props.size ?? (props.unstyled ? undefined : "$true");
   if (props.circular && props.size == null) frameProps.size = size;
+  if (typeof props.tag === "string" && props.tag !== "button" && props.type === undefined) frameProps.type = undefined;
 
   const label = wrapChildrenInText(ButtonText, children, { noTextWrap, textProps, ...props }, {});
   const parts: VChild[] = [];

@@ -273,3 +273,34 @@ reconcile.
 `Avatar`, `Progress` and `ScrollView`, which fixed `TextArea` dropping its
 `defaultValue`, `Progress` emitting `NaN%` for a non-positive `max`, and added
 `getValueLabel` plus indicator `data-value`/`data-max`.
+
+**QA.** Cheap agents then worked both apps as a user would — every route in
+both schemes and at 390/768/1024/1280 px, keyboard-only, and with the fact
+log open. Their findings split three ways. *Library:* `<Button tag="a">`
+rendered with `type="button"` and a browser underline, so link-buttons and
+`ListItem` link rows carried `textDecorationLine="none"` everywhere; both
+now suppress it (tamagui's `reset.css` does the same), the `type` is dropped
+for non-button tags, and `ListItem` rows rendered as `button`/`a` get the
+pointer cursor. Stacks shrank below their content like ordinary `div`s, so
+every fixed-width sidebar, list row and card in the apps carried
+`flexShrink={0}`; `Stack` now has React Native's `flex-shrink: 0` /
+`flex-basis: auto` and only `ScrollView` shrinks (`flex-shrink: 1`), which
+also un-squashed the catalog's Sheet and Tab-bar lists. `Anchor` exists.
+`Button.md` documents `theme="blue_accent"` as the coloured CTA, `Slot.md`
+that an `asChild` child which is your own component must spread the props it
+receives, `Portal.md` that click-away logic should test
+`closest("[data-layer], [data-layer-trigger]")` rather than `contains`.
+*App bugs worth recording:* linearlite duplicated the overlays' Escape and
+click-away handling in its own document listeners, so Escape in a menu inside
+the new-issue dialog closed both — the app handlers are gone and the overlays
+report through `onOpenChange`; the obsidian seed notes were stamped with
+`Date.now()` so a fresh vault said "edited just now". *Deliberately left:*
+sidebar collapse on phones, a roving-focus note list and pglite's two
+`ErrnoError` page errors on boot.
+
+**Core observation.** A keystroke in the obsidian editor re-expands the whole
+tree, ~30 ms with two notes and ~84 ms with forty-two, because any fact
+change reruns the single `expandTree` reaction. Nothing in the apps is slow
+enough to block on it yet, but it is the ceiling on how large a `@jam/ui` app
+can get before renders need to be scoped to the components whose facts
+changed.

@@ -3,11 +3,33 @@
 `Stack`, `XStack`, `YStack`, `ZStack` and `ThemeableStack` are the layout
 primitives everything else is built from. `Stack` is a `div` reset to a
 flexbox — `display: flex`, `flex-direction: column`, `align-items: stretch`,
-`box-sizing: border-box`, `min-width: 0`, `min-height: 0` — so it never
-inherits browser text metrics and never overflows its parent. `XStack` and
-`YStack` only pin the direction; `ZStack` layers its children on top of one
-another; `ThemeableStack` adds the theme-reactive variants that `Card`,
-`ListItem`, `Square` and friends extend.
+`flex-basis: auto`, `flex-shrink: 0`, `box-sizing: border-box`,
+`min-width: 0`, `min-height: 0` — so it never inherits browser text metrics.
+`XStack` and `YStack` only pin the direction; `ZStack` layers its children on
+top of one another; `ThemeableStack` adds the theme-reactive variants that
+`Card`, `ListItem`, `Square` and friends extend.
+
+## Views do not shrink
+
+Like a React Native view (and tamagui's `View`), a stack keeps its content
+size when its parent runs out of room instead of being squeezed: rows in a
+list stay their natural height, a fixed-width sidebar stays that width, and
+the overflow becomes the parent's problem. Browser `div`s default to
+`flex-shrink: 1`, so this is the one place a stack behaves differently from
+the element it renders.
+
+Opt back in where you want a child to give way, with `flex={1}` (grow and
+shrink) or `flexShrink={1}` (shrink only):
+
+```tsx
+<XStack height="100vh">
+  <YStack width={280}>…</YStack>          {/* keeps its width */}
+  <YStack flex={1} minWidth={0}>…</YStack> {/* takes the rest and shrinks */}
+</XStack>
+```
+
+`ScrollView` is the exception: it shrinks to its container so its content can
+scroll (see `ScrollView.md`).
 
 ## Usage
 

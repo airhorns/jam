@@ -5,11 +5,13 @@ import type { StyledProps } from "../styled";
 import { injectRule } from "../css";
 import { themeableVariants } from "../variants";
 
-/** tamagui's `View` reset: a column flexbox that never inherits browser text metrics. */
+/** tamagui's `View` reset: a column flexbox that never inherits browser text metrics and, like a React Native view, does not shrink below its content. */
 const viewDefaults = {
   display: "flex",
   flexDirection: "column",
   alignItems: "stretch",
+  flexBasis: "auto",
+  flexShrink: 0,
   boxSizing: "border-box",
   minWidth: 0,
   minHeight: 0,

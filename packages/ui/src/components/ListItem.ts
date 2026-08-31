@@ -70,6 +70,7 @@ export const ListItemFrame = styled<ListItemFrameProps>(ThemeableStack, {
         backgroundColor: "$background",
         borderColor: "$borderColor",
         color: "$color",
+        textDecorationLine: "none",
         cursor: "default",
         hoverStyle: {
           backgroundColor: "$backgroundHover",
@@ -250,10 +251,10 @@ function ListItemComponent(props: ListItemProps): VNode {
 }
 ListItemComponent.displayName = "ListItem";
 
-/** Announced as a list item unless the row is itself a button or link, which keeps its native role. */
+/** Announced as a list item unless the row is itself a button or link, which keeps its native role and gets a pointer cursor. */
 function ListItemFrameComponent(props: ListItemFrameProps): VNode {
-  const role = props.tag === "button" || props.tag === "a" ? undefined : "listitem";
-  return h(ListItemFrame, { role, ...props });
+  const interactive = props.tag === "button" || props.tag === "a";
+  return h(ListItemFrame, { role: interactive ? undefined : "listitem", cursor: interactive ? "pointer" : undefined, ...props });
 }
 ListItemFrameComponent.displayName = "ListItemFrame";
 

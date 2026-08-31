@@ -6,7 +6,8 @@ export { ScrollView } from "./ScrollView";
 export { Group, XGroup, YGroup } from "./Group";
 
 // Typography
-export { Text, SizableText, Paragraph, Heading, H1, H2, H3, H4, H5, H6 } from "./Text";
+export { Text, SizableText, Paragraph, Heading, H1, H2, H3, H4, H5, H6, Anchor } from "./Text";
+export type { AnchorProps } from "./Text";
 
 // Shapes
 export { Square, Circle } from "./Shapes";
