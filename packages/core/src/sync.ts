@@ -123,6 +123,8 @@ interface Subscription {
   resolved: boolean;
   /** Caught up with the server on the current connection. */
   synced: boolean;
+  /** The server refused this filter; it holds nothing until a later subscribe is allowed. */
+  denied: boolean;
 }
 
 /** A filter some tab holds, as tracked by the leader. */
@@ -150,6 +152,7 @@ type TabMessage =
   | { t: "conn"; open: boolean; lost: boolean }
   | { t: "state"; changes: SyncChange[] }
   | { t: "ready"; id: string }
+  | { t: "denied"; id: string; error: string }
   | { t: "error"; message: string | null }
   | { t: "local"; entries: LogEntry[] }
   | { t: "acked"; upTo: number };
@@ -204,9 +207,10 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   };
 
   const subscriptions = new Map<string, Subscription>();
+  /** Whether a subscription of this tab that the server has not refused covers the fact. */
   const matchesActive = (terms: Fact, scope: string, except?: Subscription): boolean => {
     for (const sub of subscriptions.values()) {
-      if (sub !== except && sub.compiled.matches(terms, scope)) return true;
+      if (sub !== except && !sub.denied && sub.compiled.matches(terms, scope)) return true;
     }
     return false;
   };
@@ -301,7 +305,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   const disconnected = (wasLost: boolean) => {
     connected = false;
     lost = wasLost;
-    for (const sub of subscriptions.values()) sub.synced = false;
+    for (const sub of subscriptions.values()) if (!sub.denied) sub.synced = false;
     updateStatus();
   };
   const postConn = () => post({ t: "conn", open: connected, lost });
@@ -448,6 +452,17 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     }, db);
   };
 
+  /** Forget what the mirror holds for a filter the server refused and no tab's remaining subscription covers, so a reload cannot show it again. */
+  const purgeRefused = (compiled: CompiledFilter) => {
+    const changes: SyncChange[] = [];
+    for (const fact of Array.from(mirror.values())) {
+      if (!compiled.matches(fact.terms, fact.scope) || matchesRemote(fact.terms, fact.scope)) continue;
+      forget(fact.terms, true);
+      changes.push({ op: "delete", terms: fact.terms, scope: fact.scope });
+    }
+    if (changes.length > 0) post({ t: "state", changes });
+  };
+
   /** Remember how far each caught-up subscription has seen, so a later connection can ask for a replay. */
   const recordSeq = (seq: number) => {
     write((w) => {
@@ -478,7 +493,8 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   let lead: Lead | null = null;
   let disposed = false;
 
-  const markReady = (sub: Subscription) => {
+  /** `ready` resolves and the shape fact is set the first time a subscription settles. */
+  const settle = (sub: Subscription) => {
     sub.synced = true;
     if (!sub.resolved) {
       sub.resolved = true;
@@ -486,6 +502,24 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
       sub.resolveReady();
     }
     updateStatus();
+  };
+
+  const markReady = (sub: Subscription) => {
+    if (sub.denied) {
+      sub.denied = false;
+      transaction(() => db.drop(SYNC_STATUS_FACT, "shape", sub.compiled.id, "error", _));
+      // The state that re-admitted it reached the mirror while the denial kept it out of memory.
+      loadFromMirror(sub);
+    }
+    settle(sub);
+  };
+
+  /** A denied subscription settles like a ready one, holding nothing, and reports why. */
+  const markDenied = (sub: Subscription, error: string) => {
+    sub.denied = true;
+    unloadOrphans(sub);
+    setStatusFact(SYNC_STATUS_FACT, "shape", sub.compiled.id, "error", error);
+    settle(sub);
   };
 
   const markRemoteReady = (id: string, sub: RemoteSubscription) => {
@@ -583,6 +617,11 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         if (sub && !leading) markReady(sub);
         return;
       }
+      case "denied": {
+        const sub = subscriptions.get(message.id);
+        if (sub && !leading) markDenied(sub, message.error);
+        return;
+      }
       case "error":
         if (!leading) setError(message.message);
         return;
@@ -675,6 +714,18 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         applyChanges(message.changes);
         markRemoteReady(message.id, sub);
         recordSeq(message.seq);
+        return;
+      }
+      case "denied": {
+        const sub = remote.get(message.id);
+        if (!sub) return;
+        // Nothing to resume on the next connection; a later `want` asks again and starts from a snapshot.
+        remote.delete(message.id);
+        write((w) => (w.meta[`sub:${message.id}`] = undefined));
+        post({ t: "denied", id: message.id, error: message.error });
+        const own = subscriptions.get(message.id);
+        if (own) markDenied(own, message.error);
+        purgeRefused(sub.compiled);
         return;
       }
       case "changes":
@@ -799,7 +850,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     if (!sub) {
       let resolveReady!: () => void;
       const ready = new Promise<void>((resolve) => (resolveReady = resolve));
-      sub = { compiled, refs: 0, ready, resolveReady, resolved: false, synced: false };
+      sub = { compiled, refs: 0, ready, resolveReady, resolved: false, synced: false, denied: false };
       subscriptions.set(id, sub);
       loadFromMirror(sub);
       if (!url) markReady(sub);
@@ -822,7 +873,10 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
         if (leading) drop(me, id);
         else post({ t: "drop", tab: me, id });
         unloadOrphans(owned);
-        transaction(() => db.drop(SYNC_STATUS_FACT, "shape", id, "ready", _));
+        transaction(() => {
+          db.drop(SYNC_STATUS_FACT, "shape", id, "ready", _);
+          db.drop(SYNC_STATUS_FACT, "shape", id, "error", _);
+        });
         updateStatus();
         await settled();
       },

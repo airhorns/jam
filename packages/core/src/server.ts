@@ -11,7 +11,17 @@
 
 import { Engine, ROOT_OWNER, factKey, type Fact, type FactEvent } from "@jam/engine";
 import type { FactStorage, NewLogEntry, StoredFact } from "@jam/engine/storage";
-import { compileFilter, parseChanges, parseFilter, type ClientMessage, type CompiledFilter, type ServerMessage, type SyncChange } from "./filter";
+import {
+  compileFilter,
+  parseChanges,
+  parseFilter,
+  serializeFilter,
+  type ClientMessage,
+  type CompiledFilter,
+  type FactFilter,
+  type ServerMessage,
+  type SyncChange,
+} from "./filter";
 
 export type { SyncChange, SyncOp, FactFilter, ClientMessage, ServerMessage } from "./filter";
 export { compileFilter, parseChanges, parseFilter } from "./filter";
@@ -29,14 +39,16 @@ export interface SyncSocket {
 
 export interface SyncServerOptions {
   storage: FactStorage;
-  /** Whether a connection may write facts in `scope`; a batch touching a disallowed scope is rejected whole. Default: allow everything. */
-  allow?: (scope: string, context: unknown) => boolean | Promise<boolean>;
+  /** Whether a connection may make `change`; a push with a disallowed change is rejected whole. Default: allow everything. */
+  allow?: (change: SyncChange, context: unknown) => boolean | Promise<boolean>;
+  /** Whether a connection may subscribe to `filter`; a denied subscription gets a `denied` message and receives nothing. Default: allow everything. */
+  allowRead?: (filter: FactFilter, context: unknown) => boolean | Promise<boolean>;
   /** Log entries kept for replay to reconnecting clients (default: 10000). */
   logRetention?: number;
 }
 
 export interface SyncServer {
-  /** Attach a connection; `context` is passed to `allow` (e.g. the authenticated user). */
+  /** Attach a connection; `context` is passed to `allow` and `allowRead` (e.g. the authenticated user). */
   handle(socket: SyncSocket, context?: unknown): void;
   /** Commit changes as the server itself (seeds, admin tools). Resolves with the committed seq. */
   apply(changes: SyncChange[]): Promise<number>;
@@ -56,7 +68,7 @@ interface Connection {
 }
 
 export async function createSyncServer(options: SyncServerOptions): Promise<SyncServer> {
-  const { storage, allow, logRetention = 10_000 } = options;
+  const { storage, allow, allowRead, logRetention = 10_000 } = options;
   const engine = new Engine();
   const connections = new Set<Connection>();
 
@@ -169,25 +181,33 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
     return out;
   };
 
-  const subscribe = async (connection: Connection, id: string, filter: CompiledFilter, since: number | undefined) => {
-    connection.subscriptions.set(id, filter);
+  const subscribe = async (connection: Connection, id: string, filter: FactFilter, since: number | undefined) => {
+    if (allowRead && !(await allowRead(filter, connection.context))) {
+      // A re-subscribe that has lost access also ends the stream it had.
+      connection.subscriptions.delete(id);
+      send(connection, { type: "denied", id, error: `subscribing to ${serializeFilter(filter)} is not allowed` });
+      return;
+    }
+    const compiled = compileFilter(filter);
+    connection.subscriptions.set(id, compiled);
     if (since !== undefined && since <= seq && since + 1 >= oldestSeq) {
       const entries = await storage.readLog(since);
       const changes: SyncChange[] = [];
       for (const entry of entries) {
-        if (filter.matches(entry.terms, entry.scope)) changes.push({ op: entry.op, terms: entry.terms, scope: entry.scope });
+        if (compiled.matches(entry.terms, entry.scope)) changes.push({ op: entry.op, terms: entry.terms, scope: entry.scope });
       }
       send(connection, { type: "replay", id, seq, changes });
       return;
     }
-    send(connection, { type: "snapshot", id, seq, facts: snapshot(filter) });
+    send(connection, { type: "snapshot", id, seq, facts: snapshot(compiled) });
   };
 
   const push = async (connection: Connection, id: number, changes: SyncChange[]) => {
     if (allow) {
-      const scopes = new Set(changes.map((c) => c.scope));
-      for (const scope of scopes) {
-        if (!(await allow(scope, connection.context))) throw new SyncRejected(`writes to scope ${JSON.stringify(scope)} are not allowed`);
+      for (const change of changes) {
+        if (!(await allow(change, connection.context))) {
+          throw new SyncRejected(`${change.op} of ${JSON.stringify(change.terms)} in scope ${JSON.stringify(change.scope)} is not allowed`);
+        }
       }
     }
     await apply(changes, (committed) => send(connection, { type: "ack", id, seq: committed }));
@@ -203,7 +223,7 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
     }
     switch (message.type) {
       case "subscribe": {
-        const filter = compileFilter(parseFilter(message.filter));
+        const filter = parseFilter(message.filter);
         const since = typeof message.since === "number" ? message.since : undefined;
         await serialized(() => subscribe(connection, String(message.id), filter, since));
         return;

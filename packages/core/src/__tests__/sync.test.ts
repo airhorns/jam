@@ -177,7 +177,7 @@ describe("sync (server)", () => {
   beforeEach(async () => {
     server = await createSyncServer({
       storage: memoryStorage(),
-      allow: (scope) => scope !== "forbidden",
+      allow: ({ scope }) => scope !== "forbidden",
     });
     net = fakeNetwork((socket) => server.handle(socket));
     received = [];
@@ -350,6 +350,107 @@ describe("sync (server)", () => {
     await second.subscribe().ready;
     expect(received.map((m) => m.type)).toEqual(["hello", "snapshot"]);
     expect(facts("n")).toEqual([["n", 2], ["n", 3], ["n", 4], ["n", 5]]);
+  });
+
+  it("settles a denied subscription as ready with an error fact and loads nothing for it", async () => {
+    server = await createSyncServer({ storage: memoryStorage(), allowRead: (filter) => filter.scope !== "private" });
+    await server.apply([
+      { op: "upsert", terms: ["secret", 1], scope: "private" },
+      { op: "upsert", terms: ["note", 1], scope: "" },
+    ]);
+    const s = await start();
+    const denied = s.subscribe({ scope: "private" });
+    const allowed = s.subscribe({ scope: "" });
+    await Promise.all([denied.ready, allowed.ready]);
+    expect(facts("secret")).toEqual([]);
+    expect(facts("note")).toEqual([["note", 1]]);
+    expect(db.has("sync", "shape", denied.id, "ready", true)).toBe(true);
+    expect(db.query(["sync", "shape", denied.id, "error", $.e]).map((b) => String(b.e))).toEqual([expect.stringContaining("private")]);
+    expect(db.query(["sync", "shape", allowed.id, "error", $.e])).toEqual([]);
+    expect(statusFact("status")).toBe("live");
+
+    await server.apply([{ op: "upsert", terms: ["secret", 2], scope: "private" }]);
+    await settle();
+    expect(facts("secret")).toEqual([]);
+    expect(await stored()).toEqual([{ terms: ["note", 1], scope: "" }]);
+
+    net.sockets[0].drop();
+    await settle();
+    expect(s.connected).toBe(true);
+    expect(statusFact("status")).toBe("live");
+    expect(received.filter((m) => m.type === "denied")).toHaveLength(1);
+
+    await denied.dispose();
+    expect(db.query(["sync", "shape", denied.id, $.k, $.v])).toEqual([]);
+    expect(db.has("sync", "shape", allowed.id, "ready", true)).toBe(true);
+  });
+
+  it("unloads what a denied subscription had shown from the mirror and purges the refused slice from storage", async () => {
+    server = await createSyncServer({ storage: memoryStorage(), allowRead: (filter) => filter.scope !== "private" });
+    const seeded = [
+      { terms: ["secret", 1], scope: "private" },
+      { terms: ["shared", 1], scope: "private" },
+      { terms: ["note", 1], scope: "" },
+    ];
+    await storage.write({ upserts: seeded });
+    await server.apply(seeded.map((fact) => ({ op: "upsert" as const, ...fact })));
+    const s = await start();
+    const denied = s.subscribe({ scope: "private" });
+    const shared = s.subscribe({ pattern: ["shared"] });
+    expect(facts("secret")).toEqual([["secret", 1]]);
+    expect(facts("shared")).toEqual([["shared", 1]]);
+
+    await Promise.all([denied.ready, shared.ready]);
+    expect(facts("secret")).toEqual([]);
+    expect(facts("shared")).toEqual([["shared", 1]]);
+    expect(db.scopeOf("shared", 1)).toBe("private");
+    await settle();
+    expect(await stored()).toEqual([
+      { terms: ["note", 1], scope: "" },
+      { terms: ["shared", 1], scope: "private" },
+    ]);
+
+    await shared.dispose();
+    expect(facts("shared")).toEqual([]);
+    await denied.dispose();
+    expect(facts("secret")).toEqual([]);
+  });
+
+  it("purges a slice whose access is revoked on reconnect and asks for a snapshot if it is allowed again", async () => {
+    let revoked = false;
+    server = await createSyncServer({ storage: memoryStorage(), allowRead: (filter) => !(revoked && filter.scope === "private") });
+    await server.apply([
+      { op: "upsert", terms: ["secret", 1], scope: "private" },
+      { op: "upsert", terms: ["note", 1], scope: "" },
+    ]);
+    const s = await start();
+    const secrets = s.subscribe({ scope: "private" });
+    const notes = s.subscribe({ scope: "" });
+    await Promise.all([secrets.ready, notes.ready]);
+    await settle();
+    expect(facts("secret")).toEqual([["secret", 1]]);
+    expect(await storage.getMeta(`sub:${secrets.id}`)).toBe("2");
+
+    revoked = true;
+    net.sockets[0].drop();
+    await settle();
+    expect(s.connected).toBe(true);
+    expect(statusFact("status")).toBe("live");
+    expect(received.filter((m) => m.type === "denied")).toHaveLength(1);
+    expect(facts("secret")).toEqual([]);
+    expect(facts("note")).toEqual([["note", 1]]);
+    expect(db.query(["sync", "shape", secrets.id, "error", $.e])).toHaveLength(1);
+    expect(await stored()).toEqual([{ terms: ["note", 1], scope: "" }]);
+    expect(await storage.getMeta(`sub:${secrets.id}`)).toBeUndefined();
+
+    revoked = false;
+    await secrets.dispose();
+    received = [];
+    const again = s.subscribe({ scope: "private" });
+    await again.ready;
+    expect(received.map((m) => m.type)).toEqual(["snapshot"]);
+    expect(facts("secret")).toEqual([["secret", 1]]);
+    expect(db.query(["sync", "shape", again.id, "error", $.e])).toEqual([]);
   });
 
   it("converges with a concurrent replace from another writer", async () => {
@@ -723,6 +824,126 @@ describe("sync (tabs)", () => {
     expect(a.facts("n")).toEqual([["n", 1], ["n", 2]]);
     expect(b.facts("n")).toEqual([["n", 1], ["n", 2]]);
     expect(pushes.length).toBeLessThanOrEqual(2);
+  });
+
+  it("settles a follower's denied subscription through the leader", async () => {
+    server = await createSyncServer({ storage: memoryStorage(), allowRead: (filter) => filter.scope !== "private" });
+    await server.apply([{ op: "upsert", terms: ["secret", 1], scope: "private" }]);
+    const a = await openTab();
+    const b = await openTab();
+    await settle();
+    expect(b.s.leading).toBe(false);
+
+    const sub = b.s.subscribe({ scope: "private" });
+    await sub.ready;
+    expect(b.facts("secret")).toEqual([]);
+    expect(b.db.has("sync", "shape", sub.id, "ready", true)).toBe(true);
+    expect(b.db.query(["sync", "shape", sub.id, "error", $.e])).toHaveLength(1);
+    expect(b.status("status")).toBe("live");
+    expect(a.status("status")).toBe("live");
+
+    await server.apply([{ op: "upsert", terms: ["secret", 2], scope: "private" }]);
+    await settle();
+    expect(b.facts("secret")).toEqual([]);
+    expect(await stored()).toEqual([]);
+    await sub.dispose();
+    expect(b.db.query(["sync", "shape", sub.id, $.k, $.v])).toEqual([]);
+  });
+
+  it("clears a denial when the subscription is asked for again and allowed", async () => {
+    let open = false;
+    server = await createSyncServer({ storage: memoryStorage(), allowRead: (filter) => open || filter.scope !== "private" });
+    await server.apply([{ op: "upsert", terms: ["secret", 1], scope: "private" }]);
+    const a = await openTab();
+    const b = await openTab();
+    await settle();
+    const sub = b.s.subscribe({ scope: "private" });
+    await sub.ready;
+    expect(b.db.query(["sync", "shape", sub.id, "error", $.e])).toHaveLength(1);
+
+    open = true;
+    await a.s.dispose();
+    handles.splice(handles.indexOf(a.s), 1);
+    await settle();
+    expect(b.s.leading).toBe(true);
+    expect(b.facts("secret")).toEqual([["secret", 1]]);
+    expect(b.db.query(["sync", "shape", sub.id, "error", $.e])).toEqual([]);
+    expect(b.db.has("sync", "shape", sub.id, "ready", true)).toBe(true);
+    expect(b.status("status")).toBe("live");
+  });
+
+  it("drops a follower's refused facts from its memory, purges them from the shared mirror and keeps later ones out", async () => {
+    server = await createSyncServer({ storage: memoryStorage(), allowRead: (filter) => filter.scope !== "private" });
+    const seeded = [
+      { terms: ["secret", 1], scope: "private" },
+      { terms: ["shared", 1], scope: "private" },
+    ];
+    await storage.write({ upserts: seeded });
+    await server.apply(seeded.map((fact) => ({ op: "upsert" as const, ...fact })));
+    const a = await openTab();
+    const b = await openTab();
+    await settle();
+    await a.s.subscribe({ pattern: ["shared"] }).ready;
+    expect(a.facts("shared")).toEqual([["shared", 1]]);
+
+    const sub = b.s.subscribe({ scope: "private" });
+    expect(b.facts("secret")).toEqual([["secret", 1]]);
+    expect(b.facts("shared")).toEqual([["shared", 1]]);
+    await sub.ready;
+    expect(b.facts("secret")).toEqual([]);
+    expect(b.facts("shared")).toEqual([]);
+    expect(a.facts("shared")).toEqual([["shared", 1]]);
+    await settle();
+    expect(await stored()).toEqual([{ terms: ["shared", 1], scope: "private" }]);
+
+    await server.apply([
+      { op: "upsert", terms: ["shared", 2], scope: "private" },
+      { op: "upsert", terms: ["secret", 2], scope: "private" },
+    ]);
+    await settle();
+    expect(a.facts("shared")).toEqual([["shared", 1], ["shared", 2]]);
+    expect(b.facts("shared")).toEqual([]);
+    expect(b.facts("secret")).toEqual([]);
+    expect((await stored()).map((f) => f.terms)).toEqual([["shared", 1], ["shared", 2]]);
+  });
+
+  it("keeps what only the leader's own refused filter matches out of the leader's memory", async () => {
+    server = await createSyncServer({ storage: memoryStorage(), allowRead: (filter) => filter.scope !== "private" });
+    const a = await openTab();
+    const b = await openTab();
+    await settle();
+    expect(a.s.leading).toBe(true);
+    await a.s.subscribe({ scope: "private" }).ready;
+    await b.s.subscribe({ pattern: ["shared"] }).ready;
+
+    await server.apply([{ op: "upsert", terms: ["shared", 1], scope: "private" }]);
+    await settle();
+    expect(b.facts("shared")).toEqual([["shared", 1]]);
+    expect(a.facts("shared")).toEqual([]);
+    expect(await stored()).toEqual([{ terms: ["shared", 1], scope: "private" }]);
+  });
+
+  it("repopulates a denied subscription when another tab's request for the same filter is allowed", async () => {
+    let open = false;
+    server = await createSyncServer({ storage: memoryStorage(), allowRead: (filter) => open || filter.scope !== "private" });
+    await server.apply([{ op: "upsert", terms: ["secret", 1], scope: "private" }]);
+    const a = await openTab();
+    const b = await openTab();
+    await settle();
+    const sub = b.s.subscribe({ scope: "private" });
+    await sub.ready;
+    expect(b.facts("secret")).toEqual([]);
+
+    open = true;
+    const c = await openTab();
+    await c.s.subscribe({ scope: "private" }).ready;
+    await settle();
+    expect(c.facts("secret")).toEqual([["secret", 1]]);
+    expect(b.facts("secret")).toEqual([["secret", 1]]);
+    expect(a.facts("secret")).toEqual([]);
+    expect(b.db.query(["sync", "shape", sub.id, "error", $.e])).toEqual([]);
+    expect(b.db.has("sync", "shape", sub.id, "ready", true)).toBe(true);
+    expect(await stored()).toEqual([{ terms: ["secret", 1], scope: "private" }]);
   });
 
   it("shares standalone writes between tabs without any connection", async () => {
