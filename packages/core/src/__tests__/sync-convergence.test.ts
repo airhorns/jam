@@ -93,7 +93,8 @@ async function simulate(seed: number, steps: number) {
 
 async function run(seed: number, steps: number) {
   const rand = prng(seed);
-  const server: SyncServer = await createSyncServer({ storage: memoryStorage(), logRetention: 4 });
+  // Connections die only when the run drops them; a heartbeat would leave `drain` a timer to run forever.
+  const server: SyncServer = await createSyncServer({ storage: memoryStorage(), logRetention: 4, heartbeat: 0 });
   const net: FakeNetwork = fakeNetwork((socket) => server.handle(socket));
   const browsers: Browser[] = [];
   const log: string[] = [];
