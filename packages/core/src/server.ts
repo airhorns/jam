@@ -8,6 +8,8 @@
 // See filter.ts for the message shapes. Every connection receives one
 // `changes` message per committed transaction (filtered to its subscriptions,
 // possibly empty) so a client knows exactly which seq it has caught up to.
+// The log has an id, minted once per storage and sent in `hello`, so a client
+// can tell whether the seqs it remembers belong to the log it is talking to.
 
 import { Engine, ROOT_OWNER, factKey, type Fact, type FactEvent } from "@jam/engine";
 import type { FactStorage, NewLogEntry, StoredFact } from "@jam/engine/storage";
@@ -77,6 +79,10 @@ interface Connection {
   open: boolean;
 }
 
+function logId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+}
+
 export async function createSyncServer(options: SyncServerOptions): Promise<SyncServer> {
   const { storage, allow, allowRead, logRetention = 10_000 } = options;
   const engine = new Engine();
@@ -85,6 +91,12 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
   for (const { terms, scope } of await storage.load()) engine.assert(ROOT_OWNER, engine.id(scope), terms);
   engine.applyPending();
   engine.flush();
+
+  let log = await storage.getMeta("log");
+  if (log === undefined) {
+    log = logId();
+    await storage.write({ meta: { log } });
+  }
 
   // A transaction's seq is the seq storage assigned to its last log entry.
   let seq = await storage.logHead();
@@ -284,7 +296,7 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
       console.error("[jam] sync socket error", e);
       drop();
     });
-    send(connection, { type: "hello", seq });
+    send(connection, { type: "hello", seq, log });
   };
 
   return {
