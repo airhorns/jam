@@ -48,6 +48,19 @@ test.describe("homepage", () => {
     await expect(page.getByTestId("home-github")).toHaveCount(0);
   });
 
+  test("modifier clicks on in-site links are left to the browser", async ({ page, context }) => {
+    await page.goto("/");
+    await page.waitForSelector('[data-page="home"]');
+    const [popup] = await Promise.all([
+      context.waitForEvent("page"),
+      page.getByTestId("home-components").click({ modifiers: [process.platform === "darwin" ? "Meta" : "Control"] }),
+    ]);
+    await popup.waitForSelector('[data-component="Button"]');
+    expect(new URL(popup.url()).searchParams.get("c")).toBe("all");
+    await expect(page.locator('[data-page="home"]')).toHaveCount(1);
+    await popup.close();
+  });
+
   test("component pages title themselves after their doc", async ({ page }) => {
     await page.goto("/?c=Shapes");
     await page.waitForSelector('[data-component="Shapes"]');

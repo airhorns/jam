@@ -5,6 +5,7 @@ import { XStack, YStack, Text, H2, Paragraph, Button, styled, setTheme } from "@
 import { registry, groupOrder, findComponent } from "./registry";
 import { findGuide, guides, type Guide } from "./docs";
 import { HomePage } from "./home";
+import { isPlainClick } from "./links";
 import { renderInlineMarkdown, renderMarkdown } from "./markdown";
 import type { CatalogEntry, Demo } from "./types";
 
@@ -167,6 +168,7 @@ function PageLink({ page, current, href, children, ...rest }: { page: string; cu
       active={active ? "true" : "false"}
       aria-current={active ? "page" : undefined}
       onClick={(e: Event) => {
+        if (!isPlainClick(e)) return;
         e.preventDefault();
         update({ component: page, demo: null });
       }}
@@ -195,7 +197,7 @@ function Sidebar() {
       data-testid="sidebar"
     >
       <XStack alignItems="center" justifyContent="space-between" paddingHorizontal={10} paddingBottom="$space.2">
-        <Brand href="./" onClick={(e: Event) => { e.preventDefault(); update({ component: HOME, demo: null }); }} data-nav="home">
+        <Brand href="./" onClick={(e: Event) => { if (!isPlainClick(e)) return; e.preventDefault(); update({ component: HOME, demo: null }); }} data-nav="home">
           <Text fontWeight="700" fontSize={15}>Jam</Text>
           <Text fontSize={12} opacity={0.6}>@jam/ui</Text>
         </Brand>

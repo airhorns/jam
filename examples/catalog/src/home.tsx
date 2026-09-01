@@ -2,6 +2,7 @@ import { h } from "@jam/core/jsx";
 import { Anchor, H1, Paragraph, Separator, Text, XStack, YStack, styled } from "@jam/ui";
 import { REPO_URL, readme } from "./docs";
 import { renderInlineMarkdown, renderMarkdown } from "./markdown";
+import { isPlainClick } from "./links";
 import { registry } from "./registry";
 
 // The landing page: the repository README, with its title and lead as a hero
@@ -85,6 +86,7 @@ function pageEntries(): Entry[] {
 
 export function HomePage({ onNavigate }: { onNavigate: (page: string) => void }) {
   const navigate = (page: string) => (event: Event) => {
+    if (!isPlainClick(event)) return;
     event.preventDefault();
     onNavigate(page);
   };

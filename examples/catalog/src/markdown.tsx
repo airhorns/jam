@@ -2,6 +2,7 @@ import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
 import { lexer, type Token, type Tokens } from "marked";
 import { Anchor, H3, H4, H5, Paragraph, Separator, YStack, styled } from "@jam/ui";
+import { isPlainClick } from "./links";
 
 // Renders the reference docs' markdown through Jam components rather than
 // innerHTML, so the docs are themed like the demos and legible to describeUI().
@@ -153,7 +154,7 @@ function renderInline(tokens: Token[] | undefined, options: MarkdownOptions): VC
               key={i}
               href={`?c=${page}`}
               onClick={(event: Event) => {
-                if (!options.onNavigate) return;
+                if (!options.onNavigate || !isPlainClick(event)) return;
                 event.preventDefault();
                 options.onNavigate(page);
               }}
