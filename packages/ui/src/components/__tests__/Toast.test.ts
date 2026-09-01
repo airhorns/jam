@@ -2,8 +2,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { h } from "@jam/core/jsx";
 import { render, css, setupDefaultUI, click, tick, pointerEnter, pointerLeave, keydown, focus, blur } from "../../testing";
-import { Toast, toastController } from "../Toast";
+import { Toast, toastController, useToastController, useToastState } from "../Toast";
 import { Button } from "../Button";
+import { renderError } from "./helpers";
 
 beforeEach(() => {
   setupDefaultUI();
@@ -201,5 +202,68 @@ describe("Toast", () => {
     render(h(Toast, { defaultOpen: true, duration: Infinity }, h(Toast.Action, { altText: "  ", "data-testid": "action" }, "Undo")));
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+
+  it("reports parts rendered outside a Toast", () => {
+    expect(renderError(h(Toast.Title, null, "Lost"))).toMatch(/Toast.Title must be rendered inside <Toast>/);
+  });
+
+  it("pauses while a toast has focus and resumes when it blurs", async () => {
+    const onOpenChange = vi.fn();
+    const { get } = render(h(Example, { defaultOpen: true, duration: 40, onOpenChange }));
+    const toast = get("[data-testid=toast]");
+    focus(toast);
+    await tick(60);
+    expect(onOpenChange).not.toHaveBeenCalled();
+    blur(toast);
+    await tick(60);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("runs caller handlers on the toast and viewport before its own", async () => {
+    const toastHandlers = { onPointerEnter: vi.fn(), onPointerLeave: vi.fn(), onFocus: vi.fn(), onBlur: vi.fn(), onKeyDown: vi.fn() };
+    const viewportHandlers = { onPointerOver: vi.fn(), onPointerOut: vi.fn(), onFocusIn: vi.fn(), onFocusOut: vi.fn() };
+    const onOpenChange = vi.fn();
+    const { get } = render(
+      h(
+        Toast.Viewport,
+        { "data-testid": "viewport", ...viewportHandlers },
+        h(Toast, { defaultOpen: true, duration: 40, onOpenChange, "data-testid": "toast", ...toastHandlers }, h(Toast.Title, null, "A")),
+      ),
+    );
+    const toast = get("[data-testid=toast]");
+    pointerEnter(toast);
+    await tick(60);
+    expect(onOpenChange).not.toHaveBeenCalled();
+    pointerLeave(toast);
+    focus(toast);
+    blur(toast);
+    keydown(toast, "Escape");
+    for (const handler of Object.values(toastHandlers)) expect(handler).toHaveBeenCalled();
+    for (const handler of Object.values(viewportHandlers)) expect(handler).toHaveBeenCalled();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("tolerates leave and blur on an empty viewport and hiding an unknown toast", () => {
+    const { get } = render(h(Toast.Viewport, { "data-testid": "viewport" }));
+    const viewport = get("[data-testid=viewport]");
+    pointerLeave(viewport);
+    blur(viewport);
+    toastController.hide("toast-nope");
+    expect(viewport.querySelectorAll("[data-toast-id]")).toHaveLength(0);
+  });
+
+  it("exposes the controller and the latest imperative toast through hooks", () => {
+    function Latest() {
+      const controller = useToastController();
+      const latest = useToastState();
+      return h("output", { "data-testid": "latest", onClick: () => controller.show("Second", { duration: Infinity }) }, latest?.title ?? "none");
+    }
+    const { get } = render(h("div", null, h(Toast.Viewport, null), h(Latest, null)));
+    expect(get("[data-testid=latest]").textContent).toBe("none");
+    toastController.show("First", { duration: Infinity });
+    expect(get("[data-testid=latest]").textContent).toBe("First");
+    click(get("[data-testid=latest]"));
+    expect(get("[data-testid=latest]").textContent).toBe("Second");
   });
 });

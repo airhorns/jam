@@ -23,10 +23,9 @@ function injectProgressRules(): void {
 
 export const ProgressContext = createContext<{ value: number | null; max: number }>({ value: null, max: 100 });
 
+/** Only runs for literal numbers and size tokens that exist, so the lookup always resolves. */
 const progressSized: VariantFunction = (value, { tokens }) => {
-  const size = tokenValue(tokens, "size", value);
-  if (size === undefined) return null;
-  const height = Math.round(size * 0.25);
+  const height = Math.round(tokenValue(tokens, "size", value)! * 0.25);
   return { height, minWidth: height * 20, width: "100%" };
 };
 

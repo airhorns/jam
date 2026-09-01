@@ -6,6 +6,7 @@ import { render, css, setupDefaultUI, click, keydown, tick, pointerEnter, pointe
 import { Tooltip } from "../Tooltip";
 import { Button } from "../Button";
 import type { Placement } from "../../floating";
+import { renderError } from "./helpers";
 
 beforeEach(() => {
   setupDefaultUI();
@@ -220,5 +221,15 @@ describe("Tooltip", () => {
     pointerEnter(get("[data-testid=triggerB]"));
     expect(query("[data-testid=contentA]")).toBeNull();
     expect(query("[data-testid=contentB]")).not.toBeNull();
+  });
+
+  it("reports parts rendered outside a Tooltip", () => {
+    expect(renderError(h(Tooltip.Trigger, null, "Lost"))).toMatch(/Tooltip.Trigger must be rendered inside <Tooltip>/);
+  });
+
+  it("pads the content from a literal pixel size", () => {
+    const { get } = render(h(Tooltip, { delay: 0 }, h(Tooltip.Trigger, { "data-testid": "trigger" }, "Hover me"), h(Tooltip.Content, { "data-testid": "content", size: 20 }, "Hint")));
+    focus(get("[data-testid=trigger]"));
+    expect(css(get("[data-testid=content]"))).toMatchObject({ "padding-left": "20px", "padding-top": "10px", "border-radius": "10px" });
   });
 });

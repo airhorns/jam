@@ -490,7 +490,7 @@ function AccordionComponent(props: AccordionProps): VNode {
       ...(frameProps as Record<string, unknown>),
       orientation,
       dir,
-      class: [lastChildBorderlessClass(), props.class].filter(Boolean).join(" ") || undefined,
+      class: [lastChildBorderlessClass(), props.class].filter(Boolean).join(" "),
       "data-orientation": orientation,
       "data-disabled": disabled ? "" : undefined,
       onKeyDown: (event: KeyboardEvent) => {

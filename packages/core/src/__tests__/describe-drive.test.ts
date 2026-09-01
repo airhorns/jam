@@ -229,6 +229,143 @@ describe("describeUI", () => {
     dispose = mount(h(App, null), container);
     expect(outlineUI({ interactive: true })).toBe(["generic #dom:0 (App/Disclosure open=false)", '  button "Only" #dom:0:0 expanded=false'].join("\n"));
   });
+
+  it("gives tags the role their attributes imply", () => {
+    const App = () =>
+      h(
+        "div",
+        null,
+        h("a", null, "no href"),
+        h("section", { "aria-labelledby": "t" }, h("h2", { id: "t" }, "Titled")),
+        h("section", null, "plain"),
+        h("select", { "aria-label": "One" }, h("option", null, "a")),
+        h("select", { "aria-label": "Many", multiple: true }, h("option", null, "b")),
+        h("svg", { "aria-label": "Logo" }),
+        h("svg", null),
+        h("input", { type: "hidden", value: "csrf" }),
+        h("input", { type: "submit", value: "Go" }),
+        h("input", { type: "submit", value: "  " }),
+        h("input", { type: "reset" }),
+        h("label", { htmlFor: "fruit" }, "Fruit"),
+        h("div", { role: "combobox", id: "fruit" }, "Apple"),
+        h("div", { role: "combobox", title: "Pick" }),
+      );
+    dispose = mount(h(App, null), container);
+
+    const tree = describeUI();
+    const roles = flatten(tree).map((n) => [n.role, n.name] as const);
+    expect(roles).toContainEqual(["text", "no href"]);
+    expect(roles).not.toContainEqual(["link", "no href"]);
+    expect(find(tree, "region", "Titled")?.children.map((n) => n.role)).toEqual(["heading"]);
+    expect(roles).toContainEqual(["text", "plain"]);
+    expect(find(tree, "combobox", "One")?.state.value).toBe("a");
+    expect(find(tree, "listbox", "Many")).toBeDefined();
+    expect(find(tree, "img", "Logo")).toBeDefined();
+    expect(flatten(tree).filter((n) => n.role === "img")).toHaveLength(1);
+    expect(flatten(tree).some((n) => n.state.value === "csrf")).toBe(false);
+    expect(find(tree, "button", "Go")?.state.value).toBe("Go");
+    const unnamed = flatten(tree).filter((n) => n.role === "button" && n.name === undefined);
+    expect(unnamed).toHaveLength(2);
+    expect(find(tree, "combobox", "Fruit")?.state.value).toBe("Apple");
+    expect(find(tree, "combobox", "Pick")?.state.value).toBeUndefined();
+  });
+
+  it("names controls from wrapping labels, labelledby references and nested labels, and reports what it cannot resolve", () => {
+    const App = () =>
+      h(
+        "div",
+        null,
+        h("label", null, "Wrapped", h("input", { type: "text" })),
+        h("label", null, h("input", { type: "text", placeholder: "Bare" })),
+        h("label", null, "Just words"),
+        h("h2", { id: "title" }, "Section title"),
+        h("div", { role: "group", "aria-labelledby": "title" }, h("button", null, h("span", { "aria-label": "Star" }), h("img", { alt: "Photo" }))),
+        h("button", { "aria-describedby": "missing" }, h("span", { "aria-label": "" }, "fallback")),
+        h("input", { type: "text", "aria-label": "Note", readOnly: true }),
+        h("div", { role: "heading", "aria-level": "2" }, "Sub"),
+      );
+    dispose = mount(h(App, null), container);
+
+    const tree = describeUI();
+    const wrapped = find(tree, "textbox", "Wrapped")!;
+    expect(wrapped.children).toEqual([]);
+    expect(find(tree, "textbox", "Bare")).toBeDefined();
+    expect(flatten(tree).filter((n) => n.role === "text").map((n) => n.name)).toContain("Just words");
+    expect(find(tree, "group", "Section title")).toBeDefined();
+    expect(find(tree, "button", "Star Photo")).toBeDefined();
+    const fallback = find(tree, "button", "fallback")!;
+    expect(fallback.description).toBeUndefined();
+    expect(find(tree, "textbox", "Note")?.state).toEqual({ readonly: true, value: "" });
+    expect(find(tree, "heading", "Sub")?.state).toEqual({ level: "2" });
+  });
+
+  it("keeps only controls and clickable parts inside content-named elements, and prints descriptions in the outline", () => {
+    const Word = () => h("span", null, "Home");
+    const App = () =>
+      h(
+        "div",
+        null,
+        h("a", { href: "/" }, h(Word, null), h("span", { onClick: () => {} }, "x"), h("span", { role: "status" }, "3")),
+        h("button", null, h("div", { role: "group" }, h("a", { href: "/x" }, "Inner link"))),
+        h("p", { id: "hint" }, "Be careful"),
+        h("button", { "aria-describedby": "hint" }, "Delete"),
+      );
+    dispose = mount(h(App, null), container);
+
+    const link = find(describeUI(), "link", "Home x 3")!;
+    expect(link.children.map((n) => [n.role, n.state.clickable ?? false])).toEqual([
+      ["generic", true],
+      ["status", false],
+    ]);
+    const button = find(describeUI(), "button", "Inner link")!;
+    expect(button.children.map((n) => n.role)).toEqual(["link"]);
+    expect(outlineUI()).toContain('button "Delete" #dom:0:3 — Be careful');
+  });
+
+  it("reads VDOM facts a program wrote by hand, with no DOM node behind them", () => {
+    db.insert("dom", "child", 0, "form");
+    db.insert("form", "tag", "form");
+    db.insert("form", "child", 0, "check");
+    db.insert("check", "tag", "input");
+    db.insert("check", "prop", "type", "checkbox");
+    db.insert("check", "prop", "checked", true);
+    db.insert("check", "prop", "aria-label", "Agree");
+    db.insert("form", "child", 1, "named");
+    db.insert("named", "tag", "input");
+    db.insert("named", "prop", "value", "v");
+    db.insert("named", "prop", "aria-label", "Named");
+    db.insert("form", "child", 2, "defaulted");
+    db.insert("defaulted", "tag", "input");
+    db.insert("defaulted", "prop", "defaultValue", "d");
+    db.insert("defaulted", "prop", "aria-label", "Defaulted");
+    db.insert("form", "child", 3, "empty");
+    db.insert("empty", "tag", "input");
+    db.insert("empty", "prop", "aria-label", "Empty");
+    db.insert("form", "child", 4, "ghost");
+    db.insert("form", "child", 5, "blank");
+    db.insert("blank", "tag", "__text");
+    db.insert("blank", "text", "   ");
+    db.insert("form", "child", 6, "silent");
+    db.insert("silent", "tag", "__text");
+
+    const tree = describeUI();
+    expect(find(tree, "checkbox", "Agree")?.state.checked).toBe(true);
+    expect(find(tree, "textbox", "Named")?.state.value).toBe("v");
+    expect(find(tree, "textbox", "Defaulted")?.state.value).toBe("d");
+    expect(find(tree, "textbox", "Empty")?.state.value).toBe("");
+    expect(flatten(tree).filter((n) => n.role === "text")).toEqual([]);
+    expect(tree[0].children).toHaveLength(4);
+    expect(describeUI({ root: "nowhere" })).toEqual([]);
+  });
+
+  it("prints a driver without a value as unknown", () => {
+    function Gauge() {
+      useDriver("level", { set: () => {}, get: () => undefined });
+      return h("meter", { "aria-label": "Fuel" });
+    }
+    dispose = mount(h(Gauge, null), container);
+    expect(outlineUI()).toBe('meter "Fuel" #dom:0 (Gauge level=?)');
+  });
 });
 
 describe("drive", () => {
@@ -322,6 +459,26 @@ describe("drive", () => {
     replace("app", "show", false);
     expect(() => drive(id, "open", true)).toThrow(/Nothing drives/);
   });
+
+  it("accepts a bare setter as a driver", () => {
+    const set = vi.fn();
+    const App = () => {
+      useDriver("value", set);
+      return h("button", null, "Set");
+    };
+    dispose = mount(h(App, null), container);
+    drive(find(describeUI(), "button", "Set")!.id!, "value", 7);
+    expect(set).toHaveBeenCalledWith(7);
+    expect(outlineUI()).toBe('button "Set" #dom:0 (App value=?)');
+  });
+
+  it("only drives the keys a native control understands", () => {
+    const App = () => h("input", { type: "text", "aria-label": "Name" });
+    dispose = mount(h(App, null), container);
+    const id = find(describeUI(), "textbox", "Name")!.id!;
+    expect(() => drive(id, "checked", true)).toThrow(/Nothing drives "checked"/);
+    expect(() => drive(id, "open", true)).toThrow(/Nothing drives "open"/);
+  });
 });
 
 describe("press", () => {
@@ -368,5 +525,24 @@ describe("press", () => {
 
   it("throws for an id with nothing to click", () => {
     expect(() => press("nowhere")).toThrow(/Nothing to press/);
+  });
+
+  it("calls the click handler of an element that has no DOM node with a minimal event", () => {
+    const events: unknown[] = [];
+    db.insert("ghost", "tag", "button");
+    db.insert("ghost", "prop", "type", "button");
+    db.insert("ghost", "handler", "keydown", "ghost:handler:keydown");
+    db.insert("ghost", "handler", "click", "ghost:handler:click");
+    db.setRef("ghost:handler:click", (event: { type: string; preventDefault(): void; stopPropagation(): void }) => {
+      event.preventDefault();
+      event.stopPropagation();
+      events.push(event.type);
+    });
+    press("ghost");
+    expect(events).toEqual(["click"]);
+
+    db.insert("stale", "tag", "button");
+    db.insert("stale", "handler", "click", "stale:handler:click");
+    expect(() => press("stale")).toThrow(/Nothing to press/);
   });
 });

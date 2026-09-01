@@ -41,5 +41,7 @@ describe("Spacer", () => {
     expect(css(render(h(Spacer, { flex: true })).root)["flex-grow"]).toBe("1");
     expect(css(render(h(Spacer, { flex: 1 })).root)["flex-grow"]).toBe("1");
     expect(css(render(h(Spacer, { flex: 2 })).root)["flex-grow"]).toBe("2");
+    expect(css(render(h(Spacer, { flex: 2 })).root)["flex-shrink"]).toBe("1");
+    expect(css(render(h(Spacer, { flex: 0 })).root)).toMatchObject({ "flex-grow": "0", "flex-shrink": "0" });
   });
 });

@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { h } from "@jam/core/jsx";
 import { replace, when, $ } from "@jam/core";
-import { render, css, click, resetUI, computed, injectedRules } from "../testing";
+import { render, css, click, keyup, resetUI, computed, injectedRules } from "../testing";
 import { createJamUI } from "../config";
 import { styled } from "../styled";
 import { Button } from "../components/Button";
@@ -52,5 +52,19 @@ describe("testing harness", () => {
     click(r.get("button"));
     click(r.get("button"));
     expect(r.get("button").textContent).toBe("2");
+  });
+
+  it("keyup dispatches a bubbling key event with the given init", () => {
+    const keys: string[] = [];
+    const r = render(h("div", { onKeyUp: (e: KeyboardEvent) => keys.push(`${e.key}${e.shiftKey ? "+shift" : ""}`) }, h("input", null)));
+    const event = keyup(r.get("input"), "Enter", { shiftKey: true });
+    expect(event.type).toBe("keyup");
+    expect(keys).toEqual(["Enter+shift"]);
+  });
+
+  it("get throws with the markup when nothing matches", () => {
+    const r = render(h("div", null, h("span", null, "x")));
+    expect(() => r.get("button")).toThrow(/No element matches "button" in:\n<div><span>x<\/span><\/div>/);
+    expect(r.query("button")).toBeNull();
   });
 });

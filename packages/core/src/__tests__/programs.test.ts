@@ -1,7 +1,8 @@
+// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from "vitest";
 import { $, db, when, remember } from "../index";
 import { createJamProgramFileSystem } from "../program-files";
-import { loadProgramSource, listPrograms, program, registerProgram, removeProgram } from "../programs";
+import { createProgramAPI, loadProgramSource, listPrograms, program, registerProgram, removeProgram } from "../programs";
 
 describe("program registry", () => {
   beforeEach(() => {
@@ -102,5 +103,62 @@ describe("program registry", () => {
     fs.loadProgramFile("/programs/shared.js", "shared-program");
 
     expect(when(["shared-program", "status", $.status])).toEqual([{ status: "reloaded" }]);
+  });
+
+  it("exposes durable writes that outlive the program while its claims do not", () => {
+    registerProgram("writer", ({ remember, replace, forget, claim }) => {
+      remember("note", 1, "text", "a");
+      remember("note", 2, "text", "b");
+      replace("note", 1, "text", "c");
+      forget("note", 2, "text", "b");
+      claim("writer", "ran", true);
+    });
+    expect(when(["note", $.id, "text", $.t])).toEqual([{ id: 1, t: "c" }]);
+    expect(when(["writer", "ran", $.v])).toEqual([{ v: true }]);
+
+    removeProgram("writer");
+    expect(when(["note", $.id, "text", $.t])).toEqual([{ id: 1, t: "c" }]);
+    expect(when(["writer", "ran", $.v])).toEqual([]);
+  });
+
+  it("unmounts what a program mounted and runs the cleanup it returned when it is removed", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const cleaned: string[] = [];
+    registerProgram("ui", ({ h, mount }) => {
+      mount(h("button", null, "Hi"), container);
+      return () => cleaned.push("done");
+    });
+    expect(container.querySelector("button")?.textContent).toBe("Hi");
+
+    removeProgram("ui");
+    expect(container.querySelector("button")).toBeNull();
+    expect(cleaned).toEqual(["done"]);
+    container.remove();
+  });
+
+  it("rethrows a failing program after undoing its facts and subscriptions", () => {
+    let reruns = 0;
+    expect(() =>
+      registerProgram("broken", ({ claim, whenever }) => {
+        claim("broken", "started", true);
+        whenever([["ping", $.n]], () => reruns++);
+        throw new Error("setup failed");
+      }),
+    ).toThrow("setup failed");
+
+    expect(listPrograms()).not.toContain("broken");
+    expect(when(["broken", "started", $.v])).toEqual([]);
+    const before = reruns;
+    remember("ping", 1);
+    expect(reruns).toBe(before);
+  });
+
+  it("createProgramAPI() stands alone, tracking its own disposers", () => {
+    const api = createProgramAPI();
+    expect(Object.isFrozen(api)).toBe(true);
+    const stop = api.whenever([["x", $.v]], () => {});
+    expect(typeof stop).toBe("function");
+    stop();
   });
 });

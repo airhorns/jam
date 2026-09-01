@@ -77,9 +77,3 @@ export function rovingFocus(event: KeyboardEvent, selector: string, options: Rov
   onMove?.(item, index);
   return item;
 }
-
-/** `tabIndex` for roving focus: only the active item (or the first, when none is active) is tabbable. */
-export function rovingTabIndex(isActive: boolean, anyActive: boolean, isFirst: boolean): number {
-  if (isActive) return 0;
-  return !anyActive && isFirst ? 0 : -1;
-}

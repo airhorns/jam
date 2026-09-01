@@ -5,6 +5,7 @@ import { render, css, setupDefaultUI, click, keydown, tick, injectedRules } from
 import { Dialog } from "../Dialog";
 import { AlertDialog } from "../AlertDialog";
 import { Button } from "../Button";
+import { renderError } from "./helpers";
 
 beforeEach(() => {
   setupDefaultUI();
@@ -174,6 +175,31 @@ describe("Dialog", () => {
     expect(query("[data-testid=content]")).not.toBeNull();
     click(get("[data-testid=link]"));
     expect(query("[data-testid=content]")).toBeNull();
+  });
+
+  it("runs a caller onClick on the trigger before opening", () => {
+    const onClick = vi.fn();
+    const { get, query } = render(h(Dialog, null, h(Dialog.Trigger, { "data-testid": "trigger", onClick }, "Open"), h(Dialog.Portal, null, h(Dialog.Content, { "data-testid": "content" }, h(Dialog.Title, null, "T")))));
+    click(get("[data-testid=trigger]"));
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(query("[data-testid=content]")).not.toBeNull();
+  });
+
+  it("finds a Title nested deeper in the content for aria-labelledby", () => {
+    const { get } = render(
+      h(
+        Dialog,
+        { defaultOpen: true },
+        h(Dialog.Portal, null, h(Dialog.Content, { "data-testid": "content" }, h("header", null, h("div", null, h(Dialog.Title, null, "Nested"))), h("p", null, "Body"))),
+      ),
+    );
+    const content = get("[data-testid=content]");
+    expect(get("#" + content.getAttribute("aria-labelledby")).textContent).toBe("Nested");
+    expect(content.hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  it("reports parts rendered outside a Dialog", () => {
+    expect(renderError(h(Dialog.Trigger, null, "Lost"))).toMatch(/Dialog.Trigger must be rendered inside <Dialog>/);
   });
 });
 

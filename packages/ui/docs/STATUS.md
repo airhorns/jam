@@ -75,7 +75,7 @@ setter inert afterwards), `useStableId`, `useDismissableLayer` (Escape/outside-p
 dismissal, focus trap, autofocus and focus restore, scroll lock; closed by
 `useCleanup` when its component unmounts), `repositionLayer`/`floatingStyle` (placement
 against an anchor, flipping and shifting to stay in the viewport),
-`rovingFocus`/`rovingTabIndex` for arrow-key groups. Overlays portal to the mount root and
+`rovingFocus` for arrow-key groups. Overlays portal to the mount root and
 sit at `zIndex` 100000 (toasts 100001).
 
 **Components.** `Dialog`/`AlertDialog`/`Sheet` are modal layers; `Popover`,

@@ -47,10 +47,8 @@ export const CardFrame = styled<CardProps>(ThemeableStack, {
   },
 });
 
-const paddingFromSpace: VariantFunction = (value, { tokens }) => {
-  const padding = tokenValue(tokens, "space", value);
-  return padding === undefined ? null : { padding };
-};
+/** Only runs for literal numbers and space tokens that exist, so the lookup always resolves. */
+const paddingFromSpace: VariantFunction = (value, { tokens }) => ({ padding: tokenValue(tokens, "space", value) });
 
 /** Card.Header: the top block, padded from the card's size. */
 export const CardHeader = styled(YStack, {

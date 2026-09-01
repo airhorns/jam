@@ -3,7 +3,9 @@
 Three layers, cheapest first:
 
 - **Package unit tests** (`pnpm --dir packages/ui test`, also `pnpm test:ui` at
-  the root): one `src/components/__tests__/<Component>.test.ts` per component
+  the root; `pnpm test:coverage` at the root runs every package's suite with
+  coverage and is what CI gates at 90%): one
+  `src/components/__tests__/<Component>.test.ts` per component
   plus suites for the style system, tokens, themes, media and layers. They run
   under happy-dom with the helpers in `src/testing.ts` (`render`, `css`,
   `click`, `keydown`, `type`, `resetUI`) and cover tags/roles/aria, default and

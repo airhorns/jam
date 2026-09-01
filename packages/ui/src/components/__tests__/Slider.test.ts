@@ -1,12 +1,20 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describeUI, drive } from "@jam/core";
+import type { UINode } from "@jam/core";
 import { h } from "@jam/core/jsx";
-import { render, css, keydown, setupDefaultUI } from "../../testing";
+import { render, css, keydown, setupDefaultUI, resetUI } from "../../testing";
 import { Slider } from "../Slider";
 
 beforeEach(() => {
   setupDefaultUI();
 });
+
+const flatten = (nodes: UINode[]): UINode[] => nodes.flatMap((n) => [n, ...flatten(n.children)]);
+const driveValue = (value: string | number | boolean) => {
+  const node = flatten(describeUI()).find((n) => n.drive && "value" in n.drive.keys)!;
+  drive(node.drive!.id, "value", value);
+};
 
 const slider = (props: Record<string, unknown> = {}, thumbs = 1) =>
   render(
@@ -258,5 +266,104 @@ describe("Slider", () => {
     expect(css(bare.root).cursor).toBeUndefined();
     expect(css(bare.get("[data-testid=track]"))["background-color"]).toBeUndefined();
     expect(css(bare.get("[role=slider]"))["background-color"]).toBe("transparent");
+  });
+
+  it("sizes the rail and knob from a literal pixel size", () => {
+    const { frame, track, thumbs } = parts(slider({ size: 40 }));
+    expect(css(frame)).toMatchObject({ height: "18px", "min-height": "18px" });
+    expect(css(track).height).toBe("7px");
+    expect(css(thumbs[0])).toMatchObject({ width: "18px", height: "18px" });
+    const vertical = parts(slider({ size: 40, orientation: "vertical" }));
+    expect(css(vertical.frame)).toMatchObject({ width: "18px", "min-width": "18px" });
+    expect(css(vertical.frame).height).not.toBe("18px");
+    expect(css(vertical.track).width).toBe("7px");
+  });
+
+  it("falls back to the default knob size for an unknown size token, and to 44px with no tokens at all", () => {
+    const r = slider({ defaultValue: 50, size: "$nonexistent" });
+    expect(style(parts(r).thumbs[0])).toBe("left: calc(50% - 10px); top: 50%");
+    resetUI();
+    const tokenless = slider({ defaultValue: 50 });
+    expect(style(parts(tokenless).thumbs[0])).toBe("left: calc(50% - 10px); top: 50%");
+  });
+
+  it("renders inert parts outside a Slider", () => {
+    const r = render(h("div", null, h(Slider.Track, { "data-testid": "track" }, h(Slider.TrackActive, { "data-testid": "active" })), h(Slider.Thumb, { "aria-label": "Lone" })));
+    const thumb = r.get("[role=slider]");
+    expect(thumb.getAttribute("aria-valuenow")).toBe("0");
+    expect(style(r.get("[data-testid=active]"))).toBe("left: 0%; width: 0%");
+    keydown(thumb, "ArrowRight");
+    expect(r.get("[role=slider]").getAttribute("aria-valuenow")).toBe("0");
+    r.get("[data-testid=track]").dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+  });
+
+  it("calls a thumb's own onKeyDown before moving", () => {
+    const onKeyDown = vi.fn();
+    const r = render(h(Slider, { defaultValue: 10 } as never, h(Slider.Thumb, { "aria-label": "Volume", onKeyDown })));
+    keydown(r.get("[role=slider]"), "ArrowRight");
+    expect(onKeyDown).toHaveBeenCalledTimes(1);
+    expect(r.get("[role=slider]").getAttribute("aria-valuenow")).toBe("11");
+  });
+
+  it("treats a thumb with no value as sitting at the minimum, and clamps it to its neighbour when moved", () => {
+    const r = slider({ defaultValue: 30, min: 5 }, 2);
+    expect(parts(r).thumbs[1].getAttribute("aria-valuenow")).toBe("5");
+    keydown(parts(r).thumbs[1], "ArrowRight");
+    expect(parts(r).thumbs.map((t) => t.getAttribute("aria-valuenow"))).toEqual(["30", "30"]);
+  });
+
+  it("runs top-to-bottom when vertical and inverted", () => {
+    const r = slider({ orientation: "vertical", inverted: true, defaultValue: 25 });
+    const { frame, active, thumbs } = parts(r);
+    expect(style(active)).toBe("top: 0%; height: 25%");
+    expect(style(thumbs[0])).toBe("top: calc(25% - 5px); left: 50%");
+    keydown(thumbs[0], "ArrowUp");
+    expect(parts(r).thumbs[0].getAttribute("aria-valuenow")).toBe("24");
+    stubRect(frame, { width: 20, height: 200, right: 20, bottom: 200 });
+    pointer(frame, "pointerdown", 10, 50);
+    expect(parts(r).thumbs[0].getAttribute("aria-valuenow")).toBe("25");
+  });
+
+  it("puts every thumb at the same spot when min equals max", () => {
+    const r = slider({ min: 10, max: 10, defaultValue: 10 });
+    expect(style(parts(r).active)).toBe("left: 0%; width: 0%");
+    stubRect(parts(r).frame);
+    pointer(parts(r).frame, "pointerdown", 150);
+    expect(parts(r).thumbs[0].getAttribute("aria-valuenow")).toBe("10");
+  });
+
+  it("presses to the minimum when the frame has no size yet", () => {
+    const r = slider({ defaultValue: 50 });
+    stubRect(parts(r).frame, { width: 0, right: 0 });
+    pointer(parts(r).frame, "pointerdown", 20);
+    expect(parts(r).thumbs[0].getAttribute("aria-valuenow")).toBe("0");
+  });
+
+  it("renders with no children and posts a range as an array field", () => {
+    expect(render(h(Slider, { defaultValue: 5 } as never)).root.getAttribute("role")).toBeNull();
+    const r = render(h("form", {}, h(Slider, { name: "range", defaultValue: [10, 20] } as never)));
+    expect(new FormData(r.get<HTMLFormElement>("form")).getAll("range[]")).toEqual(["10", "20"]);
+  });
+
+  it("is driven with numbers, numeric strings, JSON arrays and relative strings", () => {
+    const onValueChange = vi.fn();
+    slider({ defaultValue: [10, 90], onValueChange }, 2);
+    driveValue("42");
+    expect(onValueChange).toHaveBeenLastCalledWith([42, 90]);
+    driveValue(7);
+    expect(onValueChange).toHaveBeenLastCalledWith([7, 90]);
+    driveValue("[20, 30]");
+    expect(onValueChange).toHaveBeenLastCalledWith([20, 30]);
+    driveValue("+5");
+    expect(onValueChange).toHaveBeenLastCalledWith([5, 30]);
+    expect(() => driveValue("abc")).toThrow(/2 thumbs; got 0/);
+    expect(() => driveValue(true)).toThrow(/2 thumbs; got 0/);
+  });
+
+  it("ignores being driven while disabled", () => {
+    const onValueChange = vi.fn();
+    slider({ defaultValue: 50, disabled: true, onValueChange });
+    driveValue(10);
+    expect(onValueChange).not.toHaveBeenCalled();
   });
 });

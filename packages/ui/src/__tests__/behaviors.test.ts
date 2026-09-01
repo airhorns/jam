@@ -284,4 +284,10 @@ describe("floating layers", () => {
     expect(content.style.top).toBe("84px");
     expect(content.style.position).toBe("fixed");
   });
+
+  it("leaves the position alone while the anchor or content is missing", () => {
+    render(h("div", { "data-layer-anchor": "lonely" }));
+    repositionLayer("lonely", { placement: "bottom" });
+    expect(floatingStyle("lonely").position).toBeUndefined();
+  });
 });

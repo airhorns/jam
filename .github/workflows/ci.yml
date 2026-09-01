@@ -23,8 +23,9 @@ jobs:
           cache: pnpm
       - run: corepack pnpm install --frozen-lockfile
       - run: corepack pnpm typecheck
-      - run: corepack pnpm test:ui
-      - run: corepack pnpm test
+      - name: Package unit tests, failing under 90% coverage
+        run: corepack pnpm test:coverage
+      - run: corepack pnpm test:examples
       - run: corepack pnpm --dir examples/folk-todo exec playwright install --with-deps chromium
       - run: corepack pnpm --dir examples/puddy-vite exec playwright install --with-deps chromium
       - run: corepack pnpm --dir examples/linearlite exec playwright install --with-deps chromium

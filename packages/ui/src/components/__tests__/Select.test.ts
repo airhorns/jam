@@ -5,6 +5,7 @@ import { $, _, claim, forget, replace, when } from "@jam/core";
 import { render, css, setupDefaultUI, click, keydown, tick } from "../../testing";
 import { Select } from "../Select";
 import { Button } from "../Button";
+import { renderError } from "./helpers";
 
 beforeEach(() => {
   setupDefaultUI();
@@ -361,5 +362,120 @@ describe("Select", () => {
     expect(get("[data-testid=value]").textContent).toBe("Cherry");
     container.querySelector("form")!.reset();
     expect(get("[data-testid=value]").textContent).toBe("Apple");
+  });
+
+  it("reports parts rendered outside their owners", () => {
+    expect(renderError(h(Select.Trigger, null))).toMatch(/Select.Trigger must be rendered inside <Select>/);
+    expect(renderError(h(Select, null, h(Select.Content, null, h(Select.ItemIndicator, null))))).toMatch(/Select.ItemIndicator must be rendered inside <Select.Item>/);
+    const { get } = render(h(Select, null, h(Select.Label, { "data-testid": "label" }, "Loose")));
+    expect(get("[data-testid=label]").hasAttribute("id")).toBe(false);
+  });
+
+  it("renders with no children and tolerates unmounting before its options are published", async () => {
+    render(h(Select, {}));
+    const { unmount } = render(h(Example, {}));
+    unmount();
+    await tick();
+    expect(when([$.id, "options", $.json])).toEqual([]);
+  });
+
+  it("stays closed when disabled even if the press reaches the trigger", () => {
+    const onOpenChange = vi.fn();
+    const { get } = render(h(Example, { disabled: true, onOpenChange }));
+    get("[data-testid=value]").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(get("[data-testid=trigger]").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("runs caller handlers on the trigger, content and items before its own", async () => {
+    const triggerClick = vi.fn();
+    const triggerKeyDown = vi.fn((event: KeyboardEvent) => event.preventDefault());
+    const contentKeyDown = vi.fn();
+    const itemClick = vi.fn();
+    const itemKeyDown = vi.fn();
+    const itemPointerMove = vi.fn();
+    const { get } = render(
+      h(
+        Select,
+        null,
+        h(Select.Trigger, { "data-testid": "trigger", onClick: triggerClick, onKeyDown: triggerKeyDown }, h(Select.Value, { placeholder: "Pick" })),
+        h(
+          Select.Content,
+          { "data-testid": "content", onKeyDown: contentKeyDown },
+          h(Select.Item, { value: "a", "data-testid": "a", onClick: itemClick, onKeyDown: itemKeyDown, onPointerMove: itemPointerMove }, h(Select.ItemText, null, "A")),
+          h(Select.Item, { value: "b", "data-testid": "b", disabled: true, onPointerMove: itemPointerMove }, h(Select.ItemText, null, "B")),
+          h(Select.Item, { value: "c", "data-testid": "c" }, h(Select.ItemText, null, "C")),
+        ),
+      ),
+    );
+    const trigger = get("[data-testid=trigger]");
+    keydown(trigger, "ArrowDown");
+    expect(triggerKeyDown).toHaveBeenCalledTimes(1);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    click(trigger);
+    expect(triggerClick).toHaveBeenCalledTimes(1);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    await tick();
+    const content = get("[data-testid=content]");
+    keydown(content, "ArrowDown");
+    expect(contentKeyDown).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(get("[data-testid=a]"));
+    contentKeyDown.mockImplementation((event: KeyboardEvent) => event.preventDefault());
+    keydown(content, "End");
+    expect(document.activeElement).toBe(get("[data-testid=a]"));
+
+    content.focus();
+    get("[data-testid=b]").dispatchEvent(new MouseEvent("pointermove", { bubbles: true }));
+    expect(document.activeElement).toBe(content);
+    get("[data-testid=a]").dispatchEvent(new MouseEvent("pointermove", { bubbles: true }));
+    expect(itemPointerMove).toHaveBeenCalledTimes(2);
+    expect(document.activeElement).toBe(get("[data-testid=a]"));
+
+    keydown(get("[data-testid=b]"), "Enter");
+    expect(get("[data-testid=content]").hidden).toBe(false);
+    keydown(get("[data-testid=a]"), "ArrowRight");
+    expect(itemKeyDown).toHaveBeenCalledTimes(1);
+    click(get("[data-testid=a]"));
+    expect(itemClick).toHaveBeenCalledTimes(1);
+    expect(get("[data-testid=content]").hidden).toBe(true);
+  });
+
+  it("moves to the last option on ArrowUp from the list itself and goes nowhere when every option is disabled", async () => {
+    const { get } = render(h(Example, { defaultOpen: true }));
+    await tick();
+    const content = get("[data-testid=content]");
+    content.focus();
+    keydown(content, "ArrowUp");
+    expect(document.activeElement).toBe(get("[data-testid=item-cherry]"));
+
+    const all = render(h(Example, { defaultOpen: true, disabledItems: FRUITS.map(([value]) => value) }));
+    await tick();
+    all.get("[data-testid=content]").focus();
+    keydown(all.get("[data-testid=content]"), "ArrowDown");
+    expect(document.activeElement).toBe(all.get("[data-testid=content]"));
+  });
+
+  it("keeps the current option while the typed query still matches it", () => {
+    const onValueChange = vi.fn();
+    vi.spyOn(Date, "now").mockImplementation(() => 1000);
+    const { get } = render(h(Example, { onValueChange }));
+    const trigger = get("[data-testid=trigger]");
+    keydown(trigger, "b");
+    keydown(trigger, "a");
+    keydown(trigger, "n");
+    expect(onValueChange).toHaveBeenCalledTimes(1);
+    expect(onValueChange).toHaveBeenLastCalledWith("banana");
+  });
+
+  it("scales item text from a literal pixel size", () => {
+    const { get } = render(
+      h(
+        Select,
+        { size: 40, defaultOpen: true },
+        h(Select.Trigger, null, h(Select.Value, null)),
+        h(Select.Content, null, h(Select.Item, { value: "a" }, h(Select.ItemText, { "data-testid": "text" }, "A"))),
+      ),
+    );
+    expect(css(get("[data-testid=text]"))["font-size"]).toBe("16px");
   });
 });

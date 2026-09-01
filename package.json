@@ -9,6 +9,8 @@
     "dev:ui": "corepack pnpm --dir examples/catalog dev",
     "build:ui-catalog": "corepack pnpm --dir examples/catalog build",
     "test": "corepack pnpm -r --if-present test",
+    "test:examples": "corepack pnpm -r --filter './examples/**' --if-present test",
+    "test:coverage": "vitest run --coverage",
     "test:ui": "corepack pnpm --dir packages/ui test",
     "test:e2e": "corepack pnpm --dir examples/folk-todo test:e2e && corepack pnpm --dir examples/puddy-vite test:e2e && corepack pnpm --dir examples/linearlite test:e2e && corepack pnpm --dir examples/catalog test:e2e",
     "typecheck": "corepack pnpm -r typecheck",
@@ -18,11 +20,13 @@
     "rust:deny": "cd crates && cargo deny --locked check",
     "rust:no-ignored-tests": "if grep -rn --include='*.rs' --exclude-dir=target -E '#\\[ignore' crates; then echo 'ignored tests are not allowed; delete or fix them' >&2; exit 1; fi",
     "rust:test": "cd crates && cargo test --locked --all-targets",
-    "rust:coverage": "cd crates && cargo llvm-cov --locked --all-targets --fail-under-lines 95",
+    "rust:coverage": "cd crates && cargo llvm-cov --locked --all-targets --fail-under-lines 95 --fail-under-functions 95 --fail-under-regions 95",
     "rust:bench": "cd crates && cargo bench --locked -p jam-engine --bench engine -- --sample-size 10 --measurement-time 1 --warm-up-time 1 --noplot",
     "rust:check": "corepack pnpm rust:fmt && corepack pnpm rust:clippy && corepack pnpm rust:deny && corepack pnpm rust:no-ignored-tests && corepack pnpm rust:test"
   },
   "devDependencies": {
-    "agent-browser": "0.26.0"
+    "@vitest/coverage-v8": "3.2.4",
+    "agent-browser": "0.26.0",
+    "vitest": "3.2.4"
   }
 }

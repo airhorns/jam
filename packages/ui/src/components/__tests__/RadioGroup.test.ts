@@ -221,4 +221,26 @@ describe("RadioGroup", () => {
     expect(css(r.root).gap).toBeUndefined();
     expect(css(r.get("[role=radio]"))["background-color"]).toBe("transparent");
   });
+
+  it("runs a caller onClick before selecting and ignores clicks reaching a disabled item through its indicator", () => {
+    const onClick = vi.fn();
+    const onValueChange = vi.fn();
+    const r = group({ onValueChange }, ["a", "b", "c"], { onClick });
+    click(r.all("[role=radio]")[2]);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onValueChange).toHaveBeenLastCalledWith("c");
+
+    onValueChange.mockClear();
+    const disabled = render(h(RadioGroup, { onValueChange }, h(RadioGroup.Item, { value: "a", disabled: true }, h("span", { "data-testid": "inner" }))));
+    disabled.get("[data-testid=inner]").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onValueChange).not.toHaveBeenCalled();
+    expect(disabled.get("[role=radio]").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("renders an empty group and inert items outside a group", () => {
+    expect(render(h(RadioGroup, null)).root.children).toHaveLength(0);
+    const lone = render(h(RadioGroup.Item, { value: "a" }));
+    click(lone.root);
+    expect(lone.root.getAttribute("aria-checked")).toBe("false");
+  });
 });

@@ -4,6 +4,8 @@
 pnpm install       # Install all dependencies
 pnpm dev           # Run folk-todo example dev server
 pnpm test          # Run package/example unit tests where present
+pnpm test:coverage # packages/* unit tests with v8 coverage; CI fails under 90% lines, statements, functions or branches, overall or in any one package
+pnpm test:examples # Example unit tests only
 pnpm test:e2e      # Run folk-todo, puddy-vite, linearlite and catalog e2e tests (Playwright)
 pnpm typecheck     # TypeScript check all packages
 
@@ -21,7 +23,7 @@ pnpm run bench     # Benchmarks (packages/core only)
 
 # Rust engine (crates/), from the repo root
 pnpm rust:check    # fmt --check, clippy (host + wasm32), cargo-deny, no ignored tests, cargo test — what CI runs
-pnpm rust:coverage # cargo-llvm-cov over the crates; CI fails under 95% line coverage
+pnpm rust:coverage # cargo-llvm-cov over the crates; CI fails under 95% line, function or region coverage
 pnpm rust:bench    # criterion suite over the engine at 10k/100k/1M facts, with CI's short sampling; see docs/rust-engine-benchmarks.md
 pnpm build:engine  # Rebuild packages/engine/pkg from crates/jam-engine-wasm; commit the result
 ```
@@ -37,7 +39,7 @@ via the workspace lints, `warnings = "deny"` and `clippy::all = "deny"` — ever
 checked in CI. Prefer fixing over allowing; if you must, `#[allow(lint, reason = "...")]` with a real
 reason. No `todo!`/`unimplemented!`/`dbg!`, no `#[ignore]` tests (delete or fix them), no wildcard
 dependency versions. Tests live next to the code (`src/tests.rs` for engine-level behaviour, `mod tests`
-per module for internals) and use `pretty_assertions`; keep line coverage at or above 95%. `crates/deny.toml` lists the allowed licenses — add one only when a new
+per module for internals) and use `pretty_assertions`; keep line, function and region coverage at or above 95%. `crates/deny.toml` lists the allowed licenses — add one only when a new
 dependency actually needs it. `cargo fmt` uses `crates/rustfmt.toml` (120 columns). CI also rebuilds the
 WASM and fails if `packages/engine/pkg` differs, so run `pnpm build:engine` after touching the crates.
 

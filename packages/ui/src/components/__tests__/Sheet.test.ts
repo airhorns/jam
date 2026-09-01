@@ -4,6 +4,7 @@ import { h } from "@jam/core/jsx";
 import { render, css, setupDefaultUI, click, keydown, tick, injectedRules } from "../../testing";
 import { Sheet } from "../Sheet";
 import { Button } from "../Button";
+import { renderError } from "./helpers";
 
 beforeEach(() => {
   setupDefaultUI();
@@ -150,5 +151,28 @@ describe("Sheet", () => {
     drag(get("[data-testid=handle]"), 600, 100);
     expect(onPositionChange).toHaveBeenCalledWith(0);
     expect(get("[data-testid=sheet]").style.height).toBe("40%");
+  });
+
+  it("reports parts rendered outside a Sheet", () => {
+    expect(renderError(h(Sheet.Handle, null))).toMatch(/Sheet.Handle must be rendered inside <Sheet>/);
+  });
+
+  it("keeps a caller's inline style and runs a caller onPointerDown before starting a drag", () => {
+    const onPointerDown = vi.fn();
+    const onPositionChange = vi.fn();
+    const { get } = render(
+      h(
+        Sheet,
+        { defaultOpen: true, snapPoints: [80, 40], onPositionChange, style: { zIndex: 7 }, "data-testid": "sheet" },
+        h(Sheet.Handle, { "data-testid": "handle", onPointerDown }),
+        h(Sheet.Frame, null),
+      ),
+    );
+    const sheet = get("[data-testid=sheet]");
+    expect(sheet.style.height).toBe("80%");
+    expect(sheet.style.zIndex).toBe("7");
+    drag(get("[data-testid=handle]"), 200, 600);
+    expect(onPointerDown).toHaveBeenCalledTimes(1);
+    expect(onPositionChange).toHaveBeenCalledWith(1);
   });
 });

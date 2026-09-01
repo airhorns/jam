@@ -40,37 +40,39 @@ ToastProvider.displayName = "ToastProvider";
 
 // ---- Auto-dismiss timers ----
 
-type ToastTimer = { remaining: number; startedAt: number | undefined; handle: ReturnType<typeof setTimeout> | undefined };
+type RunningTimer = { startedAt: number; handle: ReturnType<typeof setTimeout> };
+type ToastTimer = { remaining: number; running: RunningTimer | undefined };
 
 const timers = new Map<string, ToastTimer>();
+
+function startTimer(id: string, duration: number, dismiss: () => void): RunningTimer {
+  return { startedAt: Date.now(), handle: setTimeout(() => { timers.delete(id); dismiss(); }, duration) };
+}
 
 /** Arms a fresh dismiss timer for `duration`; a no-op if one is already running or `duration` is Infinite. */
 function armDismiss(id: string, duration: number, dismiss: () => void): void {
   if (timers.has(id) || !Number.isFinite(duration)) return;
-  timers.set(id, { remaining: duration, startedAt: Date.now(), handle: setTimeout(() => { timers.delete(id); dismiss(); }, duration) });
+  timers.set(id, { remaining: duration, running: startTimer(id, duration, dismiss) });
 }
 
 /** Cancels the running timer and remembers the time left, so `resumeDismiss` restarts from there rather than the full duration. */
 function pauseDismiss(id: string): void {
   const timer = timers.get(id);
-  if (!timer || timer.handle === undefined) return;
-  clearTimeout(timer.handle);
-  const elapsed = timer.startedAt !== undefined ? Date.now() - timer.startedAt : 0;
-  timer.remaining = Math.max(0, timer.remaining - elapsed);
-  timer.handle = undefined;
-  timer.startedAt = undefined;
+  if (!timer?.running) return;
+  clearTimeout(timer.running.handle);
+  timer.remaining = Math.max(0, timer.remaining - (Date.now() - timer.running.startedAt));
+  timer.running = undefined;
 }
 
 function resumeDismiss(id: string, dismiss: () => void): void {
   const timer = timers.get(id);
-  if (!timer || timer.handle !== undefined) return;
-  timer.startedAt = Date.now();
-  timer.handle = setTimeout(() => { timers.delete(id); dismiss(); }, timer.remaining);
+  if (!timer || timer.running) return;
+  timer.running = startTimer(id, timer.remaining, dismiss);
 }
 
 function cancelDismiss(id: string): void {
   const timer = timers.get(id);
-  if (timer?.handle !== undefined) clearTimeout(timer.handle);
+  if (timer?.running) clearTimeout(timer.running.handle);
   timers.delete(id);
 }
 

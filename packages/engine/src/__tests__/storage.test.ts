@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { FORMAT_VERSION, memoryStorage, type FactStorage } from "../storage/index";
-import { indexedDBStorage } from "../storage/indexeddb";
+import { deleteIndexedDBStorage, indexedDBStorage } from "../storage/indexeddb";
 import { sqliteStorage } from "../storage/sqlite";
 
 const adapters: [string, () => Promise<FactStorage>][] = [
@@ -72,6 +72,32 @@ describe.each(adapters)("%s storage", (_name, make) => {
     expect(await s.write({ log: [{ op: "upsert", terms: ["a", 2], scope: "" }] })).toEqual([2]);
     expect(await s.readLog(0)).toEqual([{ seq: 2, op: "upsert", terms: ["a", 2], scope: "" }]);
     await s.close();
+  });
+});
+
+describe("sqlite", () => {
+  it("rolls a failed write back as a whole", async () => {
+    const s = sqliteStorage(":memory:");
+    await s.write({ upserts: [{ terms: ["keep", 1], scope: "" }] });
+    const unstorable = { meta: { bad: {} as unknown as string }, upserts: [{ terms: ["lost", 1], scope: "" }] };
+    await expect(s.write(unstorable)).rejects.toThrow();
+    expect(await s.load()).toEqual([{ terms: ["keep", 1], scope: "" }]);
+    expect(await s.getMeta("bad")).toBeUndefined();
+    await s.close();
+  });
+});
+
+describe("indexeddb", () => {
+  it("deletes a database, resolving early when open connections block it", async () => {
+    const name = `deleted-${Math.random().toString(36).slice(2)}`;
+    const s = await indexedDBStorage(name);
+    await s.write({ upserts: [{ terms: ["a", 1], scope: "" }] });
+    await deleteIndexedDBStorage(name);
+    await s.close();
+    await deleteIndexedDBStorage(name);
+    const fresh = await indexedDBStorage(name);
+    expect(await fresh.load()).toEqual([]);
+    await fresh.close();
   });
 });
 

@@ -338,7 +338,7 @@ export function expandVdom(
       : vnode.props;
     const componentId = computeEntityId(parentId, childIndex, { key: vnode.props.key }, inheritId);
     if (currentStructure) {
-      const name = (tag as { displayName?: string }).displayName ?? tag.name ?? "Anonymous";
+      const name = (tag as { displayName?: string }).displayName ?? (tag.name || "Anonymous");
       const presentational = (tag as { presentational?: boolean }).presentational === true;
       const parent = expandingComponent;
       // A component whose whole output is another component shares its id with it; record both names under that id.

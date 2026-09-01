@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { IDBKeyRange, indexedDB } from "fake-indexeddb";
 import { memoryStorage, type FactStorage } from "@jam/engine/storage";
 import { db, FactDB, _ } from "../db";
 import { claim, forget, remember, replace, scoped, whenever, $ } from "../primitives";
-import { sync, compileFilter, type SyncHandle, type SyncOptions, type SyncWebSocket } from "../sync";
+import { sync, compileFilter, type SyncHandle, type SyncOptions, type SyncWebSocket, type TabCoordinator } from "../sync";
 import { createSyncServer, type ClientMessage, type ServerMessage, type SyncServer } from "../server";
 import { fakeNetwork, type FakeNetwork } from "./helpers/fake-socket";
 import { fakeTabs } from "./helpers/fake-tabs";
@@ -114,6 +115,57 @@ describe("sync (standalone)", () => {
     await second.subscribe({ pattern: ["issue", _] }).ready;
     expect(facts("issue")).toEqual([["issue", 1, "title", "A"]]);
     expect(db.scopeOf("issue", 1, "title", "A")).toBe("p1");
+  });
+
+  it("an include allowlist stores only what it admits, even VDOM facts", async () => {
+    const s = await sync({ storage, include: (fact) => fact[0] === "dom" });
+    handles.push(s);
+    await s.subscribe().ready;
+    remember("dom", "x", "tag", "div");
+    remember("issue", 1, "title", "A");
+    await s.flush();
+    expect(await stored()).toEqual([{ terms: ["dom", "x", "tag", "div"], scope: "" }]);
+  });
+
+  it("names the tab without crypto.randomUUID when the platform lacks it", async () => {
+    vi.stubGlobal("crypto", {});
+    const s = await start();
+    vi.unstubAllGlobals();
+    expect(s.tab).toMatch(/^[0-9a-z]+$/);
+    expect(s.tab).not.toContain("-");
+  });
+});
+
+describe("sync (default storage)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps the mirror in memory when IndexedDB is unavailable and closes it on dispose", async () => {
+    const first = await sync({ name: "jam-test-memory" });
+    await first.subscribe().ready;
+    remember("n", 1);
+    await first.dispose();
+    db.clear();
+
+    const second = await sync({ name: "jam-test-memory" });
+    await second.subscribe().ready;
+    expect(facts("n")).toEqual([]);
+    await second.dispose();
+  });
+
+  it("mirrors into an IndexedDB database of the given name when one exists", async () => {
+    vi.stubGlobal("indexedDB", indexedDB);
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const name = `jam-test-${Math.random().toString(36).slice(2)}`;
+    const first = await sync({ name });
+    await first.subscribe().ready;
+    scoped("p1", () => remember("n", 1));
+    await first.dispose();
+    db.clear();
+
+    const second = await sync({ name });
+    await second.subscribe({ scope: "p1" }).ready;
+    expect(facts("n")).toEqual([["n", 1]]);
+    await second.dispose();
   });
 });
 
@@ -416,6 +468,81 @@ describe("sync (server)", () => {
     await waitFor(() => !db.has("issue", 3, "title", "Three"), "nothing followed");
     await stop();
   });
+
+  it("follow() subscribes a filter once however many times it is wanted", async () => {
+    await server.apply([{ op: "upsert", terms: ["issue", 1, "title", "One"], scope: "p1" }]);
+    const s = await start();
+    const stop = s.follow([], () => [{ scope: "p1" }, { scope: "p1" }]);
+    await waitFor(() => db.has("issue", 1, "title", "One"), "p1 facts");
+    await settle();
+    expect(received.filter((m) => m.type === "snapshot")).toHaveLength(1);
+    expect(db.query(["sync", "shape", $.id, "ready", $.r])).toHaveLength(1);
+    await stop();
+    expect(db.has("issue", 1, "title", "One")).toBe(false);
+  });
+
+  it("ignores acknowledgements it is not waiting for and server messages it cannot parse", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const s = await start({ socket: net.connect });
+    await s.subscribe().ready;
+    remember("n", 1);
+    const raw = net.sockets[0];
+    raw.onmessage?.({ data: JSON.stringify({ type: "ack", id: 999 }) });
+    raw.onmessage?.({ data: "not json" });
+    raw.onerror?.({});
+    expect(errors).toHaveBeenCalledWith("[jam] sync: bad server message", expect.any(Error));
+    await s.flush();
+    expect(statusFact("pending")).toBe(0);
+    expect(statusFact("status")).toBe("live");
+    expect(server.facts().map((f) => f.terms)).toEqual([["n", 1]]);
+    errors.mockRestore();
+  });
+
+  it("retries when the socket cannot even be opened", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    let failures = 1;
+    const s = await start({
+      socket: (url) => {
+        if (failures-- > 0) throw new Error("no network");
+        return socket(url);
+      },
+    });
+    expect(statusFact("status")).toBe("offline");
+    expect(errors).toHaveBeenCalledWith("[jam] sync: could not open socket", expect.any(Error));
+    await s.subscribe().ready;
+    expect(statusFact("status")).toBe("live");
+    expect(net.sockets).toHaveLength(1);
+    errors.mockRestore();
+  });
+
+  it("releasing a subscription twice, and disposing twice, are no-ops; follow() refuses after dispose", async () => {
+    const s = await start();
+    const sub = s.subscribe();
+    await sub.ready;
+    await sub.dispose();
+    await sub.dispose();
+    expect(db.query(["sync", "shape", $.id, "ready", $.r])).toEqual([]);
+    await s.dispose();
+    await s.dispose();
+    expect(() => s.follow([], () => [])).toThrow("sync: disposed");
+    expect(statusFact("status")).toBeUndefined();
+  });
+
+  it("dispose() releases a flush() still waiting for the server", async () => {
+    net = fakeNetwork(() => {});
+    const s = await start();
+    s.subscribe();
+    await settle();
+    expect(s.connected).toBe(true);
+    remember("n", 1);
+    let flushed = false;
+    const flushing = s.flush().then(() => (flushed = true));
+    await settle();
+    expect(flushed).toBe(false);
+    await s.dispose();
+    await flushing;
+    expect(flushed).toBe(true);
+  });
 });
 
 describe("sync (tabs)", () => {
@@ -621,5 +748,195 @@ describe("sync (tabs)", () => {
     await settle();
     expect(b.facts("issue")).toEqual([["issue", 2, "title", "B"]]);
     expect(await stored()).toEqual([{ terms: ["issue", 2, "title", "B"], scope: "p2" }]);
+  });
+
+  it("re-tags a loaded fact when another tab writes it into a different scope", async () => {
+    const a = await openTab(null);
+    const b = await openTab(null);
+    await a.s.subscribe().ready;
+    a.db.withScope("p1", () => a.db.insert("issue", 1, "title", "A"));
+    await settle();
+    expect(b.facts("issue")).toEqual([]);
+
+    b.db.withScope("p2", () => b.db.insert("issue", 1, "title", "A"));
+    await settle();
+    expect(a.facts("issue")).toEqual([["issue", 1, "title", "A"]]);
+    expect(a.db.scopeOf("issue", 1, "title", "A")).toBe("p2");
+  });
+
+  it("holds messages that arrive while the mirror is still loading and handles them once started", async () => {
+    const a = await openTab(null);
+    await a.s.subscribe().ready;
+    const slow = { ...storage, load: () => sleep(30).then(() => storage.load()) };
+    const tabDb = new FactDB();
+    const starting = sync({ storage: slow, tabs: hub.join(), db: tabDb });
+    a.db.insert("n", 1);
+    const b = await starting;
+    handles.push(b);
+    await b.subscribe().ready;
+    expect(Array.from(tabDb.facts.values()).filter((f) => f[0] === "n")).toEqual([["n", 1]]);
+  });
+
+  it("says goodbye when the page hides and asks for its subscriptions again when restored from the cache", async () => {
+    const page = new EventTarget();
+    vi.stubGlobal("window", page);
+    const posts: Array<{ t: string }> = [];
+    hub = fakeTabs(undefined, (_from, message) => posts.push(message as { t: string }));
+    const a = await openTab();
+    const b = await openTab();
+    vi.unstubAllGlobals();
+    await b.s.subscribe({ scope: "p1" }).ready;
+    expect(a.s.leading).toBe(true);
+
+    posts.length = 0;
+    page.dispatchEvent(new Event("pagehide"));
+    await settle();
+    expect(posts.filter((m) => m.t === "bye")).toHaveLength(2);
+    await server.apply([{ op: "upsert", terms: ["issue", 1, "title", "A"], scope: "p1" }]);
+    await settle();
+    expect(b.facts("issue")).toEqual([]);
+
+    page.dispatchEvent(new Event("pageshow"));
+    await settle();
+    expect(posts.filter((m) => m.t === "want")).toHaveLength(0);
+
+    page.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+    await settle();
+    expect(posts.filter((m) => m.t === "want")).toHaveLength(1);
+    expect(b.facts("issue")).toEqual([["issue", 1, "title", "A"]]);
+
+    await a.s.dispose();
+    await b.s.dispose();
+    posts.length = 0;
+    page.dispatchEvent(new Event("pagehide"));
+    expect(posts).toEqual([]);
+  });
+
+  it("does without page events when the global window cannot listen", async () => {
+    vi.stubGlobal("window", {});
+    const a = await openTab();
+    vi.unstubAllGlobals();
+    await a.s.subscribe().ready;
+    expect(a.s.leading).toBe(true);
+  });
+});
+
+describe("sync (tab protocol)", () => {
+  let server: SyncServer;
+  let net: FakeNetwork;
+
+  /** A coordinator the test drives by hand: it records what the tab posts and feeds it messages directly. */
+  function scriptedTabs(leads = true) {
+    const handlers: Array<(message: unknown) => void> = [];
+    const posted: Array<{ t: string }> = [];
+    const coordinator: TabCoordinator = {
+      post: (message) => posted.push(message as { t: string }),
+      onMessage: (handler) => handlers.push(handler),
+      lead: () => ({ acquired: leads ? Promise.resolve() : new Promise<void>(() => {}), release() {} }),
+      close() {},
+    };
+    return { coordinator, posted, receive: (message: unknown) => handlers.forEach((h) => h(message)) };
+  }
+
+  beforeEach(async () => {
+    server = await createSyncServer({ storage: memoryStorage() });
+    net = fakeNetwork((socket) => server.handle(socket));
+  });
+
+  async function settle() {
+    for (let i = 0; i < 3; i++) {
+      await net.idle();
+      await sleep(10);
+    }
+    await net.idle();
+  }
+
+  it("a leader ignores what only followers act on, and a follower what only leaders act on", async () => {
+    const tabs = scriptedTabs();
+    const s = await sync({ url: "ws://test", storage, socket: net.connect, retryDelay: 5, tabs: tabs.coordinator });
+    handles.push(s);
+    await s.subscribe().ready;
+    expect(s.leading).toBe(true);
+    tabs.posted.length = 0;
+
+    tabs.receive({ t: "lead", tab: "other" });
+    tabs.receive({ t: "conn", open: false, lost: true });
+    tabs.receive({ t: "state", changes: [{ op: "upsert", terms: ["n", 1], scope: "" }] });
+    tabs.receive({ t: "ready", id: "unknown" });
+    tabs.receive({ t: "error", message: "boom" });
+    tabs.receive({ t: "acked", upTo: 5 });
+    tabs.receive({ t: "drop", tab: "other", id: "unknown" });
+    await settle();
+    expect(s.leading).toBe(true);
+    expect(statusFact("status")).toBe("live");
+    expect(statusFact("error")).toBeUndefined();
+    expect(facts("n")).toEqual([]);
+    expect(tabs.posted).toEqual([]);
+
+    const follower = scriptedTabs(false);
+    const f = await sync({ url: "ws://test", storage, socket: net.connect, retryDelay: 5, tabs: follower.coordinator, db: new FactDB() });
+    handles.push(f);
+    follower.posted.length = 0;
+    follower.receive({ t: "hello", tab: "other" });
+    follower.receive({ t: "want", tab: "other", id: "x", filter: "{}" });
+    follower.receive({ t: "drop", tab: "other", id: "x" });
+    follower.receive({ t: "bye", tab: "other" });
+    await settle();
+    expect(f.leading).toBe(false);
+    expect(follower.posted).toEqual([]);
+    expect(net.sockets).toHaveLength(1);
+  });
+
+  it("coalesces pushes asked for while the outbox is being read, and drops messages after dispose", async () => {
+    const tabs = scriptedTabs();
+    const readLog = storage.readLog.bind(storage);
+    let reads = 0;
+    storage.readLog = (since, limit) => {
+      reads++;
+      return readLog(since, limit);
+    };
+    const s = await sync({ url: "ws://test", storage, socket: net.connect, retryDelay: 5, tabs: tabs.coordinator });
+    handles.push(s);
+    await s.subscribe().ready;
+    await settle();
+
+    const before = reads;
+    tabs.receive({ t: "hello", tab: "x" });
+    tabs.receive({ t: "hello", tab: "y" });
+    await settle();
+    expect(reads).toBe(before + 2);
+    expect(tabs.posted.filter((m) => m.t === "conn")).toHaveLength(3);
+
+    await s.dispose();
+    tabs.posted.length = 0;
+    tabs.receive({ t: "hello", tab: "z" });
+    await settle();
+    expect(tabs.posted).toEqual([]);
+  });
+
+  it("reports an outbox it cannot read and tries again on the next push", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const tabs = scriptedTabs();
+    const readLog = storage.readLog.bind(storage);
+    let failNext = false;
+    storage.readLog = (since, limit) => {
+      if (!failNext) return readLog(since, limit);
+      failNext = false;
+      return Promise.reject(new Error("disk"));
+    };
+    const s = await sync({ url: "ws://test", storage, socket: net.connect, retryDelay: 5, tabs: tabs.coordinator });
+    handles.push(s);
+    await s.subscribe().ready;
+    await settle();
+
+    failNext = true;
+    tabs.receive({ t: "hello", tab: "x" });
+    await settle();
+    expect(errors).toHaveBeenCalledWith("[jam] sync outbox read failed", expect.any(Error));
+
+    remember("after", 1);
+    await s.flush();
+    expect(server.facts().map((f) => f.terms)).toContainEqual(["after", 1]);
+    errors.mockRestore();
   });
 });

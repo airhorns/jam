@@ -60,6 +60,19 @@ describe("injectAtomic", () => {
     expect(lowRule).toContain(`:root:root .${low}`);
     expect(highRule).toContain(`:root:root:root:root:root .${high}`);
   });
+
+  it("treats a media rule without precedence as the first media key", () => {
+    const cls = injectAtomic("padding", "1px", { media: "(min-width: 800px)" });
+    const rule = injectedRules().find((r) => r.includes(cls))!;
+    expect((rule.match(/:root/g) ?? []).length).toBe(7);
+  });
+
+  it("swallows declarations the stylesheet rejects", () => {
+    const cls = injectAtomic("color", "red } p { color: blue");
+    expect(cls).toMatch(/^_col-/);
+    expect(injectedRules()).toEqual([]);
+    expect(injectAtomic("color", "red } p { color: blue")).toBe(cls);
+  });
 });
 
 describe("injectRule", () => {
@@ -67,6 +80,30 @@ describe("injectRule", () => {
     injectRule("kf", "@keyframes spin { to { transform: rotate(360deg) } }");
     injectRule("kf", "@keyframes spin { to { transform: rotate(360deg) } }");
     expect(injectedRules()).toHaveLength(1);
+  });
+
+  it("ignores rules the stylesheet cannot parse", () => {
+    expect(() => injectRule("bad", "not a rule")).not.toThrow();
+    expect(injectedRules()).toEqual([]);
+  });
+});
+
+describe("without a stylesheet", () => {
+  it("still hands out class names and remembers keys when the style element has no sheet", () => {
+    const style = document.createElement("style");
+    style.id = "jam-ui-styles";
+    Object.defineProperty(style, "sheet", { get: () => null });
+    document.head.appendChild(style);
+    try {
+      expect(injectAtomic("padding", "4px")).toBe(atomicClassName("padding", "4px"));
+      injectRule("kf", "@keyframes spin { to { transform: rotate(360deg) } }");
+      expect(injectedRules()).toEqual([]);
+      style.remove();
+      injectRule("kf", "@keyframes spin { to { transform: rotate(360deg) } }");
+      expect(injectedRules()).toEqual([]);
+    } finally {
+      style.remove();
+    }
   });
 });
 

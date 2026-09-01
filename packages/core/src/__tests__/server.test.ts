@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { memoryStorage } from "@jam/engine/storage";
 import { createSyncServer, parseChanges, parseFilter, sqliteStorage, type ServerMessage, type SyncSocket } from "../server";
-import { _ } from "../db";
-import { compileFilter } from "../filter";
+import { _, $ } from "../db";
+import { compileFilter, serializeFilter } from "../filter";
 
 type Listener = (...args: unknown[]) => void;
 
@@ -10,15 +10,25 @@ type Listener = (...args: unknown[]) => void;
 function fakeSocket() {
   const sent: ServerMessage[] = [];
   const listeners = new Map<string, Listener[]>();
-  const socket: SyncSocket & { sent: ServerMessage[]; receive(message: unknown): void; close(): void } = {
+  const socket: SyncSocket & {
+    sent: ServerMessage[];
+    receive(message: unknown): void;
+    receiveRaw(data: string): void;
+    fail(error: unknown): void;
+    close(): void;
+  } = {
     sent,
     send: (data) => sent.push(JSON.parse(data) as ServerMessage),
     on: (event, listener) => {
       listeners.set(event, [...(listeners.get(event) ?? []), listener as Listener]);
       return socket;
     },
-    receive: (message) => {
-      for (const l of listeners.get("message") ?? []) l(JSON.stringify(message));
+    receive: (message) => socket.receiveRaw(JSON.stringify(message)),
+    receiveRaw: (data) => {
+      for (const l of listeners.get("message") ?? []) l(data);
+    },
+    fail: (error) => {
+      for (const l of listeners.get("error") ?? []) l(error);
     },
     close: () => {
       for (const l of listeners.get("close") ?? []) l();
@@ -45,10 +55,24 @@ describe("compileFilter", () => {
     expect(compileFilter({ pattern: ["x", _] }).id).toBe(compileFilter({ pattern: ["x", _] }).id);
     expect(compileFilter({}).id).not.toBe(compileFilter({ scope: "" }).id);
   });
+
+  it("treats bindings like wildcards and drops a pattern made only of them", () => {
+    const bound = compileFilter({ pattern: ["issue", $.id, "title"] });
+    expect(bound.id).toBe(compileFilter({ pattern: ["issue", _, "title"] }).id);
+    expect(bound.filter).toEqual({ pattern: ["issue", _, "title"] });
+    expect(serializeFilter({ pattern: ["issue", $.id, _] })).toBe(serializeFilter({ pattern: ["issue", _, _] }));
+
+    const open = compileFilter({ pattern: [$.a, _] });
+    expect(open.filter).toEqual({});
+    expect(open.matches(["a"])).toBe(false);
+    expect(open.matches(["a", 1])).toBe(true);
+  });
 });
 
 describe("protocol parsing", () => {
   it("rejects malformed changes", () => {
+    expect(() => parseChanges({})).toThrow("changes must be an array");
+    expect(() => parseChanges(["nope"])).toThrow("change must be an object");
     expect(() => parseChanges([{ op: "nope", terms: ["a"], scope: "" }])).toThrow();
     expect(() => parseChanges([{ op: "upsert", terms: [], scope: "" }])).toThrow();
     expect(() => parseChanges([{ op: "upsert", terms: [{}], scope: "" }])).toThrow();
@@ -58,7 +82,11 @@ describe("protocol parsing", () => {
 
   it("parses filters with null wildcards", () => {
     expect(parseFilter({ scope: "p", pattern: ["issue", null] })).toEqual({ scope: "p", pattern: ["issue", _] });
-    expect(() => parseFilter({ scope: 1 })).toThrow();
+    expect(parseFilter({})).toEqual({});
+    expect(() => parseFilter({ scope: 1 })).toThrow("filter.scope must be a string");
+    expect(() => parseFilter({ pattern: "issue" })).toThrow("filter.pattern must be an array");
+    expect(() => parseFilter(null)).toThrow("filter must be an object");
+    expect(() => parseFilter("scope")).toThrow("filter must be an object");
   });
 });
 
@@ -175,5 +203,62 @@ describe("createSyncServer", () => {
     writer.receive({ type: "push", id: 3, changes: [{ op: "upsert", terms: ["note", 1, "text", "hi"], scope: "user:alice" }] });
     await tick();
     expect(writer.sent[3]).toEqual({ type: "ack", id: 3, seq: 1 });
+  });
+
+  it("rejects a push with whatever the allow policy threw, even when it is not an Error", async () => {
+    const server = await createSyncServer({
+      storage: memoryStorage(),
+      allow: () => {
+        throw "no way";
+      },
+    });
+    const socket = fakeSocket();
+    server.handle(socket);
+    socket.receive({ type: "push", id: 7, changes: [{ op: "upsert", terms: ["n", 1], scope: "" }] });
+    await tick();
+    expect(socket.sent[1]).toEqual({ type: "reject", id: 7, error: "no way" });
+    expect(server.facts()).toEqual([]);
+  });
+
+  it("ignores messages it cannot parse and reports ones it cannot handle", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = await createSyncServer({ storage: memoryStorage() });
+    const socket = fakeSocket();
+    server.handle(socket);
+    socket.receiveRaw("{not json");
+    socket.receive({ type: "subscribe", id: "bad", filter: { scope: 1 } });
+    socket.receive({ type: "subscribe", id: "ok", filter: {} });
+    await tick();
+    expect(errors).toHaveBeenCalledWith("[jam] sync: ignoring unparseable message");
+    expect(errors).toHaveBeenCalledWith("[jam] sync message failed", expect.any(Error));
+    expect(socket.sent.map((m) => m.type)).toEqual(["hello", "snapshot"]);
+    errors.mockRestore();
+  });
+
+  it("stops sending to a connection once it has closed or errored, and survives a socket that cannot send", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = await createSyncServer({ storage: memoryStorage() });
+
+    const gone = fakeSocket();
+    server.handle(gone);
+    gone.receive({ type: "subscribe", id: "s", filter: {} });
+    gone.close();
+    await tick();
+    expect(gone.sent.map((m) => m.type)).toEqual(["hello"]);
+
+    const broken = fakeSocket();
+    server.handle(broken);
+    broken.fail(new Error("reset"));
+    expect(errors).toHaveBeenCalledWith("[jam] sync socket error", expect.any(Error));
+    expect(server.connections).toBe(0);
+
+    const flaky = fakeSocket();
+    flaky.send = () => {
+      throw new Error("EPIPE");
+    };
+    server.handle(flaky);
+    expect(errors).toHaveBeenCalledWith("[jam] sync send failed", expect.any(Error));
+    expect(server.connections).toBe(1);
+    errors.mockRestore();
   });
 });
