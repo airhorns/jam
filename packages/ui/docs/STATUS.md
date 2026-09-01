@@ -429,3 +429,7 @@ items keep their markers, and that the guide is reachable from the docs. The
 site is built by the `Pages` workflow on every push to `main` and published at
 https://harry.me/jam/; pull requests run the same production build, which is
 what surfaced that `@jam/engine`'s top-level `await` needs an es2022 target.
+The root URL is a homepage rendered from the repository README — its title and
+lead as a hero over links into the components, the guide and the repo, then the
+rest of the README through the same markdown renderer — and each page sets
+`document.title` from its doc.

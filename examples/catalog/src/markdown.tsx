@@ -2,6 +2,7 @@ import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
 import { lexer, type Token, type Tokens } from "marked";
 import { Anchor, H3, H4, H5, Paragraph, Separator, YStack, styled } from "@jam/ui";
+import { isPlainClick } from "./links";
 
 // Renders the reference docs' markdown through Jam components rather than
 // innerHTML, so the docs are themed like the demos and legible to describeUI().
@@ -9,6 +10,8 @@ import { Anchor, H3, H4, H5, Paragraph, Separator, YStack, styled } from "@jam/u
 export type MarkdownOptions = {
   /** Called for links to other skill docs instead of navigating; the link still carries an `?c=<page>` href. */
   onNavigate?: (page: string) => void;
+  /** Resolves other relative hrefs — repo paths in the README — e.g. the repository's blob URL. */
+  relativeLinkBase?: string;
 };
 
 const Pre = styled("pre", {
@@ -119,6 +122,11 @@ export function docLinkTarget(href: string): string | null {
   return DOC_LINK.exec(href)?.[1] ?? null;
 }
 
+function resolveHref(href: string, options: MarkdownOptions): string {
+  if (!options.relativeLinkBase || /^(?:[a-z]+:|\/|#|\?)/i.test(href)) return href;
+  return `${options.relativeLinkBase.replace(/\/$/, "")}/${href.replace(/^(?:\.\/)+/, "")}`;
+}
+
 function renderInline(tokens: Token[] | undefined, options: MarkdownOptions): VChild[] {
   if (!tokens) return [];
   return tokens.map((token, i): VChild => {
@@ -146,7 +154,7 @@ function renderInline(tokens: Token[] | undefined, options: MarkdownOptions): VC
               key={i}
               href={`?c=${page}`}
               onClick={(event: Event) => {
-                if (!options.onNavigate) return;
+                if (!options.onNavigate || !isPlainClick(event)) return;
                 event.preventDefault();
                 options.onNavigate(page);
               }}
@@ -155,9 +163,10 @@ function renderInline(tokens: Token[] | undefined, options: MarkdownOptions): VC
             </Anchor>
           );
         }
-        const external = /^https?:/.test(link.href);
+        const href = resolveHref(link.href, options);
+        const external = /^https?:/.test(href);
         return (
-          <Anchor key={i} href={link.href} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
+          <Anchor key={i} href={href} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
             {renderInline(link.tokens, options)}
           </Anchor>
         );

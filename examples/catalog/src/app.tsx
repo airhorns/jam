@@ -1,8 +1,11 @@
-import { h } from "@jam/core/jsx";
+import { Fragment, h } from "@jam/core/jsx";
+import type { VChild } from "@jam/core/jsx";
 import { $, replace, transaction, when } from "@jam/core";
 import { XStack, YStack, Text, H2, Paragraph, Button, styled, setTheme } from "@jam/ui";
 import { registry, groupOrder, findComponent } from "./registry";
 import { findGuide, guides, type Guide } from "./docs";
+import { HomePage } from "./home";
+import { isPlainClick } from "./links";
 import { renderInlineMarkdown, renderMarkdown } from "./markdown";
 import type { CatalogEntry, Demo } from "./types";
 
@@ -15,12 +18,15 @@ export type CatalogState = {
   demo: number | null;
 };
 
+/** The `c` value of the homepage, which the URL leaves out so `/` stays canonical. */
+export const HOME = "home";
+
 function readUrl(): CatalogState {
   const params = new URLSearchParams(location.search);
   const theme = params.get("theme") === "dark" ? "dark" : "light";
   const demo = params.get("demo");
   return {
-    component: params.get("c") ?? registry[0].name,
+    component: params.get("c") ?? HOME,
     theme,
     chrome: params.get("chrome") !== "0",
     demo: demo != null && demo !== "" ? Number(demo) : null,
@@ -29,11 +35,18 @@ function readUrl(): CatalogState {
 
 function writeUrl(state: CatalogState): void {
   const params = new URLSearchParams();
-  params.set("c", state.component);
+  if (state.component !== HOME) params.set("c", state.component);
   params.set("theme", state.theme);
   if (!state.chrome) params.set("chrome", "0");
   if (state.demo != null) params.set("demo", String(state.demo));
   history.replaceState(null, "", `?${params}`);
+}
+
+function pageTitle(component: string): string {
+  if (component === HOME) return "Jam";
+  if (component === "all") return "All components · Jam";
+  const title = findComponent(component)?.doc?.title ?? findGuide(component)?.title ?? findComponent(component)?.name ?? component;
+  return `${title} · Jam`;
 }
 
 export function applyState(state: CatalogState): void {
@@ -45,6 +58,7 @@ export function applyState(state: CatalogState): void {
   });
   setTheme(state.theme);
   document.documentElement.dataset.theme = state.theme;
+  document.title = pageTitle(state.component);
   writeUrl(state);
 }
 
@@ -54,7 +68,7 @@ export function initCatalogState(): void {
 }
 
 function useCatalogState(): CatalogState {
-  const component = String(when(["catalog", "component", $.v])[0]?.v ?? registry[0].name);
+  const component = String(when(["catalog", "component", $.v])[0]?.v ?? HOME);
   const theme = (when(["catalog", "theme", $.v])[0]?.v as "light" | "dark") ?? "light";
   const chrome = when(["catalog", "chrome", $.v])[0]?.v !== false;
   const demoRaw = Number(when(["catalog", "demo", $.v])[0]?.v ?? -1);
@@ -64,7 +78,7 @@ function useCatalogState(): CatalogState {
 function update(patch: Partial<CatalogState>): void {
   const params = new URLSearchParams(location.search);
   const current: CatalogState = {
-    component: params.get("c") ?? registry[0].name,
+    component: params.get("c") ?? HOME,
     theme: params.get("theme") === "dark" ? "dark" : "light",
     chrome: params.get("chrome") !== "0",
     demo: params.get("demo") ? Number(params.get("demo")) : null,
@@ -120,6 +134,18 @@ const DemoBody = styled("div", {
   },
 });
 
+const Brand = styled("a", {
+  name: "Brand",
+  defaultProps: {
+    display: "flex",
+    alignItems: "baseline",
+    gap: 6,
+    color: "$color",
+    textDecorationLine: "none",
+    cursor: "pointer",
+  },
+});
+
 const GroupLabel = styled(Text, {
   name: "GroupLabel",
   defaultProps: {
@@ -132,6 +158,26 @@ const GroupLabel = styled(Text, {
     paddingBottom: 4,
   },
 });
+
+/** A sidebar link to a page; the current page is marked for styling and assistive tech alike. */
+function PageLink({ page, current, href, children, ...rest }: { page: string; current: string; href?: string; children?: VChild; "data-nav"?: string }) {
+  const active = current.toLowerCase() === page.toLowerCase();
+  return (
+    <NavLink
+      href={href ?? `?c=${page}`}
+      active={active ? "true" : "false"}
+      aria-current={active ? "page" : undefined}
+      onClick={(e: Event) => {
+        if (!isPlainClick(e)) return;
+        e.preventDefault();
+        update({ component: page, demo: null });
+      }}
+      {...rest}
+    >
+      {children}
+    </NavLink>
+  );
+}
 
 function Sidebar() {
   const state = useCatalogState();
@@ -151,7 +197,10 @@ function Sidebar() {
       data-testid="sidebar"
     >
       <XStack alignItems="center" justifyContent="space-between" paddingHorizontal={10} paddingBottom="$space.2">
-        <Text fontWeight="700" fontSize={15}>@jam/ui</Text>
+        <Brand href="./" onClick={(e: Event) => { if (!isPlainClick(e)) return; e.preventDefault(); update({ component: HOME, demo: null }); }} data-nav="home">
+          <Text fontWeight="700" fontSize={15}>Jam</Text>
+          <Text fontSize={12} opacity={0.6}>@jam/ui</Text>
+        </Brand>
         <Button
           size="1"
           variant="outlined"
@@ -163,24 +212,14 @@ function Sidebar() {
           {state.theme === "dark" ? "☾" : "☀"}
         </Button>
       </XStack>
-      <NavLink href="?c=all" active={state.component === "all" ? "true" : "false"} onClick={(e: Event) => { e.preventDefault(); update({ component: "all" }); }}>
-        All components
-      </NavLink>
+      <PageLink page={HOME} href="./" current={state.component} data-nav="overview">Overview</PageLink>
+      <PageLink page="all" current={state.component}>All components</PageLink>
       <YStack gap={1} paddingTop="$space.3">
         <GroupLabel>Guides</GroupLabel>
         {guides.map((guide) => (
-          <NavLink
-            key={guide.slug}
-            href={`?c=${guide.slug}`}
-            active={state.component.toLowerCase() === guide.slug ? "true" : "false"}
-            onClick={(e: Event) => {
-              e.preventDefault();
-              update({ component: guide.slug, demo: null });
-            }}
-            data-nav={guide.slug}
-          >
+          <PageLink key={guide.slug} page={guide.slug} current={state.component} data-nav={guide.slug}>
             {guide.title}
-          </NavLink>
+          </PageLink>
         ))}
       </YStack>
       {groupOrder.map((group) => {
@@ -190,18 +229,9 @@ function Sidebar() {
           <YStack key={group} gap={1} paddingTop="$space.3">
             <GroupLabel>{group}</GroupLabel>
             {items.map((c) => (
-              <NavLink
-                key={c.name}
-                href={`?c=${c.name}`}
-                active={state.component.toLowerCase() === c.name.toLowerCase() ? "true" : "false"}
-                onClick={(e: Event) => {
-                  e.preventDefault();
-                  update({ component: c.name, demo: null });
-                }}
-                data-nav={c.name}
-              >
+              <PageLink key={c.name} page={c.name} current={state.component} data-nav={c.name}>
                 {c.name}
-              </NavLink>
+              </PageLink>
             ))}
           </YStack>
         );
@@ -261,20 +291,21 @@ function GuidePage({ guide }: { guide: Guide }) {
   );
 }
 
+function Page({ state }: { state: CatalogState }) {
+  if (state.component === HOME) return <HomePage onNavigate={navigateToDoc} />;
+  if (state.component === "all") return <Fragment>{registry.map((c) => <ComponentPage key={c.name} component={c} only={null} docs={false} />)}</Fragment>;
+  const selected = findComponent(state.component);
+  if (selected) return <ComponentPage component={selected} only={state.demo} docs={true} />;
+  const guide = findGuide(state.component);
+  if (guide) return <GuidePage guide={guide} />;
+  return <Text>Unknown component “{state.component}”</Text>;
+}
+
 function Main() {
   const state = useCatalogState();
-  const isAll = state.component === "all";
-  const selected = isAll ? null : findComponent(state.component);
-  const guide = isAll || selected ? null : findGuide(state.component);
   return (
     <YStack flex={1} padding="$space.7" $max-sm={{ padding: "$space.3" }} gap="$space.8" minWidth={0} data-testid="main">
-      {isAll
-        ? registry.map((c) => <ComponentPage key={c.name} component={c} only={null} docs={false} />)
-        : selected
-          ? <ComponentPage component={selected} only={state.demo} docs={true} />
-          : guide
-            ? <GuidePage guide={guide} />
-            : <Text>Unknown component “{state.component}”</Text>}
+      <Page state={state} />
     </YStack>
   );
 }
