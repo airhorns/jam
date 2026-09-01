@@ -97,7 +97,8 @@ export type ClientMessage =
   | { type: "push"; id: number; changes: SyncChange[] };
 
 export type ServerMessage =
-  | { type: "hello"; seq: number }
+  | { type: "hello"; seq: number; heartbeat: number }
+  | { type: "ping" }
   | { type: "snapshot"; id: string; seq: number; facts: Array<[Fact, string]> }
   | { type: "replay"; id: string; seq: number; changes: SyncChange[] }
   | { type: "changes"; seq: number; changes: SyncChange[] }
