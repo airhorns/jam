@@ -4,8 +4,6 @@ import type { ComponentDemos } from "../types";
 
 export const TooltipDemos: ComponentDemos = {
   name: "Tooltip",
-  group: "Overlays",
-  description: "Hover/focus-triggered label for a control, styled as an accent chip.",
   demos: [
     {
       title: "Placements",

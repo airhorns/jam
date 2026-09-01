@@ -18,7 +18,7 @@ import {
   useStableId,
   rovingFocus,
 } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import {
   ChevronDownIcon,
@@ -558,9 +558,8 @@ function CompactCard() {
   );
 }
 
-export const UsersTableExample: ComponentDemos = {
+export const UsersTableExample: ExampleDemos = {
   name: "Users table",
-  group: "Examples",
   description: "A members table built from stacks: avatars, status chips, a row action menu, sortable headers, row selection with a bulk-action bar, and a dense scrolling variant.",
   demos: [
     {

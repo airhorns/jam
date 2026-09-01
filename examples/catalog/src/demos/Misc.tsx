@@ -4,8 +4,6 @@ import type { ComponentDemos } from "../types";
 
 export const SeparatorDemos: ComponentDemos = {
   name: "Separator",
-  group: "Layout",
-  description: "A one-pixel divider drawn with a border, so it always lands on the pixel grid.",
   demos: [
     {
       title: "Horizontal and vertical",
@@ -39,8 +37,6 @@ export const SeparatorDemos: ComponentDemos = {
 
 export const SpacerDemos: ComponentDemos = {
   name: "Spacer",
-  group: "Layout",
-  description: "A gap sized from the space scale, or a flexible one that eats the remaining room.",
   demos: [
     {
       title: "Sizes",
@@ -85,8 +81,6 @@ export const SpacerDemos: ComponentDemos = {
 
 export const ScrollViewDemos: ComponentDemos = {
   name: "ScrollView",
-  group: "Layout",
-  description: "A scrolling viewport; `horizontal` scrolls the other way and lays children out in a row.",
   demos: [
     {
       title: "Vertical",
@@ -127,8 +121,6 @@ export const ScrollViewDemos: ComponentDemos = {
 
 export const ShapesDemos: ComponentDemos = {
   name: "Shapes",
-  group: "Layout",
-  description: "Square and Circle are ThemeableStacks whose `size` sets both dimensions.",
   demos: [
     {
       title: "Size scale",
@@ -181,8 +173,6 @@ export const ShapesDemos: ComponentDemos = {
 
 export const VisuallyHiddenDemos: ComponentDemos = {
   name: "VisuallyHidden",
-  group: "Utilities",
-  description: "Content for screen readers: still in the accessibility tree and the tab order, just not on screen.",
   demos: [
     {
       title: "Icon button with a hidden label",

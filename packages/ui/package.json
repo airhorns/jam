@@ -5,12 +5,14 @@
   "exports": {
     ".": "./src/index.ts",
     "./testing": "./src/testing.ts",
-    "./playwright": "./src/playwright.ts"
+    "./playwright": "./src/playwright.ts",
+    "./docs": "./src/docs.ts"
   },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "skill-index": "node scripts/skill-index.ts"
   },
   "dependencies": {
     "@jam/core": "workspace:*"

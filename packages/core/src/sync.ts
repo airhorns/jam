@@ -16,6 +16,11 @@
 // Without `url` there is no network and subscribe() only chooses which stored
 // facts are loaded into memory.
 //
+// A closed connection is reopened with a growing backoff. One that only looks
+// open is given up on too: the server says in `hello` how often it pings, and
+// two silent heartbeats drop the socket, as does the browser going offline;
+// coming back online reconnects at once.
+//
 // Browser tabs sharing one database elect a leader through a Web Lock. The
 // leader holds the only WebSocket, subscribes to the union of every tab's
 // filters, mirrors server changes into storage and pushes the shared outbox;
@@ -633,6 +638,9 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
   let log: string | null = null;
   let attempts = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** How often the current connection's server promised to send something; 0 until its `hello` says. */
+  let heartbeat = 0;
+  let staleTimer: ReturnType<typeof setTimeout> | null = null;
   let inflight: { id: number; upTo: number } | null = null;
   let nextPushId = 1;
   /** The outbox is being read from storage for a push; another push was asked for meanwhile. */
@@ -699,8 +707,11 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     switch (message.type) {
       case "hello":
         log = message.log;
+        heartbeat = message.heartbeat > 0 ? message.heartbeat : 0;
         for (const [id, sub] of remote) void subscribeRemote(id, sub);
         pushNow();
+        return;
+      case "ping":
         return;
       case "snapshot": {
         const sub = remote.get(message.id);
@@ -754,6 +765,35 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     reconnectTimer = setTimeout(connect, delay);
   };
 
+  const clearStale = () => {
+    if (staleTimer) clearTimeout(staleTimer);
+    staleTimer = null;
+  };
+
+  /**
+   * Give the current socket up and schedule a reconnect. Closing is not waited for: a socket whose network
+   * has silently gone may take minutes to finish its closing handshake, and whatever it reports afterwards
+   * is ignored.
+   */
+  const loseSocket = () => {
+    const ws = socket;
+    if (!ws) return;
+    socket = null;
+    log = null;
+    heartbeat = 0;
+    clearStale();
+    inflight = null;
+    for (const sub of remote.values()) sub.synced = false;
+    ws.close();
+    scheduleReconnect();
+  };
+
+  /** Every message from the server buys the connection two more heartbeats before it counts as dead. */
+  const expectHeartbeat = () => {
+    clearStale();
+    if (heartbeat > 0) staleTimer = setTimeout(loseSocket, 2 * heartbeat);
+  };
+
   const connect = () => {
     if (disposed || !url) return;
     reconnectTimer = null;
@@ -781,15 +821,11 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
       } catch (e) {
         console.error("[jam] sync: bad server message", e);
       }
+      expectHeartbeat();
     };
     ws.onerror = () => {};
     ws.onclose = () => {
-      if (socket !== ws) return;
-      socket = null;
-      log = null;
-      inflight = null;
-      for (const sub of remote.values()) sub.synced = false;
-      scheduleReconnect();
+      if (socket === ws) loseSocket();
     };
   };
 
@@ -835,9 +871,24 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
     if (!event.persisted || leading) return;
     for (const [id, sub] of subscriptions) post({ t: "want", tab: me, id, filter: serializeFilter(sub.compiled.filter) });
   };
+  const onOffline = () => loseSocket();
+  /** Reconnect now instead of waiting out the backoff; a socket still trying from before the outage is abandoned. */
+  const onOnline = () => {
+    if (!leading || connected) return;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    attempts = 0;
+    const pending = socket;
+    socket = null;
+    pending?.close();
+    connect();
+  };
   const page = typeof window !== "undefined" && typeof window.addEventListener === "function" ? window : null;
   page?.addEventListener("pagehide", onHide);
   page?.addEventListener("pageshow", onShow);
+  if (url) {
+    page?.addEventListener("offline", onOffline);
+    page?.addEventListener("online", onOnline);
+  }
 
   // --- handle ---
   const subscribe = (filter: FactFilter = {}): FactSubscription => {
@@ -958,7 +1009,10 @@ export async function sync(options: SyncOptions = {}): Promise<SyncHandle> {
       unobserve();
       page?.removeEventListener("pagehide", onHide);
       page?.removeEventListener("pageshow", onShow);
+      page?.removeEventListener("offline", onOffline);
+      page?.removeEventListener("online", onOnline);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearStale();
       const ws = socket;
       socket = null;
       connected = false;

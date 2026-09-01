@@ -1,6 +1,6 @@
 import { h } from "@jam/core/jsx";
 import { XStack, YStack, RadioGroup, Label, SizableText, styled, useStableId } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { LockIcon, UsersIcon, GlobeIcon } from "./icons";
 
@@ -154,9 +154,8 @@ function InlineOptions() {
   );
 }
 
-export const GroupedRadioExample: ComponentDemos = {
+export const GroupedRadioExample: ExampleDemos = {
   name: "Radio cards",
-  group: "Examples",
   description: "RadioGroup laid out as selectable cards, tiles and inline options, with the whole card acting as the label.",
   demos: [
     {

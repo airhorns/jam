@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
 import { XStack, YStack, Button, Card, Input, Label, Popover, Separator, SizableText, useStableId } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon } from "./icons";
 
@@ -367,9 +367,8 @@ function RangeCalendar() {
   );
 }
 
-export const DatePickerExample: ComponentDemos = {
+export const DatePickerExample: ExampleDemos = {
   name: "Date picker",
-  group: "Examples",
   description: "Calendars built from Buttons in a fixed 7-column grid: a popover picker behind a read-only input, an inline calendar with month and year pickers, and a range picker.",
   demos: [
     {

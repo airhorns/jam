@@ -7,9 +7,11 @@
 //
 // See filter.ts for the message shapes. Every connection receives one
 // `changes` message per committed transaction (filtered to its subscriptions,
-// possibly empty) so a client knows exactly which seq it has caught up to.
-// The log has an id, minted once per storage and sent in `hello`, so a client
-// can tell whether the seqs it remembers belong to the log it is talking to.
+// possibly empty) so a client knows exactly which seq it has caught up to,
+// and a `ping` every `heartbeat` milliseconds (announced in `hello`) so it can
+// tell a dead connection from a quiet one. The log has an id, minted once per
+// storage and sent in `hello`, so a client can tell whether the seqs it
+// remembers belong to the log it is talking to.
 
 import { Engine, ROOT_OWNER, factKey, type Fact, type FactEvent } from "@jam/engine";
 import type { FactStorage, NewLogEntry, StoredFact } from "@jam/engine/storage";
@@ -47,6 +49,8 @@ export interface SyncServerOptions {
   allowRead?: (filter: FactFilter, context: unknown) => boolean | Promise<boolean>;
   /** Log entries kept for replay to reconnecting clients (default: 10000). */
   logRetention?: number;
+  /** Milliseconds between the `ping`s sent to every connection; 0 sends none (default: 30000). */
+  heartbeat?: number;
 }
 
 /** A committed transaction as reported to `observe` listeners. */
@@ -84,7 +88,7 @@ function logId(): string {
 }
 
 export async function createSyncServer(options: SyncServerOptions): Promise<SyncServer> {
-  const { storage, allow, allowRead, logRetention = 10_000 } = options;
+  const { storage, allow, allowRead, logRetention = 10_000, heartbeat = 30_000 } = options;
   const engine = new Engine();
   const connections = new Set<Connection>();
 
@@ -120,6 +124,13 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
       console.error("[jam] sync send failed", e);
     }
   };
+
+  const pinger =
+    heartbeat > 0
+      ? setInterval(() => {
+          for (const connection of connections) send(connection, { type: "ping" });
+        }, heartbeat)
+      : null;
 
   /** Apply a batch to the engine and return what actually changed. */
   const commit = (changes: SyncChange[]): SyncChange[] => {
@@ -296,7 +307,7 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
       console.error("[jam] sync socket error", e);
       drop();
     });
-    send(connection, { type: "hello", seq, log });
+    send(connection, { type: "hello", seq, log, heartbeat });
   };
 
   return {
@@ -314,6 +325,7 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
       return connections.size;
     },
     async close() {
+      if (pinger !== null) clearInterval(pinger);
       await chain;
       connections.clear();
       await storage.close();

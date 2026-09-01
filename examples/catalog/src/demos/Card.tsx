@@ -4,8 +4,6 @@ import type { ComponentDemos } from "../types";
 
 export const CardDemos: ComponentDemos = {
   name: "Card",
-  group: "Content",
-  description: "A surface with a header and footer that share its sizing. `elevate` adds the themed shadow, `bordered` the outline.",
   demos: [
     {
       title: "Basic",

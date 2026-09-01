@@ -113,7 +113,7 @@ describe("createSyncServer", () => {
     await first.apply([{ op: "upsert", terms: ["n", 1], scope: "" }]);
 
     const second = await createSyncServer({ storage });
-    expect(hello(second)).toEqual({ type: "hello", seq: 1, log });
+    expect(hello(second)).toEqual({ type: "hello", seq: 1, log, heartbeat: 30_000 });
     expect(hello(await createSyncServer({ storage: memoryStorage() })).log).not.toBe(log);
 
     const path = join(mkdtempSync(join(tmpdir(), "jam-log-")), "facts.db");
@@ -148,7 +148,7 @@ describe("createSyncServer", () => {
     ]);
     const socket = fakeSocket();
     server.handle(socket);
-    expect(socket.sent[0]).toEqual({ type: "hello", seq: 3, log: expect.any(String) });
+    expect(socket.sent[0]).toEqual({ type: "hello", seq: 3, log: expect.any(String), heartbeat: 30_000 });
     socket.receive({ type: "subscribe", id: "s1", filter: { scope: "p1" } });
     await tick();
     expect(socket.sent[1]).toEqual({ type: "snapshot", id: "s1", seq: 3, facts: [[["issue", 1, "title", "A"], "p1"]] });
@@ -360,5 +360,44 @@ describe("createSyncServer", () => {
     expect(errors.map((e) => (e as Error).message)).toEqual(["boom", "boom"]);
     expect(server.facts().map((f) => f.terms)).toEqual([["n", 1], ["n", 2]]);
     spy.mockRestore();
+  });
+
+  it("announces its heartbeat in hello, pings every open connection at that interval and stops on close", async () => {
+    vi.useFakeTimers();
+    try {
+      const server = await createSyncServer({ storage: memoryStorage(), heartbeat: 100 });
+      const socket = fakeSocket();
+      const gone = fakeSocket();
+      server.handle(socket);
+      server.handle(gone);
+      expect(socket.sent).toEqual([{ type: "hello", seq: 0, log: expect.any(String), heartbeat: 100 }]);
+      gone.close();
+
+      await vi.advanceTimersByTimeAsync(250);
+      expect(socket.sent.slice(1)).toEqual([{ type: "ping" }, { type: "ping" }]);
+      expect(gone.sent).toHaveLength(1);
+
+      await server.close();
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(socket.sent).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sends no pings when the heartbeat is 0", async () => {
+    vi.useFakeTimers();
+    try {
+      const server = await createSyncServer({ storage: memoryStorage(), heartbeat: 0 });
+      const socket = fakeSocket();
+      server.handle(socket);
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(socket.sent).toEqual([{ type: "hello", seq: 0, log: expect.any(String), heartbeat: 0 }]);
+      await server.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

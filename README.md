@@ -46,7 +46,7 @@ another app's dev server. Set `PLAYWRIGHT_PORT` or the example-specific
 - `examples/obsidian-clone` — linked-note workspace with graph-derived views
 - `examples/puddy-vite` — chat/session app with VCR-style network tests
 - `examples/linearlite` — Multi-project Linear clone on `sync()` with per-project subscriptions against a WebSocket sync server, with unit and e2e coverage
-- `examples/catalog` — browser catalog for `@jam/ui` components, with screenshot and e2e tooling
+- `examples/catalog` — browser catalog for `@jam/ui` components with their reference docs, published at https://harry.me/jam/ on every push to `main`; includes screenshot and e2e tooling
 
 ## Core API
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { memoryStorage, type FactStorage } from "@jam/engine/storage";
 import { db, FactDB, _ } from "../db";
 import { claim, forget, remember, replace, scoped, whenever, $ } from "../primitives";
@@ -736,5 +736,207 @@ describe("sync (tabs)", () => {
     await settle();
     expect(b.facts("issue")).toEqual([["issue", 2, "title", "B"]]);
     expect(await stored()).toEqual([{ terms: ["issue", 2, "title", "B"], scope: "p2" }]);
+  });
+});
+
+describe("sync (liveness)", () => {
+  let server: SyncServer;
+  let net: FakeNetwork;
+  /** Every message the server sent, whether or not `relay` let it through. */
+  let sent: ServerMessage[];
+  /** What reaches the client of each server message; `null` swallows it, as a network that silently died would. */
+  let relay: (message: ServerMessage) => ServerMessage | null;
+  const win = new EventTarget();
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", win);
+    sent = [];
+    relay = (message) => message;
+  });
+
+  afterEach(async () => {
+    for (const handle of handles.splice(0)) await handle.dispose();
+    await server.close();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  /** A server pinging every `heartbeat` ms, reached over a network whose server-to-client leg goes through `relay`. */
+  async function serve(heartbeat: number) {
+    server = await createSyncServer({ storage: memoryStorage(), heartbeat });
+    net = fakeNetwork((socket) => {
+      const deliver = socket.send;
+      socket.send = (data) => {
+        const message = JSON.parse(data) as ServerMessage;
+        sent.push(message);
+        const relayed = relay(message);
+        if (relayed) deliver(JSON.stringify(relayed));
+      };
+      server.handle(socket);
+    });
+  }
+
+  async function start(options: Partial<SyncOptions> = {}) {
+    const handle = await sync({ url: "ws://test", storage, socket: net.connect, retryDelay: 1000, ...options });
+    handles.push(handle);
+    return handle;
+  }
+
+  /** Deliver every queued network and tab message; heartbeats are far longer than this. */
+  const settle = () => vi.advanceTimersByTimeAsync(10);
+  const pings = () => sent.filter((m) => m.type === "ping").length;
+
+  it("gives up a connection that stays silent for two heartbeats and reconnects", async () => {
+    await serve(100);
+    const s = await start({ retryDelay: 50 });
+    const sub = s.subscribe();
+    await settle();
+    await sub.ready;
+    expect(statusFact("status")).toBe("live");
+
+    relay = () => null;
+    await vi.advanceTimersByTimeAsync(150);
+    expect(pings()).toBe(1);
+    expect(statusFact("status")).toBe("live");
+    expect(s.connected).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(50);
+    expect(statusFact("status")).toBe("offline");
+    expect(s.connected).toBe(false);
+    expect(server.connections).toBe(0);
+    expect(net.sockets).toHaveLength(1);
+
+    relay = (message) => message;
+    await vi.advanceTimersByTimeAsync(60);
+    expect(net.sockets).toHaveLength(2);
+    expect(statusFact("status")).toBe("live");
+    expect(s.connected).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(statusFact("status")).toBe("live");
+    expect(net.sockets).toHaveLength(2);
+  });
+
+  it("stays live for as long as the server keeps pinging", async () => {
+    await serve(100);
+    const s = await start();
+    const sub = s.subscribe();
+    await settle();
+    await sub.ready;
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(pings()).toBe(10);
+    expect(statusFact("status")).toBe("live");
+    expect(s.connected).toBe(true);
+    expect(net.sockets).toHaveLength(1);
+  });
+
+  it("arms no stale timer when the server sends no heartbeat", async () => {
+    await serve(0);
+    const s = await start();
+    const sub = s.subscribe();
+    await settle();
+    await sub.ready;
+    expect(vi.getTimerCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(sent.map((m) => m.type)).toEqual(["hello", "snapshot"]);
+    expect(statusFact("status")).toBe("live");
+    expect(net.sockets).toHaveLength(1);
+  });
+
+  it("treats a hello without a heartbeat as a server that never pings", async () => {
+    await serve(100);
+    relay = (message) => (message.type === "hello" ? ({ type: "hello", seq: message.seq, log: message.log } as ServerMessage) : message);
+    const s = await start();
+    const sub = s.subscribe();
+    await settle();
+    await sub.ready;
+
+    relay = () => null;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(statusFact("status")).toBe("live");
+    expect(net.sockets).toHaveLength(1);
+  });
+
+  it("drops the socket when the browser goes offline and reconnects at once when it is back online", async () => {
+    await serve(0);
+    const s = await start();
+    const sub = s.subscribe();
+    await settle();
+    await sub.ready;
+    win.dispatchEvent(new Event("online"));
+    expect(net.sockets).toHaveLength(1);
+
+    win.dispatchEvent(new Event("offline"));
+    expect(statusFact("status")).toBe("offline");
+    expect(s.connected).toBe(false);
+    await settle();
+    expect(server.connections).toBe(0);
+    expect(net.sockets).toHaveLength(1);
+
+    win.dispatchEvent(new Event("online"));
+    expect(net.sockets).toHaveLength(2);
+    await settle();
+    expect(statusFact("status")).toBe("live");
+    expect(s.connected).toBe(true);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(net.sockets).toHaveLength(2);
+  });
+
+  it("abandons a socket still connecting when the browser comes back online", async () => {
+    await serve(0);
+    let stall = false;
+    let stalledClosed = 0;
+    const s = await start({
+      retryDelay: 100,
+      socket: (url) => {
+        if (!stall) return net.connect(url);
+        return { send() {}, close: () => stalledClosed++, onopen: null, onmessage: null, onclose: null, onerror: null };
+      },
+    });
+    const sub = s.subscribe();
+    await settle();
+    await sub.ready;
+
+    stall = true;
+    win.dispatchEvent(new Event("offline"));
+    await vi.advanceTimersByTimeAsync(150);
+    expect(statusFact("status")).toBe("offline");
+    expect(net.sockets).toHaveLength(1);
+
+    stall = false;
+    win.dispatchEvent(new Event("online"));
+    expect(stalledClosed).toBe(1);
+    expect(net.sockets).toHaveLength(2);
+    await settle();
+    expect(statusFact("status")).toBe("live");
+  });
+
+  it("reconnects through the leader alone when the tabs come back online", async () => {
+    await serve(0);
+    const hub = fakeTabs();
+    const openTab = async () => {
+      const s = await sync({ url: "ws://test", storage, socket: net.connect, retryDelay: 1000, tabs: hub.join(), db: new FactDB() });
+      handles.push(s);
+      return s;
+    };
+    const a = await openTab();
+    const b = await openTab();
+    await settle();
+    expect(a.leading).toBe(true);
+    expect(b.leading).toBe(false);
+    expect(b.connected).toBe(true);
+
+    win.dispatchEvent(new Event("offline"));
+    await settle();
+    expect(a.connected).toBe(false);
+    expect(b.connected).toBe(false);
+
+    win.dispatchEvent(new Event("online"));
+    await settle();
+    expect(net.sockets).toHaveLength(2);
+    expect(a.connected).toBe(true);
+    expect(b.connected).toBe(true);
   });
 });

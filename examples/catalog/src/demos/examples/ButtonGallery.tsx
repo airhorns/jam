@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
 import { XStack, YStack, XGroup, YGroup, Button, Spinner, Tooltip, Popover, ListItem, Separator, SizableText, Paragraph, rovingFocus } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import {
   HeartIcon,
@@ -230,9 +230,8 @@ function SocialButtons() {
   );
 }
 
-export const ButtonGalleryExample: ComponentDemos = {
+export const ButtonGalleryExample: ExampleDemos = {
   name: "Button gallery",
-  group: "Examples",
   description: "Buttons the way an app uses them: icon labels across themes and sizes, a loading state, icon-only and split buttons, and social sign-in.",
   demos: [
     {

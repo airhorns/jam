@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import type { VNode } from "@jam/core/jsx";
 import { XStack, YStack, H2, Paragraph, SizableText, Button, Input, Label, Checkbox, Progress, Separator, ScrollView, Circle, useStableId, rovingFocus } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { PhoneFrame } from "./shared";
 import type { IconProps } from "./icons";
@@ -256,9 +256,8 @@ function VerifyCode() {
   );
 }
 
-export const OnboardingExample: ComponentDemos = {
+export const OnboardingExample: ExampleDemos = {
   name: "Onboarding",
-  group: "Examples",
   description: "A mobile onboarding flow: a three-step walkthrough with a dot pager, an account form with terms consent and social sign-in, and a one-time-code screen.",
   demos: [
     {

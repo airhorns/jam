@@ -5,8 +5,6 @@ import { useDemoState } from "./state";
 
 export const ProgressDemos: ComponentDemos = {
   name: "Progress",
-  group: "Feedback",
-  description: "A track whose Progress.Indicator fills to `value` out of `max`. With no value it sweeps as indeterminate.",
   demos: [
     {
       title: "Controlled",
