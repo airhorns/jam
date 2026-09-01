@@ -1,5 +1,8 @@
 import { docNameFromPath, parseComponentDoc, parseDocPage, type ComponentDoc, type DocPage } from "@jam/ui/docs";
 import styleSystem from "../../../.agents/skills/jam-ui/style-system.md?raw";
+import readmeSource from "../../../README.md?raw";
+
+export const REPO_URL = "https://github.com/airhorns/jam";
 
 // The reference docs are the jam-ui skill's markdown files, bundled as strings.
 const sources = import.meta.glob("../../../.agents/skills/jam-ui/components/*.md", {
@@ -28,3 +31,6 @@ export const guides: Guide[] = [
 export function findGuide(slug: string): Guide | undefined {
   return guides.find((guide) => guide.slug === slug.toLowerCase());
 }
+
+/** The repository README, which the homepage renders: its H1 and lead make the hero. */
+export const readme: DocPage = parseDocPage(readmeSource, "README.md");
