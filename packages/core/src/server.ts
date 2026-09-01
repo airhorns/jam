@@ -47,11 +47,21 @@ export interface SyncServerOptions {
   logRetention?: number;
 }
 
+/** A committed transaction as reported to `observe` listeners. */
+export interface SyncCommit {
+  seq: number;
+  /** What actually changed, as broadcast to subscribers. */
+  changes: SyncChange[];
+  context: unknown;
+}
+
 export interface SyncServer {
   /** Attach a connection; `context` is passed to `allow` and `allowRead` (e.g. the authenticated user). */
   handle(socket: SyncSocket, context?: unknown): void;
   /** Commit changes as the server itself (seeds, admin tools). Resolves with the committed seq. */
   apply(changes: SyncChange[]): Promise<number>;
+  /** Runs after every committed transaction with the changes that took effect; `context` is the pushing connection's, or undefined for `apply`. */
+  observe(listener: (commit: SyncCommit) => void): () => void;
   facts(): StoredFact[];
   readonly seq: number;
   readonly connections: number;
@@ -162,13 +172,28 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
     }
   };
 
-  /** Commit a batch; `committed` runs inside the serialized section so anything it sends precedes the next transaction's broadcast. */
-  const apply = (changes: SyncChange[], committed?: (seq: number) => void): Promise<number> =>
+  const observers = new Set<(commit: SyncCommit) => void>();
+  const notify = (commit: SyncCommit) => {
+    for (const listener of observers) {
+      try {
+        listener(commit);
+      } catch (e) {
+        console.error("[jam] sync observer failed", e);
+      }
+    }
+  };
+
+  /**
+   * Commit a batch on behalf of `context`; `committed` runs inside the serialized section so anything it
+   * sends precedes the next transaction's broadcast.
+   */
+  const apply = (changes: SyncChange[], context?: unknown, committed?: (seq: number) => void): Promise<number> =>
     serialized(async () => {
       const effective = commit(changes);
       if (effective.length > 0) {
         seq = await persist(effective);
         broadcast(seq, effective);
+        notify({ seq, changes: effective, context });
       }
       committed?.(seq);
       return seq;
@@ -210,7 +235,7 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
         }
       }
     }
-    await apply(changes, (committed) => send(connection, { type: "ack", id, seq: committed }));
+    await apply(changes, connection.context, (committed) => send(connection, { type: "ack", id, seq: committed }));
   };
 
   const handleMessage = async (connection: Connection, raw: unknown) => {
@@ -264,7 +289,11 @@ export async function createSyncServer(options: SyncServerOptions): Promise<Sync
 
   return {
     handle,
-    apply,
+    apply: (changes) => apply(changes),
+    observe(listener) {
+      observers.add(listener);
+      return () => observers.delete(listener);
+    },
     facts: () => engine.facts(),
     get seq() {
       return seq;
