@@ -401,3 +401,31 @@ in an app the dialog's `open` sat on a stray `hidden` node instead of on its
 trigger, and `root` on its id found nothing — while the conformance suite,
 which writes the parts outside any component, saw the intended tree by
 accident. Parents and element owners now follow the tree being expanded.
+
+## Docs as a skill, rendered in the catalog
+
+The per-component reference docs moved out of `packages/ui/docs/` into the
+`jam-ui` skill (`.agents/skills/jam-ui/components/<Name>.md`, with
+`style-system.md` beside them and `SKILL.md` carrying a generated index by
+group), so an agent building on the library finds one skill and one file per
+component, while `packages/ui/docs/` keeps the contributor-facing
+`AUTHORING.md` and this file (plus a `components` symlink). Each doc opens with
+frontmatter — `name`, `group`, `description` — that the catalog now reads
+instead of the per-demo `group`/`description` strings it used to duplicate:
+the registry attaches demos to docs by name and refuses to start when either
+side is missing, which is how `Portal` and `Slot` gained demos (a banner
+escaping a clipped card; a card as a `Popover.Trigger`, a standalone merge and
+a hand-rolled `asChild`). The catalog renders the doc beneath a component's
+demos through Jam components rather than `innerHTML` — headings, paragraphs,
+`<pre>`, tables and lists via `marked`'s lexer — so the docs are themed like
+the demos, legible to `describeUI()`, and relative links between skill files
+navigate within the site — `style-system.md` is a page too, under "Guides",
+so `Stacks.md`'s link up to it resolves. `docs.test.ts` in `packages/ui`
+checks every doc's frontmatter, lead and Usage section, that every relative
+link points at a file in the skill, and that the committed index in
+`SKILL.md` matches `pnpm skill-index`; the catalog's `docs.spec.ts` checks
+every page renders every section, code block and table of its file, that list
+items keep their markers, and that the guide is reachable from the docs. The
+site is built by the `Pages` workflow on every push to `main` and published at
+https://harry.me/jam/; pull requests run the same production build, which is
+what surfaced that `@jam/engine`'s top-level `await` needs an es2022 target.

@@ -25,8 +25,6 @@ const section = (item: { value: string; title: string; body: string }, extra: Re
 
 export const AccordionDemos: ComponentDemos = {
   name: "Accordion",
-  group: "Content",
-  description: "Collapsible sections, one open at a time or many.",
   demos: [
     {
       title: "Single, collapsible",

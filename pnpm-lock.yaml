@@ -9,13 +9,13 @@ importers:
   .:
     devDependencies:
       '@vitest/coverage-v8':
-        specifier: ^3.2.4
+        specifier: 3.2.4
         version: 3.2.4(vitest@3.2.4(@types/node@26.4.0)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@26.4.0)(typescript@5.9.3))(tsx@4.23.13))
       agent-browser:
         specifier: 0.26.0
         version: 0.26.0
       vitest:
-        specifier: ^3.2.4
+        specifier: 3.2.4
         version: 3.2.4(@types/node@26.4.0)(happy-dom@17.6.3)(jsdom@29.0.2)(msw@2.13.4(@types/node@26.4.0)(typescript@5.9.3))(tsx@4.23.13)
 
   examples/catalog:
@@ -26,6 +26,9 @@ importers:
       '@jam/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      marked:
+        specifier: ^16.4.2
+        version: 16.4.2
     devDependencies:
       '@playwright/test':
         specifier: ^1.58.2
@@ -1543,6 +1546,11 @@ packages:
     resolution: {integrity: sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw==}
     engines: {node: '>=10'}
 
+  marked@16.4.2:
+    resolution: {integrity: sha512-TI3V8YYWvkVf3KJe1dRkpnjs68JUPyEa5vjKrp1XEEJUAOaQc+Qj+L1qWbPd0SJuAdQkFU0h73sXXqwDYxsiDA==}
+    engines: {node: '>= 20'}
+    hasBin: true
+
   mdn-data@2.27.1:
     resolution: {integrity: sha512-9Yubnt3e8A0OKwxYSXyhLymGW4sCufcLG6VdiDdUGVkPhpqLxlvP5vl1983gQjJl3tqbrM731mjaZaP68AgosQ==}
 
@@ -3022,6 +3030,8 @@ snapshots:
   make-dir@4.0.0:
     dependencies:
       semver: 7.8.5
+
+  marked@16.4.2: {}
 
   mdn-data@2.27.1: {}
 

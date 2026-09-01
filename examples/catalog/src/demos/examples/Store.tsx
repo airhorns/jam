@@ -21,7 +21,7 @@ import {
   useStableId,
   useControllableState,
 } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { Page } from "./shared";
 import type { IconProps } from "./icons";
@@ -513,9 +513,8 @@ function ProductDetail() {
   );
 }
 
-export const StoreExample: ComponentDemos = {
+export const StoreExample: ExampleDemos = {
   name: "Store",
-  group: "Examples",
   description: "A small storefront: a filterable product grid with ratings, a cart kept in demo state and opened in a Sheet, and a product detail page with colour, size and quantity pickers.",
   demos: [
     {

@@ -87,8 +87,6 @@ function ActionsMenu() {
 
 export const MenuDemos: ComponentDemos = {
   name: "Menu",
-  group: "Overlays",
-  description: "A dropdown menu of actions with keyboard navigation, typeahead, checkbox and radio items.",
   demos: [
     {
       title: "Actions",

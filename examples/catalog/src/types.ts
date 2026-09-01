@@ -1,4 +1,5 @@
 import type { VChild } from "@jam/core/jsx";
+import type { ComponentDoc, DocGroup } from "@jam/ui/docs";
 
 /**
  * How `pnpm shots` should capture a demo whose interesting state needs
@@ -19,20 +20,26 @@ export type Demo = {
   shot?: ShotRecipe;
 };
 
-export type DemoGroup =
-  | "Layout"
-  | "Typography"
-  | "Forms"
-  | "Overlays"
-  | "Content"
-  | "Feedback"
-  | "Navigation"
-  | "Utilities"
-  | "Examples";
+export type DemoGroup = DocGroup | "Examples";
 
+/** Demos for a documented component. Its group, description and docs come from `components/<name>.md` in the jam-ui skill. */
 export type ComponentDemos = {
   name: string;
-  group: DemoGroup;
-  description?: string;
   demos: Demo[];
+};
+
+/** A composition showcase in the Examples group; it has no reference doc. */
+export type ExampleDemos = {
+  name: string;
+  description: string;
+  demos: Demo[];
+};
+
+/** One sidebar entry: a documented component with its demos, or an example. */
+export type CatalogEntry = {
+  name: string;
+  group: DemoGroup;
+  description: string;
+  demos: Demo[];
+  doc?: ComponentDoc;
 };

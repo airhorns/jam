@@ -5,8 +5,6 @@ import { useDemoState } from "./state";
 
 export const SheetDemos: ComponentDemos = {
   name: "Sheet",
-  group: "Overlays",
-  description: "Bottom drawer that slides up over the page and rests at snap points; drag the handle to move or dismiss it.",
   demos: [
     {
       title: "Modal with snap points",

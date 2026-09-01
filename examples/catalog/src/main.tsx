@@ -3,6 +3,7 @@ import { $, _, db, describeUI, drive, mount, outlineUI, press } from "@jam/core"
 import { setupUI } from "./config";
 import { App, initCatalogState, applyState } from "./app";
 import { registry } from "./registry";
+import { guides } from "./docs";
 
 setupUI();
 initCatalogState();
@@ -12,7 +13,14 @@ mount(<App />, document.getElementById("app")!);
 (window as any).__db = db;
 (window as any).__jam = { $, _, describeUI, outlineUI, drive, press };
 (window as any).__catalog = {
-  components: registry.map((c) => ({ name: c.name, group: c.group, demos: c.demos.map((d) => ({ title: d.title, shot: d.shot })) })),
+  components: registry.map((c) => ({
+    name: c.name,
+    group: c.group,
+    description: c.description,
+    doc: c.doc ? `.agents/skills/jam-ui/components/${c.name}.md` : null,
+    demos: c.demos.map((d) => ({ title: d.title, shot: d.shot })),
+  })),
+  guides: guides.map((g) => ({ name: g.slug, title: g.title, doc: g.path })),
   show(component: string, theme: "light" | "dark" = "light", demo: number | null = null) {
     applyState({ component, theme, chrome: false, demo });
   },

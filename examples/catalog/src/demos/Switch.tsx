@@ -5,8 +5,6 @@ import { useDemoState } from "./state";
 
 export const SwitchDemos: ComponentDemos = {
   name: "Switch",
-  group: "Forms",
-  description: "A role=switch button whose thumb slides one track height when on.",
   demos: [
     {
       title: "Sizes",

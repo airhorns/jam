@@ -4,8 +4,6 @@ import type { ComponentDemos } from "../types";
 
 export const LabelDemos: ComponentDemos = {
   name: "Label",
-  group: "Forms",
-  description: "A real `<label>`: `htmlFor` gives you native click-to-focus and the control's accessible name.",
   demos: [
     {
       title: "Sizes",

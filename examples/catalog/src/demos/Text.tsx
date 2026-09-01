@@ -4,8 +4,6 @@ import type { ComponentDemos } from "../types";
 
 export const TextDemos: ComponentDemos = {
   name: "Text",
-  group: "Typography",
-  description: "Text, SizableText, Paragraph and the Heading family.",
   demos: [
     {
       title: "Headings",

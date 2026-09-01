@@ -5,8 +5,6 @@ import { useDemoState } from "./state";
 
 export const SliderDemos: ComponentDemos = {
   name: "Slider",
-  group: "Forms",
-  description: "A thumb dragged along a track to pick a number or a range.",
   demos: [
     {
       title: "Controlled",

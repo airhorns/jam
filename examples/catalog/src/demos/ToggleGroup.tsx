@@ -5,8 +5,6 @@ import { useDemoState } from "./state";
 
 export const ToggleGroupDemos: ComponentDemos = {
   name: "ToggleGroup",
-  group: "Forms",
-  description: "Joined toggle buttons that read as one segmented control.",
   demos: [
     {
       title: "Single",

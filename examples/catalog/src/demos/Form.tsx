@@ -5,8 +5,6 @@ import { useDemoState } from "./state";
 
 export const FormDemos: ComponentDemos = {
   name: "Form",
-  group: "Forms",
-  description: "A real `<form>` whose `onSubmit` runs instead of reloading the page. Form.Trigger is the submit button.",
   demos: [
     {
       title: "Basic form",

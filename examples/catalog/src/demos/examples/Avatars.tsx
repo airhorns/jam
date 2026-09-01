@@ -1,6 +1,6 @@
 import { h } from "@jam/core/jsx";
 import { XStack, YStack, YGroup, Avatar, Circle, Tooltip, Separator, SizableText, getToken } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 
 type Person = { name: string; initials: string; theme: string; role: string; online: boolean };
 
@@ -168,9 +168,8 @@ function WithStatus() {
   );
 }
 
-export const AvatarsExample: ComponentDemos = {
+export const AvatarsExample: ExampleDemos = {
   name: "Avatar groups",
-  group: "Examples",
   description: "Initials avatars composed into overlapping groups, hover tooltips, presence badges and a people list.",
   demos: [
     {

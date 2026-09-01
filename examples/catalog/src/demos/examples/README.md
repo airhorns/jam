@@ -7,8 +7,8 @@ would, so anything awkward to build here is a library bug worth fixing in
 
 ## Conventions
 
-- One file per example exporting a `ComponentDemos` with `group: "Examples"`,
-  registered in `../../registry.ts`. Each `demos[]` entry is one self-contained
+- One file per example exporting an `ExampleDemos` (name, one-line
+  description, demos), registered in `../../registry.ts`. Each `demos[]` entry is one self-contained
   variant; give interactive states a `shot` recipe (`click`/`hover`/`focus` by
   `data-testid`, plus `wait` ms) so `pnpm shots` captures them.
 - Import `h` from `@jam/core/jsx` in every file. Components are plain

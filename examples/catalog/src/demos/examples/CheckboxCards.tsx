@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import { XStack, YStack, Checkbox, Label, SizableText, Separator, styled, useStableId } from "@jam/ui";
 import type { CheckedState } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { BellIcon, MailIcon, MessageSquareIcon, PhoneIcon, LayersIcon, ZapIcon, GlobeIcon } from "./icons";
 
@@ -202,9 +202,8 @@ function IndeterminateParent() {
   );
 }
 
-export const CheckboxCardsExample: ComponentDemos = {
+export const CheckboxCardsExample: ExampleDemos = {
   name: "Checkbox cards",
-  group: "Examples",
   description: "Checkboxes inside clickable cards and rows: whole-card labels that toggle the box, an accent highlight for the checked state, and a parent checkbox that summarises its children.",
   demos: [
     {

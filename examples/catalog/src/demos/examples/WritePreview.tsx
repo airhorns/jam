@@ -1,7 +1,7 @@
 import { h } from "@jam/core/jsx";
 import type { VChild } from "@jam/core/jsx";
 import { XStack, YStack, Card, Tabs, TextArea, Paragraph, Button, Tooltip, Separator, Avatar, useStableId } from "@jam/ui";
-import type { ComponentDemos } from "../../types";
+import type { ExampleDemos } from "../../types";
 import { useDemoState } from "../state";
 import { BoldIcon, ImageIcon, ItalicIcon, LinkIcon, SendIcon } from "./icons";
 
@@ -111,9 +111,8 @@ function CompactReply() {
   );
 }
 
-export const WritePreviewExample: ComponentDemos = {
+export const WritePreviewExample: ExampleDemos = {
   name: "Composer",
-  group: "Examples",
   description: "Comment composers: a write/preview card with a formatting toolbar, and a single-row reply box.",
   demos: [
     {
